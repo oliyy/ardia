@@ -7,8 +7,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useBrowser } from "../store/browser";
 import { useSidebarOpen, useWindowId, useWindowUi } from "../store/hooks";
 import { downloadsIn, downloadVisibleIn } from "../store/ui";
-import { SIDEBAR_FOOTER_DOWNLOADS, useAddressBarInSidebar, useTabLayout } from "./layout/windowLayout";
-import { PROFILE_DOTS_HEIGHT } from "./profiles/ProfileDots";
+import { SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, useAddressBarInSidebar, useTabLayout } from "./layout/windowLayout";
 import { openInternalPage } from "./pages/urls";
 import { useSidebarWidth } from "./sidebar/tokens";
 import { HoverSlot } from "./HoverSlot";
@@ -177,7 +176,7 @@ export function DownloadsButton({ windowId }: { windowId: string }) {
       <IconButton
         icon="arrow.down.circle"
         size={16}
-        box={SIDEBAR_FOOTER_DOWNLOADS.size}
+        box={SIDEBAR_FOOTER_BUTTON.size}
         radius={10}
         active={open}
         tooltip={open ? undefined : "Downloads (⇧⌘J)"}
@@ -206,7 +205,7 @@ function DownloadsPanel({ windowId, closing, onClosed }: { windowId: string; clo
   const topStrip = useTabLayout() === "top";
   const addressBar = useAddressBarInSidebar();
   const setOpen = (value: boolean) => useBrowser.getState().setDownloadsOpen(windowId, value);
-  const { root, placement: p, onLayout } = useDownloadsPlacement(windowId, closing, { topStrip, footer: addressBar, footerBottom: PROFILE_DOTS_HEIGHT + 2 });
+  const { root, placement: p, onLayout } = useDownloadsPlacement(windowId, closing, { topStrip, footer: addressBar, footerBottom: SIDEBAR_FOOTER_HEIGHT + 2 });
   const placed = p !== null;
   const appear = useRef(new Animated.Value(0)).current;
   const closed = useRef(onClosed);
@@ -526,7 +525,7 @@ export function DownloadMagnet() {
   }, [windowId]);
 
   const sidebar = !topStrip && sidebarOpen ? sidebarWidth : 0;
-  const footer = { x: layout.sidebarInset + SIDEBAR_FOOTER_DOWNLOADS.size / 2, y: size.height - SIDEBAR_FOOTER_DOWNLOADS.bottom - SIDEBAR_FOOTER_DOWNLOADS.size / 2 };
+  const footer = { x: layout.sidebarInset + SIDEBAR_FOOTER_BUTTON.size / 2, y: size.height - SIDEBAR_FOOTER_BUTTON.bottom - SIDEBAR_FOOTER_BUTTON.size / 2 };
   const target = topStrip ? { x: size.width - 25, y: 21 } : addressBar ? footer : sidebarOpen ? { x: sidebarWidth - 24, y: 27 } : { x: 24, y: 24 };
   const start = { x: sidebar + (size.width - sidebar) / 2, y: size.height * 0.45 };
   const icon = 44;

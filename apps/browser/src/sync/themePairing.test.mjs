@@ -298,9 +298,9 @@ test("a leftover adoption flag on a theme that's already applied is cleared at s
   });
   const edited = { ...THEME_B, intensity: 0.33 };
   await c.with(async () => {
-    const saved = JSON.parse(shell.docs.get("sync.json"));
+    const saved = JSON.parse(shell.docs.get("sync-v2.json"));
     saved.profiles.default.themeAdopting = true;
-    shell.docs.set("sync.json", JSON.stringify(saved));
+    shell.docs.set("sync-v2.json", JSON.stringify(saved));
     S().updateProfile("default", { theme: edited });
   });
   const restarted = await import("./engine.ts?leftover6");

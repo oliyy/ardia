@@ -6,16 +6,24 @@ import { ancestorIds } from "../../store/groups";
 import { activeTabId, bookmarkProfileId, pinSection, tabLayoutOf, viewTabIds } from "../../store/model";
 import { groupLabel, groupOf, selectedTabIds } from "../../store/organize";
 import type { Tab } from "../../store/types";
-import { measureRow, setSidebarUi, sidebarUi, type Target } from "./state";
+import { FOLD_MS } from "./geometry";
+import { containersOf, hiddenBy, type PathTarget } from "./pinnedTree";
+import { measureRow, revealInSidebar, setSidebarUi, sidebarUi, type Target } from "./state";
 
 const store = () => useBrowser.getState();
 
 const anchors = new Map<string, string>();
 
+const rangeOrder = (s: ReturnType<typeof store>, windowId: string) =>
+  viewTabIds(s, windowId).filter((id) => {
+    const t = s.tabs[id]!;
+    return !t.liveItem || t.pinned;
+  });
+
 export function clickTab(windowId: string, tabId: string, mods: { metaKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {}) {
   const s = store();
   if (mods.altKey && mods.shiftKey && !mods.metaKey && s.settings.optShiftClickOpensInGroup) return openInCurrentGroup(windowId, tabId);
-  const view = viewTabIds(s, windowId);
+  const view = rangeOrder(s, windowId);
   const active = activeTabId(s, windowId);
   const current = s.selection[windowId] ?? [];
   if (mods.metaKey) {
@@ -50,6 +58,33 @@ function openInCurrentGroup(windowId: string, tabId: string) {
   store().activate(tabId);
 }
 
+const profileOf = (windowId: string, target: PathTarget) => {
+  const s = store();
+  return (target.kind === "tab" ? s.tabs[target.id]?.profileId : target.kind === "group" ? s.groups[target.id]?.profileId : undefined) ?? s.windows[windowId]?.profileId;
+};
+
+const targetContainers = (windowId: string, profileId: string, target: PathTarget) => {
+  const s = store();
+  return target.kind === "group" && !s.groups[target.id]?.pinned ? ancestorIds(s.groups, target.id) : containersOf(s, windowId, profileId, target);
+};
+
+function expandHidden(windowId: string, target: PathTarget): boolean {
+  const profileId = profileOf(windowId, target);
+  if (!profileId) return false;
+  const hidden = target.kind === "group" ? targetContainers(windowId, profileId, target).filter((id) => store().groups[id]?.collapsed) : hiddenBy(store(), windowId, profileId, target);
+  for (const id of hidden) store().updateGroup(id, { collapsed: false });
+  return hidden.length > 0;
+}
+
+export function openPath(windowId: string, target: PathTarget) {
+  const profileId = profileOf(windowId, target);
+  if (!profileId) return;
+  const s = store();
+  for (const id of targetContainers(windowId, profileId, target)) if (s.groups[id]?.collapsed) store().updateGroup(id, { collapsed: false });
+}
+
+const settled = (expanded: boolean) => new Promise((resolve) => setTimeout(resolve, expanded ? FOLD_MS + 50 : 0));
+
 export async function startRename(windowId: string, target: Target) {
   const s = store();
   if (target.kind === "tab") {
@@ -66,13 +101,13 @@ export async function startRename(windowId: string, target: Target) {
       if (name !== null) store().updateTab(tab.id, { customTitle: name });
       return;
     }
-    const group = groupOf(s, tab.id);
-    if (group && activeTabId(s, windowId) !== tab.id) {
-      for (const id of [group.id, ...ancestorIds(s.groups, group.id)]) if (s.groups[id]!.collapsed) s.updateGroup(id, { collapsed: false });
-    }
   }
   if (target.kind === "group" && !sidebarShows(windowId)) return renameGroupInSheet(windowId, target.id);
+  const expanded = target.kind === "live" || target.kind === "folder" ? false : expandHidden(windowId, { kind: target.kind, id: target.id });
   setSidebarUi({ renaming: { windowId, ...target } });
+  if (target.kind === "live" || !sidebarShows(windowId)) return;
+  await settled(expanded);
+  revealInSidebar(windowId, target.id);
 }
 
 const sidebarShows = (windowId: string) => tabLayoutOf(store(), windowId) === "sidebar" && !!store().windows[windowId]?.sidebarOpen;
@@ -105,6 +140,7 @@ export function endRename(target: Target) {
 }
 
 export async function openIconPicker(windowId: string, target: Target) {
+  if (target.kind !== "live" && target.kind !== "folder") await settled(expandHidden(windowId, { kind: target.kind, id: target.id }));
   const anchor = await measureRow(windowId, target.id);
   setSidebarUi({ iconPicker: { windowId, ...target, anchor }, hover: null });
 }

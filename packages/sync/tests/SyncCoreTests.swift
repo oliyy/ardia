@@ -83,6 +83,6 @@ final class SyncVaultTests: XCTestCase {
     try other.write(scope: "app", payload: Data("theirs".utf8))
     try vault.deleteChain()
     XCTAssertFalse(vault.chainExists())
-    XCTAssertEqual(other.read(scope: "app", skipping: []).files.count, 1)
+    XCTAssertEqual(try other.read(scope: "app", skipping: []).files.count, 1)
   }
 }

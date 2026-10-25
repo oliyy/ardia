@@ -4,10 +4,12 @@ import {
   Clock,
   emptyScope,
   folderTransport,
+  localDataReady,
   restoreJournal,
   syncScope,
   SyncNative,
   visible,
+  whenLocalDataReady,
   writtenSeq,
   type Adapter,
   type ExtensionsAdapter,
@@ -29,9 +31,7 @@ import {
   historyAdapter,
   historyExpired,
   passwordsAdapter,
-  pinnedAdapter,
-  pinnedOrderAdapter,
-  pinnedRowsAdapter,
+  pinnedTreeAdapter,
   profilesAdapter,
   settingsAdapter,
   sharedDataAdapter,
@@ -66,8 +66,10 @@ type ProfileLink = {
   themeAdopting?: true;
 };
 
+type ChainState = "ready" | "imported" | "creating" | "awaiting";
+
 type SyncDoc = {
-  v: 1;
+  v: 2;
   enabled: boolean;
   folder: string | null;
   deviceId: string | null;
@@ -78,12 +80,26 @@ type SyncDoc = {
   lastSyncedAt: number | null;
   setupAt: number | null;
   joining: boolean;
+  chain: ChainState;
+  adoptBeforePublish: boolean;
   seqs?: Record<string, number>;
 };
 
-const DOC = "sync.json";
-const STATE = "sync-state.nns";
-const JOURNAL = "sync-journal.nns";
+type PreviousSyncDoc = {
+  v: 1;
+  enabled?: boolean;
+  folder?: string | null;
+  deviceId?: string | null;
+  clock?: string | null;
+  types?: Partial<Record<DataType, boolean>>;
+  profiles?: Record<string, Partial<ProfileLink>>;
+  setupAt?: number | null;
+};
+
+const DOC = "sync-v2.json";
+const STATE = "sync-v2-state.nns";
+const JOURNAL = "sync-v2-journal.nns";
+const PREVIOUS_DOC = "sync.json";
 const APP_SCOPE = "app";
 const CYCLE_MS = 15_000;
 const AFTER_EDIT_MS = 3_000;
@@ -91,7 +107,7 @@ const AFTER_EDIT_MS = 3_000;
 const defaultTypes = (): Record<DataType, boolean> => ({ bookmarks: true, history: true, tabs: true, pinned: true, passwords: true, extensions: true, settings: true });
 
 const emptyDoc = (): SyncDoc => ({
-  v: 1,
+  v: 2,
   enabled: false,
   folder: null,
   deviceId: null,
@@ -102,6 +118,8 @@ const emptyDoc = (): SyncDoc => ({
   lastSyncedAt: null,
   setupAt: null,
   joining: false,
+  chain: "ready",
+  adoptBeforePublish: false,
 });
 
 export type SyncStatus = "off" | "starting" | "updating" | "updated" | "stalled" | "offline" | "locked" | "reset" | "unavailable";
@@ -151,13 +169,38 @@ function load() {
   try {
     const json = readDocument(DOC);
     if (json) {
-      const saved = JSON.parse(json) as SyncDoc;
+      const saved = JSON.parse(json) as Partial<SyncDoc> | null;
+      if (saved?.v !== 2) throw new Error(`unknown version ${String(saved?.v)}`);
       doc = { ...emptyDoc(), ...saved, types: { ...defaultTypes(), ...saved.types }, scopes: {} };
     }
     savedJson = json ?? "";
+    if (!json) importPreviousConfiguration();
   } catch (error) {
-    console.warn("[sync] couldn't read sync.json", error);
+    console.warn(`[sync] couldn't read ${DOC}`, error);
   }
+}
+
+function importPreviousConfiguration() {
+  const json = readDocument(PREVIOUS_DOC);
+  if (!json) return;
+  const previous = JSON.parse(json) as PreviousSyncDoc | null;
+  if (previous?.v !== 1) return;
+  const folder = typeof previous.folder === "string" ? previous.folder : null;
+  const deviceId = typeof previous.deviceId === "string" ? previous.deviceId : null;
+  const types = { ...defaultTypes(), ...previous.types };
+  if (previous.enabled !== true || !folder || !deviceId) {
+    doc = { ...emptyDoc(), folder, types };
+  } else {
+    const profiles = Object.fromEntries(
+      Object.entries(previous.profiles ?? {})
+        .filter(([, link]) => typeof link?.syncId === "string")
+        .map(([id, link]): [string, ProfileLink] => [id, { syncId: link.syncId!, enabled: link.enabled !== false, ...(link.themeAdopting ? { themeAdopting: true as const } : {}) }]),
+    );
+    const clock = typeof previous.clock === "string" ? previous.clock : null;
+    const setupAt = typeof previous.setupAt === "number" ? previous.setupAt : null;
+    doc = { ...emptyDoc(), enabled: true, folder, deviceId, clock, types, profiles, setupAt, chain: "imported", adoptBeforePublish: true };
+  }
+  saveDoc();
 }
 
 type Journal = Record<string, LogFile[]>;
@@ -212,13 +255,22 @@ function clearJournal() {
 let savedState = "";
 let sealing: Promise<void> | null = null;
 
-function save() {
+function saveDoc() {
   const { scopes, ...meta } = doc;
   const json = JSON.stringify({ ...meta, seqs: Object.fromEntries(Object.entries(scopes).map(([k, s]) => [k, writtenSeq(s)])) });
   if (json !== savedJson) {
     savedJson = json;
     writeDocument(DOC, json);
   }
+}
+
+async function stateSaved() {
+  while (sealing) await sealing;
+}
+
+function save() {
+  saveDoc();
+  const scopes = doc.scopes;
   const state = doc.enabled ? JSON.stringify(scopes) : "";
   if (state === savedState || sealing) return;
   if (!state) {
@@ -286,8 +338,7 @@ function profileAdapters(profileId: string, retiring: boolean): Adapter[] {
   let passwords = passwordAdapters.get(profileId);
   if (!passwords) passwordAdapters.set(profileId, (passwords = passwordsAdapter(profileId, () => forcePasswords)));
   return [
-    ...(t.pinned ? [tileFoldersAdapter(profileId)] : []),
-    ...(t.pinned ? [pinnedRowsAdapter(profileId), pinnedOrderAdapter(profileId), inTodaysNames(pinnedAdapter(profileId))] : []),
+    ...(t.pinned ? [inTodaysNames(pinnedTreeAdapter(profileId)), tileFoldersAdapter(profileId)] : []),
     ...(t.bookmarks && ownsData ? [inTodaysNames(bookmarksAdapter(profileId))] : []),
     ...(t.history && ownsData ? [inTodaysNames(historyAdapter(profileId))] : []),
     inTodaysNames(deviceTabsAdapter(profileId, id, deviceName, !t.tabs)),
@@ -315,6 +366,8 @@ function scheduleSync(delay = AFTER_EDIT_MS) {
   timer = setTimeout(() => void runCycle(), delay);
 }
 
+const resumeWhenLocalDataReady = () => scheduleSync(0);
+
 export async function syncNow() {
   forcePasswords = true;
   await runCycle();
@@ -323,6 +376,7 @@ export async function syncNow() {
 async function runCycle({ retiring = false } = {}) {
   const native = SyncNative;
   if (!native || !doc.enabled || !doc.folder || !doc.deviceId) return;
+  if (!localDataReady()) return whenLocalDataReady(resumeWhenLocalDataReady);
   if (running) {
     again = true;
     return;
@@ -331,43 +385,50 @@ async function runCycle({ retiring = false } = {}) {
   clearTimeout(timer);
   const slow = setTimeout(() => useSync.getState().status === "updated" && publishUi({ status: "updating" }), 1000);
   try {
+    if (retiring && doc.chain !== "ready") return;
+    await stateSaved();
     await watchExtensions();
     const status = await native.chainStatus(doc.folder);
     if (status === "unavailable") return publishUi({ status: "offline", error: null });
-    if (status === "missing") return await resetFromElsewhere();
+    const chain = await openChain(native, doc.folder, status);
+    if (chain === "lost") return await resetFromElsewhere();
+    if (chain === "awaiting") return publishUi({ status: "starting", error: null });
     const transport = folderTransport(native, doc.folder);
     const clock = new Clock(doc.deviceId, doc.clock);
     const device = doc.deviceId;
     const app = (doc.scopes[APP_SCOPE] ??= { ...emptyScope(), awaitRemote: doc.joining });
     settleAppliedThemes(app);
-    await syncScope({
+    const appCycle = await syncScope({
       scope: APP_SCOPE,
       state: app,
       transport,
       adapters: appAdapters(retiring),
       clock,
       device,
-      options: { persist: persistJournal(APP_SCOPE) },
+      options: { persist: persistJournal(APP_SCOPE), adoptBeforePublish: doc.adoptBeforePublish },
     });
+    if (appCycle.adopted) again = true;
     if (app.joined) linkProfiles(app);
     confirmThemes(app);
     let pending = app.pending;
     const s = useBrowser.getState();
-    for (const [profileId, link] of Object.entries(doc.profiles)) {
+    const remotelySynced = (syncId: string) => doc.joining && !!app.records[`prof:${syncId}`]?.v;
+    for (const [profileId, link] of app.joined ? Object.entries(doc.profiles) : []) {
       const exists = !!s.profiles[profileId];
       const retire = retiring || !!link.retire || !exists;
       if (!retire && !link.enabled) continue;
       const scope = `p:${link.syncId}`;
-      const state = (doc.scopes[scope] ??= emptyScope());
-      await syncScope({
+      const state = (doc.scopes[scope] ??= { ...emptyScope(), ...(remotelySynced(link.syncId) ? { awaitRemote: true } : {}) });
+      const profileCycle = await syncScope({
         scope,
         state,
         transport,
         adapters: profileAdapters(profileId, retire),
         clock,
         device,
-        options: { expired: historyExpired, persist: persistJournal(scope) },
+        options: { expired: historyExpired, persist: persistJournal(scope), adoptBeforePublish: doc.adoptBeforePublish },
       });
+      if (profileCycle.adopted) again = true;
       pending += state.pending;
       if (!retire && doc.types.extensions && !s.profiles[profileId]?.dataId && extensionSyncAvailable()) await extensionsOf(profileId).reconcile(visible(state, "ext:"), Date.now());
       if (retire) {
@@ -402,6 +463,30 @@ async function runCycle({ retiring = false } = {}) {
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+type OpenChain = "open" | "awaiting" | "lost";
+
+async function openChain(native: NonNullable<typeof SyncNative>, folder: string, status: "ok" | "previous" | "missing"): Promise<OpenChain> {
+  if (doc.chain === "ready") return status === "ok" ? "open" : "lost";
+  if (status === "missing") return "lost";
+  if (doc.chain === "imported" && status === "ok") return settleChain(true);
+  if (doc.chain === "imported") {
+    doc.chain = "creating";
+    saveDoc();
+  }
+  if (doc.chain === "creating") {
+    await native.createChain(folder);
+    return settleChain(false);
+  }
+  return status === "ok" ? settleChain(doc.joining) : "awaiting";
+}
+
+function settleChain(joining: boolean): OpenChain {
+  doc.chain = "ready";
+  doc.joining = joining;
+  saveDoc();
+  return "open";
+}
 
 function pairedTheme(app: ScopeState, syncId: string): Pick<Profile, "theme"> | null {
   const record = app.records[`pth:${syncId}`]?.v;
@@ -542,7 +627,7 @@ export async function chooseSyncFolder(): Promise<string | null> {
 }
 
 function begin(folder: string, deviceId: string, joining: boolean) {
-  doc = { ...emptyDoc(), types: doc.types, enabled: true, folder, deviceId, setupAt: Date.now(), joining };
+  doc = { ...emptyDoc(), types: doc.types, enabled: true, folder, deviceId, setupAt: Date.now(), joining, chain: joining ? "awaiting" : "ready" };
   clearJournal();
   save();
   publishUi({ status: "starting", error: null });

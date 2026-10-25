@@ -15,7 +15,7 @@ import { CreateProfileHost } from "./components/profiles/CreateProfile";
 import { useFullscreenTab } from "./components/layout/pageState";
 import { ProfileTint } from "./components/layout/ProfileSwipe";
 import { TOP_CARD_INSET, TOP_STRIP_HEIGHT, TopStripPeek, TopTabStrip } from "./components/layout/TopTabStrip";
-import { useTabLayout } from "./components/layout/windowLayout";
+import { useCardGeometry, useTabLayout } from "./components/layout/windowLayout";
 import { WindowProfile } from "./components/layout/WindowProfile";
 import { DockedLayout } from "./components/layout/SidebarDock";
 import { LittleArdiaWindow } from "./components/littleArdia/LittleArdiaWindow";
@@ -52,6 +52,7 @@ function BrowserWindow() {
   const topTabs = useTabLayout() === "top";
   const showStrip = useBrowser((s) => topTabs && !!s.windows[windowId]?.sidebarOpen);
   const fullscreen = !!useFullscreenTab(windowId);
+  const cardGeometry = useCardGeometry();
   const [width, setWidth] = useState(0);
   const card = (
     <>
@@ -71,7 +72,7 @@ function BrowserWindow() {
         inset={
           showStrip
             ? { top: TOP_STRIP_HEIGHT, right: TOP_CARD_INSET, bottom: TOP_CARD_INSET, left: TOP_CARD_INSET }
-            : { top: layout.cardTop, right: layout.cardInset, bottom: layout.cardInset, left: layout.cardInset }
+            : { top: cardGeometry.top, right: cardGeometry.inset, bottom: cardGeometry.inset, left: cardGeometry.inset }
         }
       >
         {card}

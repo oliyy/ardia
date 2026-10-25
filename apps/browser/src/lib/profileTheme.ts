@@ -1,8 +1,12 @@
-import type { ProfileTheme, ThemeColor, ThemeLook, ThemeMode, ThemeStop, ThemeTexture } from "../store/types";
+import type { ArcStyle, ProfileTheme, ThemeColor, ThemeLook, ThemeMode, ThemeStop, ThemeTexture } from "../store/types";
 
 export const MAX_THEME_STOPS = 3;
 export const PAD_LIGHTNESS = 0.6;
 export const THEME_TEXTURES: ThemeTexture[] = ["grain", "sand", "denim", "tweed"];
+export const ARC_STYLES: ArcStyle[] = ["auto", "light", "dark"];
+export const ARC_AUTO_UNDERLAY = 0.14;
+
+export const isArcStyle = (v: unknown): v is ArcStyle => ARC_STYLES.includes(v as ArcStyle);
 
 const TEXTURE_STRENGTH: Record<ThemeTexture, number> = { grain: 0.8, sand: 0.15, denim: 0.6, tweed: 0.4 };
 const BASE_REACH = 0.75;
@@ -16,6 +20,7 @@ export type ThemeBackdropProps = {
   themeTexture: ThemeTexture;
   themeAppearance: ThemeMode;
   themeAngle: number;
+  themeBackdrop: "default" | "arcAuto";
 };
 
 export const PRESET_BACKDROP: ThemeBackdropProps = {
@@ -26,6 +31,7 @@ export const PRESET_BACKDROP: ThemeBackdropProps = {
   themeTexture: "grain",
   themeAppearance: "auto",
   themeAngle: DEFAULT_THEME_ANGLE,
+  themeBackdrop: "default",
 };
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -98,6 +104,10 @@ export function colorHex(color: ThemeColor): string {
   return toHex([color.r, color.g, color.b]);
 }
 
+export function colorHexAlpha(color: ThemeColor): string {
+  return toHex([color.r, color.g, color.b, color.a]);
+}
+
 export function hexColor(hex: string): ThemeColor {
   const ch = (i: number) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16) / 255;
   return { r: ch(0), g: ch(1), b: ch(2), a: 1 };
@@ -142,8 +152,8 @@ export function themeDark(theme: ProfileTheme, appDark: boolean): boolean {
 }
 
 export function resolveTheme(theme: ProfileTheme, dark: boolean): ProfileTheme {
-  const { dark: darkLook, ...base } = theme;
-  if (!dark || !darkLook) return base;
+  const { dark: darkLook, arcStyle, ...base } = theme;
+  if (!dark || !darkLook) return { ...base, ...(arcStyle ? { arcStyle } : {}) };
   const { angle: _lightAngle, ...light } = base;
   return { ...light, ...darkLook };
 }
@@ -157,6 +167,7 @@ export function themeLayerAlpha(theme: ProfileTheme): number {
 }
 
 export function themeUnderlayAlpha(theme: ProfileTheme, dark: boolean): number {
+  if (theme.arcStyle === "auto") return clamp01(theme.translucency) * ARC_AUTO_UNDERLAY;
   const arc = Math.min(arcLayerAlpha(theme.intensity), 0.5);
   return clamp01(theme.translucency) * (dark ? 0.35 * arc : arc);
 }
@@ -178,6 +189,7 @@ export function themeBackdrop(theme: ProfileTheme, dark: boolean): ThemeBackdrop
     themeTexture: theme.texture,
     themeAppearance: theme.mode,
     themeAngle: lookAngle(theme),
+    themeBackdrop: theme.arcStyle === "auto" ? "arcAuto" : "default",
   };
 }
 
@@ -191,8 +203,9 @@ export function themePalette(theme: ProfileTheme): string[] {
 
 function underGrey(theme: ProfileTheme, dark: boolean): number {
   const u = themeUnderlayAlpha(theme, dark);
-  const blur = dark ? 0.16 : 0.92;
-  return (dark ? 0 : 1) * u + blur * (1 - u);
+  const arcAuto = theme.arcStyle === "auto";
+  const blur = arcAuto ? 1 : dark ? 0.16 : 0.92;
+  return (arcAuto || dark ? 0 : 1) * u + blur * (1 - u);
 }
 
 export function themeUnderColor(theme: ProfileTheme, dark: boolean): string {
@@ -236,14 +249,18 @@ export function stopLightness(stop: ThemeStop): number {
   return rgbToHsl(clamp01(stop.color.r), clamp01(stop.color.g), clamp01(stop.color.b))[2];
 }
 
+const withoutPalette = ({ foregroundSecondary: _, maxContrastColor: __, favoriteMutedColor: ___, minContrastColor: ____, subtitle: _____, ...rest }: ProfileTheme): ProfileTheme => rest;
+
 export function withStopAt(theme: ProfileTheme, index: number, x: number, y: number): ProfileTheme {
-  const stops = theme.stops.map((s, i) => (i === index ? { x, y, color: { ...padColor(x, y, stopLightness(s)), a: s.color.a } } : s));
-  return { ...theme, stops };
+  const rest = withoutPalette(theme);
+  const stops = rest.stops.map((s, i) => (i === index ? { x, y, color: { ...padColor(x, y, stopLightness(s)), a: s.color.a } } : s));
+  return { ...rest, stops };
 }
 
 export function withStopLightness(theme: ProfileTheme, index: number, lightness: number): ProfileTheme {
-  const stops = theme.stops.map((s, i) => (i === index ? { ...s, color: { ...padColor(s.x, s.y, lightness), a: s.color.a } } : s));
-  return { ...theme, stops };
+  const rest = withoutPalette(theme);
+  const stops = rest.stops.map((s, i) => (i === index ? { ...s, color: { ...padColor(s.x, s.y, lightness), a: s.color.a } } : s));
+  return { ...rest, stops };
 }
 
 export function withAngle(theme: ProfileTheme, degrees: number): ProfileTheme {
@@ -252,16 +269,18 @@ export function withAngle(theme: ProfileTheme, degrees: number): ProfileTheme {
 
 export function withAddedStop(theme: ProfileTheme): ProfileTheme {
   if (theme.stops.length >= MAX_THEME_STOPS) return theme;
-  const last = theme.stops[theme.stops.length - 1] ?? { x: 0.8, y: 0.5 };
+  const rest = withoutPalette(theme);
+  const last = rest.stops[rest.stops.length - 1] ?? { x: 0.8, y: 0.5 };
   const angle = Math.atan2(last.y - 0.5, last.x - 0.5) + (2 * Math.PI) / 5;
   const radius = Math.max(0.3, Math.hypot(last.x - 0.5, last.y - 0.5));
   const x = 0.5 + radius * Math.cos(angle), y = 0.5 + radius * Math.sin(angle);
-  return { ...theme, stops: [...theme.stops, { x, y, color: padColor(x, y) }] };
+  return { ...rest, stops: [...rest.stops, { x, y, color: padColor(x, y) }] };
 }
 
 export function withoutStop(theme: ProfileTheme, index: number): ProfileTheme {
   if (theme.stops.length <= 1) return theme;
-  return { ...theme, stops: theme.stops.filter((_, i) => i !== index) };
+  const rest = withoutPalette(theme);
+  return { ...rest, stops: rest.stops.filter((_, i) => i !== index) };
 }
 
 export function startingTheme(swatch: string): ProfileTheme {
@@ -306,7 +325,32 @@ function sanitizeLook(v: unknown): ThemeLook | null {
     texture: THEME_TEXTURES.includes(t.texture as ThemeTexture) ? (t.texture as ThemeTexture) : "grain",
     translucency: clamp01(num(t.translucency, 1)),
     ...(typeof t.angle === "number" && Number.isFinite(t.angle) ? { angle: ((t.angle % 360) + 360) % 360 } : {}),
+    ...(isArcStyle(t.arcStyle) ? { arcStyle: t.arcStyle } : {}),
   };
+}
+
+function sanitizeColorPair(v: unknown): ProfileTheme["foregroundSecondary"] | null {
+  if (!v || typeof v !== "object") return null;
+  const p = v as Record<string, unknown>;
+  const light = sanitizeColor(p.light);
+  const dark = sanitizeColor(p.dark);
+  return light && dark ? { light, dark } : null;
+}
+
+const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+
+function finiteColor(v: unknown): ThemeColor | null {
+  if (!v || typeof v !== "object") return null;
+  const { r, g, b, a } = v as Record<string, unknown>;
+  return finite(r) && finite(g) && finite(b) && finite(a) ? { r, g, b, a } : null;
+}
+
+function finiteColorPair(v: unknown): ProfileTheme["minContrastColor"] | null {
+  if (!v || typeof v !== "object") return null;
+  const p = v as Record<string, unknown>;
+  const light = finiteColor(p.light);
+  const dark = finiteColor(p.dark);
+  return light && dark ? { light, dark } : null;
 }
 
 export function sanitizeTheme(v: unknown): ProfileTheme | null {
@@ -314,5 +358,10 @@ export function sanitizeTheme(v: unknown): ProfileTheme | null {
   if (!look) return null;
   const t = v as Record<string, unknown>;
   const dark = sanitizeLook(t.dark);
-  return { ...look, mode: t.mode === "light" || t.mode === "dark" ? t.mode : "auto", ...(dark ? { dark } : {}) };
+  const foregroundSecondary = sanitizeColorPair(t.foregroundSecondary);
+  const maxContrastColor = sanitizeColorPair(t.maxContrastColor);
+  const favoriteMutedColor = sanitizeColorPair(t.favoriteMutedColor);
+  const minContrastColor = finiteColorPair(t.minContrastColor);
+  const subtitle = finiteColorPair(t.subtitle);
+  return { ...look, mode: t.mode === "light" || t.mode === "dark" ? t.mode : "auto", ...(dark ? { dark } : {}), ...(foregroundSecondary ? { foregroundSecondary } : {}), ...(maxContrastColor ? { maxContrastColor } : {}), ...(favoriteMutedColor ? { favoriteMutedColor } : {}), ...(minContrastColor ? { minContrastColor } : {}), ...(subtitle ? { subtitle } : {}) };
 }

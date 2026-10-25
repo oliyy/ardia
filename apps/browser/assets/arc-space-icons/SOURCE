@@ -1,0 +1,12 @@
+Ionicons 7.4.0 artwork, MIT License, Copyright (c) 2015-present Ionic (http://ionic.io/). Full license text: LICENSE in this folder.
+Upstream package: npm ionicons@7.4.0, files dist/svg/<name>.svg, fetched from https://unpkg.com/ionicons@7.4.0.
+
+Arc space icon enum -> asset -> upstream source -> sha256 of the upstream file
+map -> map.png -> https://unpkg.com/ionicons@7.4.0/dist/svg/map.svg -> 4595c754ef4e70b66151885e8e1e52223fa2fb36308b019f0093b9bcf16ca6ca
+fileTrayFull -> file-tray-full.png -> https://unpkg.com/ionicons@7.4.0/dist/svg/file-tray-full.svg -> 9e091bb6361e662f5fd4c5bff8a80ae72b90f07835ea5f7fb2352c1ac6fb9e13
+musicalNote -> musical-notes.png -> https://unpkg.com/ionicons@7.4.0/dist/svg/musical-notes.svg -> eead6496eaa1187b68b630b72e2044fe82b2b58b12767a8a4203e0b8a565010b
+airplane -> airplane.png -> https://unpkg.com/ionicons@7.4.0/dist/svg/airplane.svg -> 19124b7df7a3077fffae1b57ff04121d14dfe3ed2a7125ee89a55ef0342669e8
+book -> book.png -> https://unpkg.com/ionicons@7.4.0/dist/svg/book.svg -> d86cbdb9a8f9222a8ba6fcfac19a79ab761d0075667a6df035b7196239a45de9
+LICENSE -> https://unpkg.com/ionicons@7.4.0/LICENSE -> c89dabc60b2e4e1a04b33bd7010b5a56bb4725ffe8c00d793a5ae009fbbfebd8
+
+Each PNG is 64x64, white, with the upstream SVG's coverage as alpha, rasterised once with macOS NSImage. Each PNG carries Copyright, License (the full MIT text) and Source (upstream URL and sha256) tEXt chunks so the notice travels with the distributed file.

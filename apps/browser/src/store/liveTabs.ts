@@ -1,7 +1,7 @@
 import type { StripGroup, StripState, StripTab } from "@ardia/ardiacore";
 import type { BrowserState } from "./browser";
 import { rootOf } from "./groups";
-import { engineProfile, pinnedFirst } from "./model";
+import { engineProfile, inPinnedContainer, pinnedFirst } from "./model";
 import { forgetOpeners, switchKeepsOpeners } from "./openers";
 import { groupOf, placing, withGroup } from "./organize";
 import { isPeekTab, withoutPeek } from "./peek";
@@ -105,7 +105,7 @@ function groupsChanged(
   const looksBefore = new Map((before?.groups ?? []).map((g) => [g.id, g]));
   for (const t of now) {
     const tab = s.tabs[t.key];
-    if (!tab || tab.pinned || !followed(t) || pending.grouped?.has(t.key)) continue;
+    if (!tab || tab.pinned || folderLeaf(s, t.key) || !followed(t) || pending.grouped?.has(t.key)) continue;
     const token = t.group ?? null;
     if (!taken.has(t.key) && was.get(t.browser) === token) continue;
     const current = chromeGroupOf(s, t.key);
@@ -118,7 +118,7 @@ function groupsChanged(
       if (current?.id !== id) s = regroupInPlace(s, t.key, id);
       continue;
     }
-    const members = now.filter((x) => x.group === token && s.tabs[x.key] && !s.tabs[x.key]!.pinned).map((x) => x.key);
+    const members = now.filter((x) => x.group === token && s.tabs[x.key] && !s.tabs[x.key]!.pinned && !folderLeaf(s, x.key)).map((x) => x.key);
     const [next, made] = withGroup(s, members, { pinned: false, name: looks.get(token)?.title ?? "", parentId: null });
     if (!made) continue;
     bound.set(token, made);
@@ -134,9 +134,11 @@ function groupsChanged(
   return s;
 }
 
+const folderLeaf = (s: BrowserState, key: string) => !s.tabs[key]!.pinned && inPinnedContainer(s, key);
+
 function regroupInPlace(s: BrowserState, key: string, groupId: string | null): BrowserState {
   const w = s.windows[s.tabs[key]!.windowId];
-  if (!w) return s;
+  if (!w || folderLeaf(s, key)) return s;
   const beforeId = w.tabIds[w.tabIds.indexOf(key) + 1] ?? null;
   return placing(s, [key], { pinned: false, beforeId, groupId });
 }
@@ -160,7 +162,11 @@ type GroupStep = {
 
 export function groupStep(s: BrowserState, strip: StripState, bound: GroupBindings): GroupStep | null {
   if (!reportsGroups(strip)) return null;
-  const tabs = strip.tabs.filter((t): t is Keyed => known(s, t) && !t.pinned && !s.tabs[t.key]!.pinned);
+  const unpinned = strip.tabs.filter((t): t is Keyed => known(s, t) && !t.pinned && !s.tabs[t.key]!.pinned);
+  const folded = unpinned.filter((t) => inPinnedContainer(s, t.key));
+  const tabs = unpinned.filter((t) => !inPinnedContainer(s, t.key));
+  const foldedStrays = folded.filter((t) => t.group);
+  if (foldedStrays.length) return { keys: foldedStrays.map((t) => t.key), group: null };
   const looks = new Map((strip.groups ?? []).map((g) => [g.id, g]));
   const tokenOf = (id: string) => [...bound].find(([token, g]) => g === id && looks.has(token))?.[0];
   const strays = tabs.filter((t) => t.group && t.group !== (chromeGroupOf(s, t.key) ? tokenOf(chromeGroupOf(s, t.key)!.id) : undefined));
@@ -222,7 +228,7 @@ function placeLike(
   group?: string | null,
 ): BrowserState {
   const w = s.windows[s.tabs[key]!.windowId];
-  if (!w) return s;
+  if (!w || (!pinned && folderLeaf(s, key))) return s;
   const panes = splitOf(s, key)?.tabIds ?? [key];
   const moving = w.tabIds.filter((id) => panes.includes(id));
   const i = strip.findIndex((t) => t.key === key);

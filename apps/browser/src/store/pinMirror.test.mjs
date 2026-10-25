@@ -122,8 +122,8 @@ test("relaunch: every restored window shows the pins; a 0.2.27 session whose win
        tab("y2", "w2", "https://y.com/", true), tab("x2", "w2", "https://x.com/", true), tab("r2", "w2", "https://r2.com/", false)].map((t) => [t.id, t]),
     ),
   });
-  const union = ["https://x.com/", "https://mail.com/", "https://y.com/"];
-  assert.deepEqual(pinned("w1"), union, "nothing lost: the windows' pins together, x.com once");
+  const union = ["https://x.com/", "https://mail.com/", "https://y.com/", "https://x.com/"];
+  assert.deepEqual(pinned("w1"), union, "nothing lost: the windows' pins together, each distinct pin kept even when two share an address");
   assert.deepEqual(pinned("w2"), union);
   assert.equal(S().tabs.x2.pinned, true, "w2 keeps its own x.com tile as the copy");
 });

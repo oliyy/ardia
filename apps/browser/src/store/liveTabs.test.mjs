@@ -530,6 +530,7 @@ test("a member dragged out of a pinned group, or onto a tab, reaches Chrome with
   S().groupTabs([id("g1"), id("g2"), id("g3")]);
   await settle(win);
   const groups = () => Object.values(S().groups).map((g) => g.tabIds.map(urlOf)).sort();
+  const todayGroups = () => Object.values(S().groups).filter((g) => !g.pinned).map((g) => g.tabIds.map(urlOf)).sort();
   const chromeGroups = () => {
     const out = {};
     for (const t of chrome.strips.get(win.strip).tabs) if (t.group) (out[t.group] ??= []).push(urlOf(t.key));
@@ -540,12 +541,12 @@ test("a member dragged out of a pinned group, or onto a tab, reaches Chrome with
   await settle(win);
   assert.deepEqual(order(win.w), ["g1", "g3", "a", "g2", "b"]);
   assert.deepEqual(chromeOrder(win.strip), order(win.w));
-  assert.deepEqual(chromeGroups(), groups());
+  assert.deepEqual(chromeGroups(), todayGroups());
   S().groupOnto([id("g1")], id("a"));
   await settle(win);
   assert.deepEqual(groups(), [["a", "g1"], ["g3"]]);
   assert.deepEqual(chromeOrder(win.strip), order(win.w));
-  assert.deepEqual(chromeGroups(), groups());
+  assert.deepEqual(chromeGroups(), todayGroups());
 });
 
 test("Chrome's own pin or move of a group's tab while a rename of the group is on its way stands", async () => {

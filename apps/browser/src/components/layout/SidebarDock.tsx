@@ -28,6 +28,7 @@ import {
   useDockMotion,
 } from "./dockMotion";
 import { useTabDrag } from "./tabDrag";
+import { useCardGeometry } from "./windowLayout";
 import { usePeek } from "./usePeek";
 
 let reduceMotion = false;
@@ -153,6 +154,7 @@ function SidebarDock({
 }) {
   const theme = useTheme();
   const windowId = useWindowId();
+  const cardInset = useCardGeometry().inset;
   const moving = useDockMotion((m) => !!m.moving[windowId]);
   const edgeOver = useRef(false);
   const peek = usePeek(!open && !moving && !fullscreen, arc, () => edgeOver.current || peekHeld(windowId), () => dismissHoverIn(windowId));
@@ -242,7 +244,7 @@ function SidebarDock({
             position: "absolute",
             left: 0,
             top: 0,
-            bottom: layout.cardInset,
+            bottom: cardInset,
             width: !open && !fullscreen ? STRIP_WIDTH : 0,
           }}
         />

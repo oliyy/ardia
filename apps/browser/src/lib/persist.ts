@@ -6,6 +6,9 @@ import { earlyLaunchTabOn, launchTab, type LaunchTab } from "../store/launchTab"
 import { launchBackdrop, type LaunchBackdrop } from "./launchBackdrop";
 import { parkWindowPins } from "../store/parkedPins";
 import { isPeekTab } from "../store/peek";
+import { liveNode, siblingsOf, tableOf } from "../store/pinTree";
+import { setLiveLifecycle } from "../store/organize";
+import { removeFolder, restoreFolder, snapshotFolder, useLive, type LiveFolderSnapshot } from "../live/store";
 import { lastActiveProfile } from "../store/small";
 import type { BrowserWindow, ClosedTab, Tab } from "../store/types";
 import { downloadSession } from "../store/ui";
@@ -43,7 +46,7 @@ const DOCS: Doc[] = [
   },
   {
     name: "session.json",
-    sources: (s) => [s.profiles, s.profileOrder, s.orphanedProfileData, s.windows, s.windowOrder, s.tabs, s.groups, s.splits, s.closedTabs, s.closedWindows, s.parkedPins, s.pinChoices, s.pinSync, s.settings, s.ui.focusedWindowId, s.ui.lastProfileId, s.ui.appDark, s.closedGroups, s.deletedGroups, s.cleanedTabs],
+    sources: (s) => [s.profiles, s.profileOrder, s.orphanedProfileData, s.windows, s.windowOrder, s.tabs, s.groups, s.splits, s.closedTabs, s.closedWindows, s.parkedPins, s.pinChoices, s.pinPlace, s.settings, s.ui.focusedWindowId, s.ui.lastProfileId, s.ui.appDark, s.closedGroups, s.deletedGroups, s.cleanedTabs],
     json: serialized((s) => {
       const windows = Object.values(s.windows).filter((w) => !w.incognito && w.kind !== "small").map(({ chromeWindow: _c, ...w }) => w);
       const kept = new Set(windows.map((w) => w.id));
@@ -68,7 +71,7 @@ const DOCS: Doc[] = [
         closedWindows: s.closedWindows.filter((c) => c.tabs.every(publicTab)),
         parkedPins: Object.fromEntries(Object.entries(s.parkedPins).filter(([profileId]) => publicTab({ profileId }))),
         pinChoices: Object.fromEntries(Object.entries(s.pinChoices).filter(([profileId]) => publicTab({ profileId }))),
-        pinSync: Object.fromEntries(Object.entries(s.pinSync).filter(([profileId]) => publicTab({ profileId }))),
+        pinPlace: Object.fromEntries(Object.entries(s.pinPlace).filter(([profileId]) => publicTab({ profileId }))),
         closedGroups: s.closedGroups.filter((c) => c.tabs.every(publicTab)),
         deletedGroups: s.deletedGroups.filter((c) => c.tabs.every(publicTab)),
         cleanedTabs: s.cleanedTabs.filter((c) => publicTab(c.tab)),
@@ -114,7 +117,7 @@ type SessionV2 = {
   closedWindows: BrowserState["closedWindows"];
   parkedPins?: BrowserState["parkedPins"];
   pinChoices?: BrowserState["pinChoices"];
-  pinSync?: BrowserState["pinSync"];
+  pinPlace?: BrowserState["pinPlace"];
   closedGroups?: BrowserState["closedGroups"];
   deletedGroups?: BrowserState["deletedGroups"];
   cleanedTabs?: BrowserState["cleanedTabs"];
@@ -154,7 +157,7 @@ export function loadSession(): HydrateData | null {
     closedWindows: session.closedWindows,
     parkedPins: session.parkedPins ?? {},
     pinChoices: session.pinChoices ?? {},
-    pinSync: session.pinSync ?? {},
+    pinPlace: session.pinPlace,
     closedGroups: session.closedGroups ?? [],
     deletedGroups: session.deletedGroups ?? [],
     cleanedTabs: session.cleanedTabs ?? [],
@@ -206,8 +209,40 @@ export function resumePersistence() {
   resume();
 }
 
+function placeSavedLiveFolders() {
+  const s = useBrowser.getState();
+  const { folders, folderOrder } = useLive.getState();
+  const unplaced = new Map<string, Map<string | null, string[]>>();
+  for (const id of folderOrder) {
+    const folder = folders[id];
+    const profileId = folder?.profileId;
+    if (!folder || !profileId || !s.profiles[profileId] || isIncognitoProfile(profileId)) continue;
+    const table = tableOf(s.pinPlace, profileId);
+    if (table[liveNode(id)]) continue;
+    const roots = siblingsOf(table, null);
+    const anchor = folder.after === undefined ? -1 : roots.indexOf(folder.after ?? "");
+    const before = folder.after === null ? (roots[0] ?? null) : anchor >= 0 ? (roots[anchor + 1] ?? null) : null;
+    const profile = unplaced.get(profileId) ?? new Map<string | null, string[]>();
+    profile.set(before, [...(profile.get(before) ?? []), liveNode(id)]);
+    unplaced.set(profileId, profile);
+  }
+  for (const [profileId, positions] of unplaced) {
+    for (const [before, nodes] of positions) s.placePinned(profileId, nodes, null, before);
+  }
+}
+
 export function startPersistence() {
-  useBrowser.getState().hydrate(loadSession() ?? {});
+  setLiveLifecycle({
+    remove: (ids) => ids.map(removeFolder).filter((snapshot): snapshot is LiveFolderSnapshot => !!snapshot),
+    snapshot: (ids) => ids.map(snapshotFolder).filter((snapshot): snapshot is LiveFolderSnapshot => !!snapshot),
+    restore: (entries, profileId) => {
+      for (const { snapshot, id } of entries) restoreFolder({ ...(snapshot as LiveFolderSnapshot), id, profileId });
+    },
+    exists: (id) => !!useLive.getState().folders[id],
+  });
+  const session = loadSession();
+  useBrowser.getState().hydrate(session ?? {});
+  if (!session?.pinPlace) placeSavedLiveFolders();
 
   const lastSources = new Map<string, unknown[]>();
   const lastJson = new Map<string, string>();
@@ -242,6 +277,10 @@ export function startPersistence() {
     if (dirty.size && !timer) timer = setTimeout(save, SAVE_DELAY_MS);
   };
   check(useBrowser.getState(), true);
+  if (!session?.pinPlace) {
+    dirty.add(DOCS.find((d) => d.name === "session.json")!);
+    save();
+  }
   if (droppedPrivateDownloads) {
     droppedPrivateDownloads = false;
     dirty.add(DOCS.find((d) => d.name === "downloads.json")!);

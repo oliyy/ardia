@@ -12,6 +12,7 @@ type SidebarUi = {
   searchTabs: string | null;
   switcher: { windowId: string; ids: string[]; index: number; visible: boolean } | null;
   dragWidth: Record<string, number>;
+  reveal: { windowId: string; id: string } | null;
 };
 
 export const useSidebarUi = create<SidebarUi>()(() => ({
@@ -21,10 +22,12 @@ export const useSidebarUi = create<SidebarUi>()(() => ({
   searchTabs: null,
   switcher: null,
   dragWidth: {},
+  reveal: null,
 }));
 
 export const sidebarUi = () => useSidebarUi.getState();
 export const setSidebarUi = (patch: Partial<SidebarUi>) => useSidebarUi.setState(patch);
+export const revealInSidebar = (windowId: string, id: string) => setSidebarUi({ reveal: { windowId, id } });
 
 const rows = new Map<string, Map<string, View>>();
 

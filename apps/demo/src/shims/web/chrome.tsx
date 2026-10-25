@@ -35,11 +35,34 @@ export type SurfaceProps = ViewProps & {
   shadowOpacity?: number;
   shadowRadius?: number;
   shadowOffset?: [number, number];
+  cutout?: [number, number, number];
+  inactiveOpacity?: number;
+  inactiveFillOpacity?: number;
+  hidesAccessibility?: boolean;
+  logicalWidth?: number;
 };
 
 export const CA_SHADOW_BLUR = 2;
 
-export function Surface({ fill, cornerRadius = 0, borderColor, borderWidth = 0, borderColors, shadowColor: color, shadowOpacity = 0, shadowRadius = 0, shadowOffset, style, children, ...props }: SurfaceProps) {
+export function Surface({
+  fill,
+  cornerRadius = 0,
+  borderColor,
+  borderWidth = 0,
+  borderColors,
+  shadowColor: color,
+  shadowOpacity = 0,
+  shadowRadius = 0,
+  shadowOffset,
+  cutout: _cutout,
+  inactiveOpacity: _inactiveOpacity,
+  inactiveFillOpacity: _inactiveFillOpacity,
+  hidesAccessibility: _hidesAccessibility,
+  logicalWidth: _logicalWidth,
+  style,
+  children,
+  ...props
+}: SurfaceProps) {
   const gradientBorder = !!borderColors && borderColors.length >= 2 && borderWidth > 0;
   const surface: Style = {
     backgroundColor: fill,

@@ -1,0 +1,8 @@
+Feather search artwork, Copyright (c) 2013-2023 Cole Bemis. MIT License; full text in LICENSE and embedded in each PNG.
+Original artwork: https://github.com/feathericons/feather/blob/v4.29.2/icons/search.svg
+Original SVG SHA256: 5f27d6498c8d1746ef65458aedc42b51052a4ef1c52fb5d0cd900c19676a9db3
+
+Raster source: U+E9CC in the icomoon icon font from Arc's ARCClients_Icons resource bundle, identified by the FeatherIcon metadata and searchOutline call path in Arc arm64 77be289e16a139056dd9d0bf145ad4707d4e217289bb279a333949dcfd39c52d.
+Font input SHA256: dbf17c08aa14d28585f0df35960de0d25ab790e3c105bfb8f1dafb5741b29ef5. The font file is not distributed here. These PNGs preserve that converted outline and its text raster placement; they are not renders of the upstream SVG or React Native Vector Icons font.
+Generation: icomoon at 14pt, font and foreground attributes only, centered in a 14x14 unflipped template NSImage, drawn at (1,1,14,14) into a transparent 16x16 allocation at 1x and 2x. The source is drawn black, as in the decoded renderer. Its exact alpha is preserved while RGB is set to white for caller tinting. No crop-to-ink, stretch, fitted offset or contrast adjustment.
+Retained renderer and controls: output/arc-visual-parity-2026-10-24/url-glyph-contract/render-assets.swift and CONTRACT.md.

@@ -4,6 +4,7 @@ import { ARC_LIGHTS_CENTER, LIGHTS_CENTER, lightsCenter, TOP_STRIP_LIGHTS_CENTER
 import { layout } from "../../lib/theme";
 import { useBrowser, type BrowserState } from "../../store/browser";
 import { useWindowId } from "../../store/hooks";
+import { isSmallWindow } from "../../store/small";
 
 export function useTabLayout(): "sidebar" | "top" {
   const windowId = useWindowId();
@@ -29,6 +30,14 @@ export function useAddressBarInSidebar(): boolean {
   return useBrowser((s) => addressBarInSidebar(s, windowId));
 }
 
+const ARC_CARD = { top: 10, inset: 10, radius: 6 } as const;
+const DIA_CARD = { top: layout.cardTop, inset: layout.cardInset, radius: layout.cardRadius } as const;
+
+export function useCardGeometry(): { top: number; inset: number; radius: number } {
+  const windowId = useWindowId();
+  return useBrowser((s) => addressBarInSidebar(s, windowId) && !isSmallWindow(s.windows[windowId])) ? ARC_CARD : DIA_CARD;
+}
+
 export function openingLightsCenter(s: BrowserState, windowId: string): [number, number] | null {
   const w = s.windows[windowId];
   if (!w) return null;
@@ -37,10 +46,12 @@ export function openingLightsCenter(s: BrowserState, windowId: string): [number,
   return lightsCenter(open ? 0 : (s.settings.sidebarWidth ?? layout.sidebarWidth), 0, s.settings.addressBar === "sidebar" ? ARC_LIGHTS_CENTER : LIGHTS_CENTER);
 }
 
-export const SIDEBAR_FIELD = { top: 46, height: layout.rowHeight, radius: 10 } as const;
-export const SIDEBAR_FOOTER_DOWNLOADS = { bottom: 3 + (41 - 3 - 34) / 2, size: 34 } as const;
+export const SIDEBAR_FIELD = { top: 46, height: layout.rowHeight, radius: layout.rowRadius, textLeft: 13 } as const;
+export const SIDEBAR_FOOTER_CENTER = 25;
+export const SIDEBAR_FOOTER_BUTTON = { bottom: SIDEBAR_FOOTER_CENTER - 34 / 2, size: 34 } as const;
+export const SIDEBAR_FOOTER_HEIGHT = 50;
 export function listTopGap(addressBar: boolean): number {
-  return addressBar ? 6 : layout.pinnedTop - layout.sidebarHeader;
+  return addressBar ? layout.sidebarInset : layout.pinnedTop - layout.sidebarHeader;
 }
 
 export const SIDEBAR_HEADER_WITH_FIELD = SIDEBAR_FIELD.top + SIDEBAR_FIELD.height;

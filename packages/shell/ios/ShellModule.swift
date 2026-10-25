@@ -679,6 +679,7 @@ public class FadeLabelModule: Module {
       Prop("weight") { (view: FadeLabel, v: String) in view.weight = v }
       Prop("color") { (view: FadeLabel, hex: String) in view.color = NSColor(hex: hex) ?? .labelColor }
       Prop("fadeWidth") { (view: FadeLabel, v: Double) in view.fadeWidth = v }
+      Prop("letterSpacing") { (view: FadeLabel, v: Double?) in view.letterSpacing = v.flatMap { $0.isFinite ? $0 : nil } ?? 0 }
     }
   }
 }
@@ -690,8 +691,17 @@ final class FadeLabel: ExpoView {
   var text = "" { didSet { update() } }
   var fontSize: Double = 13 { didSet { update() } }
   var weight = "regular" { didSet { update() } }
-  var color: NSColor = .labelColor { didSet { field.textColor = color } }
+  var color: NSColor = .labelColor {
+    didSet {
+      if letterSpacing == 0 {
+        field.textColor = color
+      } else {
+        update()
+      }
+    }
+  }
   var fadeWidth: Double = 24 { didSet { relayout() } }
+  var letterSpacing: Double = 0 { didSet { if letterSpacing != oldValue { update() } } }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -719,9 +729,14 @@ final class FadeLabel: ExpoView {
     let weights: [String: NSFont.Weight] = [
       "light": .light, "regular": .regular, "medium": .medium, "semibold": .semibold, "bold": .bold,
     ]
-    field.font = .monospacedDigitSystemFont(ofSize: fontSize, weight: weights[weight] ?? .regular)
-    field.stringValue = text
-    field.textColor = color
+    let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: weights[weight] ?? .regular)
+    field.font = font
+    if letterSpacing == 0 {
+      field.stringValue = text
+      field.textColor = color
+    } else {
+      field.attributedStringValue = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .kern: letterSpacing])
+    }
     relayout()
   }
 
@@ -1757,6 +1772,25 @@ final class GlassEffect: ExpoView {
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+public class FolderShapeModule: Module {
+  public func definition() -> ModuleDefinition {
+    Name("ArdiaFolderShape")
+    View(FolderShape.self) {
+      Prop("front") { (view: FolderShape, hex: String?) in view.frontColor = hex.flatMap(NSColor.init(hex:)) }
+      Prop("frontExtendedSRGB") { (view: FolderShape, v: [Double]?) in
+        view.frontExtendedColor = v.flatMap { rgb in
+          rgb.count == 3 && rgb.allSatisfy({ $0.isFinite && abs($0) < 4 })
+            ? NSColor(colorSpace: .extendedSRGB, components: rgb.map { CGFloat($0) } + [1], count: 4) : nil
+        }
+      }
+      Prop("back") { (view: FolderShape, hex: String?) in view.backColor = hex.flatMap(NSColor.init(hex:)) }
+      Prop("stroke") { (view: FolderShape, hex: String?) in view.strokeColor = hex.flatMap(NSColor.init(hex:)) }
+      Prop("open") { (view: FolderShape, v: Bool?) in view.isOpen = v ?? false }
+      Prop("mark") { (view: FolderShape, value: [String: Any]?) in view.mark = value.flatMap(FolderMark.init) }
+    }
+  }
+}
+
 public class SurfaceModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ArdiaSurface")
@@ -1771,8 +1805,42 @@ public class SurfaceModule: Module {
       Prop("surfaceShadowOpacity") { (view: Surface, v: Double) in view.surfaceShadowOpacity = v }
       Prop("surfaceShadowRadius") { (view: Surface, v: Double) in view.surfaceShadowRadius = v }
       Prop("surfaceShadowOffset") { (view: Surface, v: [Double]) in view.surfaceShadowOffset = v.count == 2 ? CGSize(width: v[0], height: v[1]) : .zero }
+      Prop("cutout") { (view: Surface, v: [Double]?) in
+        view.surfaceCutout = v.flatMap { $0.count == 3 && $0.allSatisfy(\.isFinite) && $0[2] > 0 ? $0 : nil }
+      }
+      Prop("inactiveOpacity") { (view: Surface, v: Double?) in
+        view.surfaceInactiveOpacity = v.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+      }
+      Prop("inactiveFillOpacity") { (view: Surface, v: Double?) in
+        view.surfaceInactiveFillOpacity = v.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+      }
+      Prop("inactiveBorderColors") { (view: Surface, hexes: [String]?) in
+        let colors = hexes?.compactMap(NSColor.init(hex:)) ?? []
+        view.surfaceInactiveBorderColors = colors.count >= 2 && colors.count == hexes?.count ? colors : nil
+      }
+      Prop("hidesAccessibility") { (view: Surface, v: Bool?) in view.surfaceHidesAccessibility = v ?? false }
+      Prop("logicalWidth") { (view: Surface, v: Double?) in
+        view.surfaceLogicalWidth = v.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil }
+      }
     }
   }
+}
+
+final class SurfaceLayer: CALayer {
+  private var requestedMask: CALayer?
+  var heldMask: CALayer? { didSet { super.mask = heldMask ?? requestedMask } }
+
+  override var mask: CALayer? {
+    get { super.mask }
+    set {
+      requestedMask = newValue
+      super.mask = heldMask ?? newValue
+    }
+  }
+
+  override init() { super.init() }
+  override init(layer: Any) { super.init(layer: layer) }
+  required init?(coder: NSCoder) { super.init(coder: coder) }
 }
 
 final class Surface: ExpoView {
@@ -1785,16 +1853,117 @@ final class Surface: ExpoView {
   var surfaceShadowOpacity: Double = 0 { didSet { apply() } }
   var surfaceShadowRadius: Double = 0 { didSet { apply() } }
   var surfaceShadowOffset: CGSize = .zero { didSet { apply() } }
+  var surfaceCutout: [Double]? { didSet { apply() } }
+  var surfaceLogicalWidth: CGFloat? { didSet { apply() } }
+  var surfaceInactiveOpacity: Double? { didSet { observeActivity() } }
+  var surfaceInactiveFillOpacity: Double? { didSet { observeActivity() } }
+  var surfaceInactiveBorderColors: [NSColor]? { didSet { observeActivity() } }
+  var surfaceHidesAccessibility = false {
+    didSet {
+      guard surfaceHidesAccessibility != oldValue, window != nil else { return }
+      NSAccessibility.post(element: self, notification: .layoutChanged)
+    }
+  }
+
+  private var requestedAlpha: CGFloat = 1
+  private var activityObservers: [NSObjectProtocol] = []
+
+  override var alphaValue: CGFloat {
+    get { super.alphaValue }
+    set {
+      requestedAlpha = newValue
+      applyActivity()
+    }
+  }
 
   private let plate = CALayer()
   private let shadowLayer = CALayer()
   private let shadowMask = CAShapeLayer()
   private let borderGradient = CAGradientLayer()
   private let borderStroke = CAShapeLayer()
+  private let cutoutMask = CAShapeLayer()
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     wantsLayer = true
+  }
+
+  deinit {
+    for token in activityObservers { NotificationCenter.default.removeObserver(token) }
+  }
+
+  override func makeBackingLayer() -> CALayer {
+    SurfaceLayer()
+  }
+
+  override func isAccessibilityElement() -> Bool { !surfaceHidesAccessibility && super.isAccessibilityElement() }
+  override func accessibilityChildren() -> [Any]? { surfaceHidesAccessibility ? [] : super.accessibilityChildren() }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    observeActivity()
+    if surfaceLogicalWidth != nil { apply() }
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    if surfaceLogicalWidth != nil { apply() }
+  }
+
+  private var drawRect: CGRect {
+    guard let width = surfaceLogicalWidth else { return bounds }
+    return backingAlignedRect(CGRect(x: bounds.minX, y: bounds.minY, width: width, height: bounds.height), options: .alignAllEdgesNearest)
+  }
+
+  private func childBounds(_ rect: CGRect) -> CGRect {
+    surfaceLogicalWidth == nil ? rect : CGRect(origin: .zero, size: rect.size)
+  }
+
+  private func observeActivity() {
+    for token in activityObservers { NotificationCenter.default.removeObserver(token) }
+    activityObservers = []
+    if surfaceInactiveOpacity != nil || surfaceInactiveFillOpacity != nil || surfaceInactiveBorderColors != nil, window != nil {
+      let names: [Notification.Name] = [
+        NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+        NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+        NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification,
+      ]
+      activityObservers = names.map { name in
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.applyActivity() }
+      }
+    }
+    applyActivity()
+  }
+
+  private var windowActive: Bool {
+    guard NSApp.isActive else { return false }
+    var current = window
+    while let candidate = current {
+      if candidate.isKeyWindow || candidate.isMainWindow { return true }
+      current = candidate.sheetParent ?? candidate.parent
+    }
+    return false
+  }
+
+  private var effectiveFill: CGColor? {
+    guard let fill = surfaceFill else { return nil }
+    guard let factor = surfaceInactiveFillOpacity, !windowActive else { return fill.cgColor }
+    return fill.withAlphaComponent(fill.alphaComponent * CGFloat(factor)).cgColor
+  }
+
+  private var effectiveBorderColors: [NSColor] {
+    guard let colors = surfaceInactiveBorderColors, !windowActive else { return surfaceBorderColors }
+    return colors
+  }
+
+  private func applyActivity() {
+    let multiplier = surfaceInactiveOpacity.map { windowActive ? 1 : CGFloat($0) } ?? 1
+    super.alphaValue = requestedAlpha * multiplier
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    plate.backgroundColor = effectiveFill
+    applyBorder()
+    CATransaction.commit()
   }
 
   override func layout() {
@@ -1834,33 +2003,16 @@ final class Surface: ExpoView {
       shadowLayer.mask = shadowMask
     }
     layer.masksToBounds = false
-    plate.frame = bounds
+    let rect = drawRect
+    let local = childBounds(rect)
+    plate.frame = rect
     plate.cornerRadius = surfaceRadius
     plate.cornerCurve = .continuous
-    plate.backgroundColor = surfaceFill?.cgColor
-    plate.borderColor = surfaceBorderColor?.cgColor
-    plate.borderWidth = surfaceBorderWidth
+    plate.backgroundColor = effectiveFill
+    applyBorder()
 
-    if surfaceBorderColors.count >= 2, surfaceBorderWidth > 0 {
-      borderGradient.isHidden = false
-      borderGradient.frame = bounds
-      borderGradient.colors = surfaceBorderColors.map(\.cgColor)
-      let flipped = layer.isGeometryFlipped || isFlipped
-      borderGradient.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
-      borderGradient.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
-      let inset = surfaceBorderWidth / 2
-      borderStroke.frame = bounds
-      borderStroke.lineWidth = surfaceBorderWidth
-      borderStroke.path = CGPath(
-        roundedRect: bounds.insetBy(dx: inset, dy: inset),
-        cornerWidth: max(surfaceRadius - inset, 0), cornerHeight: max(surfaceRadius - inset, 0), transform: nil)
-      plate.borderWidth = 0
-    } else {
-      borderGradient.isHidden = true
-    }
-
-    let shape = CGPath(roundedRect: bounds, cornerWidth: surfaceRadius, cornerHeight: surfaceRadius, transform: nil)
-    shadowLayer.frame = bounds
+    let shape = CGPath(roundedRect: local, cornerWidth: surfaceRadius, cornerHeight: surfaceRadius, transform: nil)
+    shadowLayer.frame = rect
     if let shadowColor = surfaceShadowColor, surfaceShadowOpacity > 0 {
       shadowLayer.shadowColor = shadowColor.cgColor
       shadowLayer.shadowOpacity = Float(surfaceShadowOpacity)
@@ -1869,15 +2021,59 @@ final class Surface: ExpoView {
       shadowLayer.shadowPath = shape
       let outset = surfaceShadowRadius * 3 + abs(surfaceShadowOffset.height) + abs(surfaceShadowOffset.width) + 4
       let mask = CGMutablePath()
-      mask.addRect(bounds.insetBy(dx: -outset, dy: -outset))
+      mask.addRect(local.insetBy(dx: -outset, dy: -outset))
       mask.addPath(shape)
-      shadowMask.frame = bounds
+      shadowMask.frame = local
       shadowMask.path = mask
       shadowLayer.isHidden = false
     } else {
       shadowLayer.isHidden = true
     }
+
+    if let surfaceLayer = layer as? SurfaceLayer {
+      if let cutout = surfaceCutout {
+        let flipped = layer.isGeometryFlipped || isFlipped
+        let radius = cutout[2]
+        let centerY = flipped ? cutout[1] : bounds.height - cutout[1]
+        let outset = max(bounds.width, bounds.height) + 32
+        let path = CGMutablePath()
+        path.addRect(bounds.insetBy(dx: -outset, dy: -outset))
+        path.addEllipse(in: CGRect(x: cutout[0] - radius, y: centerY - radius, width: radius * 2, height: radius * 2))
+        cutoutMask.fillRule = .evenOdd
+        cutoutMask.frame = bounds
+        cutoutMask.path = path
+        surfaceLayer.heldMask = cutoutMask
+      } else if surfaceLayer.heldMask != nil {
+        surfaceLayer.heldMask = nil
+      }
+    }
     CATransaction.commit()
+  }
+
+  private func applyBorder() {
+    guard let layer else { return }
+    plate.borderColor = surfaceBorderColor?.cgColor
+    plate.borderWidth = surfaceBorderWidth
+    let colors = effectiveBorderColors
+    if colors.count >= 2, surfaceBorderWidth > 0 {
+      let rect = drawRect
+      let local = childBounds(rect)
+      borderGradient.isHidden = false
+      borderGradient.frame = rect
+      borderGradient.colors = colors.map(\.cgColor)
+      let flipped = layer.isGeometryFlipped || isFlipped
+      borderGradient.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
+      borderGradient.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
+      let inset = surfaceBorderWidth / 2
+      borderStroke.frame = local
+      borderStroke.lineWidth = surfaceBorderWidth
+      borderStroke.path = CGPath(
+        roundedRect: local.insetBy(dx: inset, dy: inset),
+        cornerWidth: max(surfaceRadius - inset, 0), cornerHeight: max(surfaceRadius - inset, 0), transform: nil)
+      plate.borderWidth = 0
+    } else {
+      borderGradient.isHidden = true
+    }
   }
 }
 

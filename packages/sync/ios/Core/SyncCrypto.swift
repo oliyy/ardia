@@ -20,7 +20,9 @@ public struct SyncKeys {
     nameKey = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: Self.salt, info: Data("name-key".utf8), outputByteCount: 32)
   }
 
-  public var chainTag: String { tag("chain") }
+  public var chainTag: String { tag("chain/v2") }
+
+  public var previousChainTag: String { tag("chain") }
 
   public func scopeTag(_ scope: String) -> String { tag("scope/" + scope) }
 

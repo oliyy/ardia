@@ -379,12 +379,74 @@ export type SymbolProps = ViewProps & {
 
 export const Symbol = requireNativeViewManager<SymbolProps>("ArdiaSymbol");
 
+export type FolderShapeProps = ViewProps & {
+  front: string;
+  frontExtendedSRGB?: [number, number, number];
+  back: string;
+  stroke: string;
+  open?: boolean;
+  mark?: { kind: "dots" } | { kind: "symbol"; name: string } | { kind: "image"; uri: string } | null;
+};
+
+export const FolderShape = requireNativeViewManager<FolderShapeProps>("ArdiaFolderShape");
+
+export type ArcFavoriteBackgroundProps = ViewProps & {
+  source?: { uri: string; profileId: string } | null;
+  cornerRadius?: number;
+  hovered?: boolean;
+  logicalWidth?: number;
+  dark?: boolean;
+  mutedColor?: string | null;
+};
+
+export const ArcFavoriteBackground = requireNativeViewManager<ArcFavoriteBackgroundProps>("ArdiaArcFavoriteBackground");
+
+export type ArcTabRowBackgroundProps = ViewProps & {
+  dark: boolean;
+  current?: boolean;
+  contentVisible?: boolean;
+  multiSelected?: boolean;
+  hovered?: boolean;
+  canReset?: boolean;
+  iconMinX?: number;
+  iconWidth?: number;
+  regionHovered?: boolean;
+  regionPressed?: boolean;
+};
+
+export const ArcTabRowBackground = requireNativeViewManager<ArcTabRowBackgroundProps>("ArdiaTabRowBackground");
+
+export type ArcUrlFieldBackgroundProps = ViewProps & {
+  dark: boolean;
+  hovered?: boolean;
+};
+
+export const ArcUrlFieldBackground = requireNativeViewManager<ArcUrlFieldBackgroundProps>("ArdiaUrlFieldBackground");
+
+export type ArcUrlFieldTextProps = ViewProps & {
+  text: string;
+  placeholder?: string;
+  alignment?: "leading" | "trailing";
+  color: string;
+  hoverButtonsWidth?: number;
+};
+
+export const ArcUrlFieldText = requireNativeViewManager<ArcUrlFieldTextProps>("ArdiaUrlFieldText");
+
+export type ArcUrlInsecureIconProps = ViewProps & {
+  dark?: boolean;
+  hovered?: boolean;
+};
+
+export const ArcUrlInsecureIcon = requireNativeViewManager<ArcUrlInsecureIconProps>("ArdiaUrlInsecureIcon");
+
 export type FadeLabelProps = ViewProps & {
   text: string;
   fontSize?: number;
   weight?: "light" | "regular" | "medium" | "semibold" | "bold";
   color?: string;
   fadeWidth?: number;
+  letterSpacing?: number;
 };
 
 export const FadeLabel = requireNativeViewManager<FadeLabelProps>("ArdiaFadeLabel");
@@ -414,6 +476,12 @@ export type SurfaceProps = ViewProps & {
   shadowOpacity?: number;
   shadowRadius?: number;
   shadowOffset?: [number, number];
+  cutout?: [number, number, number];
+  inactiveOpacity?: number;
+  inactiveFillOpacity?: number;
+  inactiveBorderColors?: string[];
+  hidesAccessibility?: boolean;
+  logicalWidth?: number;
 };
 
 type NativeSurfaceProps = Omit<SurfaceProps, "shadowColor" | "shadowOpacity" | "shadowRadius" | "shadowOffset"> & {

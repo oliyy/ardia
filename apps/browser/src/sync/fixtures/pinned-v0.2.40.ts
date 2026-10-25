@@ -2,13 +2,19 @@ import { assignPositions, type Adapter, type Extraction } from "@ardia/sync";
 import { useBrowser, type BrowserState } from "../../store/browser";
 import { ancestorIds, depthOf, leaveGroups, syncGroupOrder, withParent } from "../../store/groups";
 import { makeTab, newId, pinSection, without } from "../../store/model";
-import { groupChoiceKey, placeChoiceKey, type PinSyncEntry } from "../../store/organize";
+import { groupChoiceKey, placeChoiceKey } from "../../store/organize";
 import { adoptParkedPins, parkWindowPins } from "../../store/parkedPins";
 import { pinKeyOf } from "../../store/pinMirror";
 import { removeTabs } from "../../store/tabs";
 import type { Tab, TabGroup } from "../../store/types";
 
+type PinSyncEntry = { g?: string; w?: number };
+type PinSync = Record<string, Record<string, PinSyncEntry>>;
+
+type FixtureBrowserState = BrowserState & { pinSync?: PinSync };
+
 const store = () => useBrowser.getState();
+const pendingOf = (s: BrowserState) => (s as FixtureBrowserState).pinSync ?? {};
 
 function orderSections(ids: string[], tabs: Record<string, Tab>, groups: Record<string, TabGroup>): string[] {
   const pinnedGroup = new Set(Object.values(groups).filter((g) => g.pinned).flatMap((g) => g.tabIds));
@@ -99,7 +105,7 @@ export function pinnedAdapter(profileId: string): Adapter {
       for (const g of park?.groups ?? []) enter(parkChain(g.id));
       const values = new Map<string, unknown>();
       const chosen = s.pinChoices[profileId] ?? {};
-      const sync = s.pinSync[profileId] ?? {};
+      const sync = pendingOf(s)[profileId] ?? {};
       const baseTab = (key: string) => base(`pin:t:${key}`) as PinValue | undefined;
       const baseGroup = (key: string) => base(`pin:g:${key}`) as PinGroupValue | undefined;
       const pinValue = (t: Pin, group: string | null, pos: string): PinValue => {
@@ -151,7 +157,7 @@ export function pinnedAdapter(profileId: string): Adapter {
     },
     apply: (visible, changed, base, records) => {
       if ([...changed].every((k) => k.startsWith(PIN_ROW))) return true;
-      const sync = store().pinSync[profileId] ?? {};
+      const sync = pendingOf(store())[profileId] ?? {};
       let s = store();
       const home = homeWindow(s, profileId);
       if (!home) return false;
@@ -410,8 +416,9 @@ export function pinnedAdapter(profileId: string): Adapter {
         delete windows[PARK];
       }
       const { find, splits, selection, windowOrder, windowUi } = s;
-      const pinSync = noted.size ? { ...s.pinSync, [profileId]: { ...s.pinSync[profileId], ...Object.fromEntries(noted) } } : s.pinSync;
-      useBrowser.setState({ tabs, windows, groups, live, find, splits, selection, windowOrder, windowUi, parkedPins, pinSync });
+      const pinSync = noted.size ? { ...pendingOf(s), [profileId]: { ...pendingOf(s)[profileId], ...Object.fromEntries(noted) } } : pendingOf(s);
+      const patch: Partial<FixtureBrowserState> = { tabs, windows, groups, live, find, splits, selection, windowOrder, windowUi, parkedPins, pinSync };
+      useBrowser.setState(patch);
     },
   };
 }

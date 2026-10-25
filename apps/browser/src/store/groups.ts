@@ -1,10 +1,11 @@
 import type { StateCreator } from "zustand";
 import type { BrowserState } from "./browser";
 import { newId } from "./model";
-import { closingGroup } from "./organize";
+import { closingGroup, groupPinPlaces } from "./organize";
 import { withSplitRows } from "./splits";
 import { withNewTab } from "./tabs";
 import type { BrowserWindow, ClosedGroupInfo, GroupColor, Tab, TabGroup } from "./types";
+import { dropNodes, groupNode, pinKeyOf, placeNodes, promoteChildren, tableOf, tabNode } from "./pinTree";
 
 export type GroupsSlice = {
   groups: Record<string, TabGroup>;
@@ -77,7 +78,7 @@ export function leaveGroups(groups: Record<string, TabGroup>, ids: Set<string>, 
   for (const g of Object.values(groups)) {
     const tabIds = keep?.has(g.id) ? g.tabIds : g.tabIds.filter((id) => !ids.has(id));
     if (tabIds.length === g.tabIds.length) next[g.id] = g;
-    else if (tabIds.length > (g.autoUngroup && !g.pinnedOpenerId ? 1 : 0)) next[g.id] = { ...g, tabIds };
+    else if (g.pinned || tabIds.length > (g.autoUngroup && !g.pinnedOpenerId ? 1 : 0)) next[g.id] = { ...g, tabIds };
   }
   return reparent(next, groups);
 }
@@ -142,7 +143,24 @@ export function commonGroup(groups: Record<string, TabGroup>, ids: string[]): Ta
   return best;
 }
 
-export const innermostGroupOf = (groups: Record<string, TabGroup>, tabId: string): TabGroup | undefined => commonGroup(groups, [tabId]);
+const innermostIndexes = new WeakMap<Record<string, TabGroup>, Map<string, TabGroup>>();
+
+export function innermostGroupIndex(groups: Record<string, TabGroup>): Map<string, TabGroup> {
+  const known = innermostIndexes.get(groups);
+  if (known) return known;
+  const index = new Map<string, TabGroup>();
+  const depths = new Map(Object.values(groups).map((g) => [g.id, g.parentId ? depthOf(groups, g.id) : 0]));
+  for (const g of Object.values(groups)) {
+    for (const id of g.tabIds) {
+      const was = index.get(id);
+      if (!was || depths.get(g.id)! > depths.get(was.id)!) index.set(id, g);
+    }
+  }
+  innermostIndexes.set(groups, index);
+  return index;
+}
+
+export const innermostGroupOf = (groups: Record<string, TabGroup>, tabId: string): TabGroup | undefined => innermostGroupIndex(groups).get(tabId);
 
 export function groupPath(groups: Record<string, TabGroup>, id: string): string[] {
   return [...ancestorIds(groups, id).reverse(), id];
@@ -313,7 +331,8 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
       tabIds: window.tabIds.filter((id) => members.has(id)),
       createdAt: Date.now(),
     };
-    set({ groups: { ...leaveGroups(s.groups, members), [group.id]: group }, windows: { ...s.windows, [w.id]: window } });
+    const pinPlace = dropNodes(s.pinPlace, first.profileId, tabs.map((t) => tabNode(pinKeyOf(t!))));
+    set({ pinPlace, groups: { ...leaveGroups(s.groups, members), [group.id]: group }, windows: { ...s.windows, [w.id]: window } });
     return group.id;
   },
 
@@ -321,11 +340,17 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
     set((s) => {
       const g = s.groups[id];
       if (!g) return {};
+      const parent = g.parentId ? s.groups[g.parentId] : undefined;
+      if (patch.pinned !== undefined && parent) patch = { ...patch, pinned: parent.pinned };
       const groups = { ...s.groups, [id]: { ...g, ...patch } };
       const w = s.windows[g.windowId];
       if (patch.pinned === undefined || patch.pinned === g.pinned || !w) return { groups };
+      if (!patch.pinned && !g.tabIds.length) {
+        const { [id]: _, ...rest } = s.groups;
+        return { groups: rest, pinPlace: groupPinPlaces(s, g, false) };
+      }
       const window = { ...w, tabIds: orderSections(w.tabIds, s.tabs, groups) };
-      return { groups: syncGroupOrder(groups, window), windows: { ...s.windows, [w.id]: window } };
+      return { pinPlace: groupPinPlaces(s, g, patch.pinned), groups: syncGroupOrder(groups, window), windows: { ...s.windows, [w.id]: window } };
     });
   },
 
@@ -342,7 +367,9 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
       const block = placeBlock(w.tabIds, [...group.tabIds, ...adding]);
       const groups = nestGroups({ ...leaveGroups(s.groups, new Set(adding)), [groupId]: { ...group, tabIds: [...group.tabIds, ...adding] } });
       const window = { ...w, tabIds: placeGroups(block, groups, w.id) };
-      return { groups: syncGroupOrder(groups, window), windows: { ...s.windows, [w.id]: window } };
+      const nodes = adding.map((id) => tabNode(pinKeyOf(s.tabs[id]!)));
+      const pinPlace = group.pinned ? placeNodes(s.pinPlace, group.profileId, nodes, groupNode(pinKeyOf(group)), null) : dropNodes(s.pinPlace, group.profileId, nodes);
+      return { pinPlace, groups: syncGroupOrder(groups, window), windows: { ...s.windows, [w.id]: window } };
     });
   },
 
@@ -351,17 +378,21 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
       let groups = s.groups;
       const windows = { ...s.windows };
       const touched = new Set<string>();
+      let pinPlace = s.pinPlace;
       for (const id of withSplitRows(s, tabIds)) {
         const g = innermostGroupOf(groups, id);
         const w = g && windows[g.windowId];
         if (!g || !w) continue;
         touched.add(w.id);
+        if (g.pinned) pinPlace = dropNodes(pinPlace, g.profileId, [tabNode(pinKeyOf(s.tabs[id]!))]);
         const kept = g.tabIds.filter((x) => x !== id);
         if (kept.length) {
           const order = w.tabIds.filter((x) => x !== id);
           order.splice(order.indexOf(kept.at(-1)!) + 1, 0, id);
           windows[w.id] = { ...w, tabIds: order };
           groups = { ...groups, [g.id]: { ...g, tabIds: kept } };
+        } else if (g.pinned) {
+          groups = { ...groups, [g.id]: { ...g, tabIds: [] } };
         } else {
           const { [g.id]: _, ...rest } = groups;
           groups = reparent(rest, groups);
@@ -369,7 +400,7 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
       }
       let next = { tabs: s.tabs, windows, groups };
       for (const windowId of touched) next = withGroupsPlaced(next, windowId, next.groups);
-      return { groups: next.groups, windows: next.windows };
+      return { pinPlace, groups: next.groups, windows: next.windows };
     });
   },
 
@@ -379,9 +410,13 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
       if (!group) return {};
       const { [groupId]: _, ...rest } = s.groups;
       const groups = reparent(rest, s.groups);
-      if (!s.windows[group.windowId]) return { groups };
+      const node = groupNode(pinKeyOf(group));
+      const leaves = group.tabIds.filter((id) => s.tabs[id] && tableOf(s.pinPlace, group.profileId)[tabNode(pinKeyOf(s.tabs[id]!))]?.parent === node).map((id) => tabNode(pinKeyOf(s.tabs[id]!)));
+      const nested = group.parentId && s.groups[group.parentId]?.pinned;
+      const pinPlace = group.pinned ? promoteChildren(nested ? s.pinPlace : dropNodes(s.pinPlace, group.profileId, leaves), group.profileId, node) : s.pinPlace;
+      if (!s.windows[group.windowId]) return { groups, pinPlace };
       const next = withGroupsPlaced(s, group.windowId, groups);
-      return { groups: next.groups, windows: next.windows };
+      return { pinPlace, groups: next.groups, windows: next.windows };
     });
   },
 
@@ -405,7 +440,8 @@ export const createGroupsSlice: StateCreator<BrowserState, [], [], GroupsSlice> 
       parentId,
     };
     const groups = nestGroups({ ...next.groups, [parentId]: { ...p, collapsed: false }, [group.id]: group });
-    set(withGroupsPlaced(next, w.id, groups));
+    const pinPlace = p.pinned ? placeNodes(placeNodes(next.pinPlace, p.profileId, [groupNode(group.id)], groupNode(pinKeyOf(p)), null), p.profileId, [tabNode(tabId)], groupNode(group.id), null) : next.pinPlace;
+    set(withGroupsPlaced({ ...next, pinPlace }, w.id, groups));
     return group.id;
   },
 

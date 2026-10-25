@@ -5,8 +5,6 @@ const { Clock, compact, emptyScope, syncScope } = await import("@ardia/sync");
 const adapters = await import("./adapters.ts");
 const stub = await import("../test-native-stub.mjs");
 const { flushPersistence, loadSession, startPersistence } = await import("../lib/persist.ts");
-const shipped = await import("../../../../packages/sync/src/fixtures/scope-v0.2.38.ts");
-const { pinnedAdapter: shippedPinnedAdapter } = await import("./fixtures/pinned-v0.2.38.ts");
 
 const S = () => useBrowser.getState();
 const PROFILES = ["default", "work"];
@@ -42,18 +40,21 @@ class Folder {
 }
 
 class Mac {
-  constructor(id, folder, browser, scopes = {}, legacy = false) {
+  constructor(id, folder, browser, scopes = {}) {
     this.id = id;
     this.folder = folder;
     this.browser = browser;
     this.scopes = scopes;
-    this.legacy = legacy;
     this.sent = [];
     this.clock = new Clock(id, null, now);
   }
-  with(fn) {
+  enter() {
     stub.current.device = this.id;
+    useBrowser.setState({ ...this.browser, tabs: {} }, true);
     useBrowser.setState(this.browser, true);
+  }
+  with(fn) {
+    this.enter();
     try {
       return fn();
     } finally {
@@ -61,18 +62,17 @@ class Mac {
     }
   }
   async sync(profiles = PROFILES) {
-    stub.current.device = this.id;
-    useBrowser.setState(this.browser, true);
+    this.enter();
     let published = 0;
     try {
       for (const p of profiles) {
         const state = (this.scopes[p] ??= emptyScope());
         const before = new Map(Object.entries(state.records).map(([key, r]) => [key, r.h]));
-        const result = await (this.legacy ? shipped.syncScope : syncScope)({
+        const result = await syncScope({
           scope: `p:${p}`,
           state: (this.scopes[p] ??= emptyScope()),
           transport: this.folder.transport(),
-          adapters: this.legacy ? [shippedPinnedAdapter(p)] : [adapters.pinnedRowsAdapter(p), adapters.pinnedOrderAdapter(p), adapters.pinnedAdapter(p)],
+          adapters: [adapters.pinnedTreeAdapter(p)],
           clock: this.clock,
           device: this.id,
           now: () => wall,
@@ -86,7 +86,7 @@ class Mac {
     return published;
   }
   fork(folder) {
-    return new Mac(this.id, folder, this.browser, structuredClone(this.scopes), this.legacy);
+    return new Mac(this.id, folder, this.browser, structuredClone(this.scopes));
   }
   relaunch() {
     this.with(() => {
@@ -103,15 +103,15 @@ class Mac {
   }
   async compact(days = 46) {
     wall += days * DAY;
-    for (const p of PROFILES) if (this.scopes[p]) await (this.legacy ? shipped.compact : compact)(this.scopes[p], this.folder.transport(), `p:${p}`, this.id, wall, {}, true);
+    for (const p of PROFILES) if (this.scopes[p]) await compact(this.scopes[p], this.folder.transport(), `p:${p}`, this.id, wall, {}, true);
   }
 }
 
 const WORK = { id: "work", name: "Work", color: "blue", icon: null, createdAt: 1 };
-function freshMac(id, folder, legacy = false) {
+function freshMac(id, folder) {
   S().hydrate({});
   useBrowser.setState((s) => ({ profiles: { ...s.profiles, work: WORK }, profileOrder: [...s.profileOrder, "work"] }));
-  const mac = new Mac(id, folder, S(), {}, legacy);
+  const mac = new Mac(id, folder, S(), {});
   mac.with(() => {
     S().createWindow({ url: `https://${id}-home.example/` });
     S().createWindow({ profileId: "work", url: `https://${id}-work.example/` });
@@ -135,7 +135,6 @@ async function world(startRow) {
   const folder = new Folder();
   const a = freshMac("devA", folder);
   const b = freshMac("devB", folder);
-  const old = freshMac("devOld", folder, true);
   const k = {};
   a.with(() => {
     const wd = Object.values(S().windows).find((x) => x.profileId === "default").id;
@@ -150,8 +149,8 @@ async function world(startRow) {
     k.W1 = S().newTab(ww, { url: "https://w1.example/" });
     S().pinTabs([k.W1], true, true);
   });
-  for (let i = 0; i < 3; i++) for (const m of [a, b, old]) await m.sync();
-  const w = { folder, a, b, old, k, startRow, wall };
+  for (let i = 0; i < 3; i++) for (const m of [a, b]) await m.sync();
+  const w = { folder, a, b, k, startRow, wall };
   worlds.set(startRow, w);
   return w;
 }
@@ -160,10 +159,10 @@ const X_OTHER = "https://x.example/other";
 const M_REMOTE = "https://m.example/remote";
 const M_THIRD = "https://m.example/third";
 function sentBy(k, key, device) {
-  return (k.macs?.[device]?.sent ?? []).filter((x) => x.p === "default" && x.key === `pin:t:${key}`).map((x) => x.v);
+  return (k.macs?.[device]?.sent ?? []).filter((x) => x.p === "default" && x.key === `pt:n:t:${key}`).map((x) => x.v);
 }
 const doneBy = (k, name) => [...k.done].find((d) => d.startsWith(`${name}@`))?.slice(name.length + 1);
-const everSent = (k, key, name, url) => sentBy(k, key, doneBy(k, name)).some((v) => v?.u === url);
+const everSent = (k, key, name, url) => sentBy(k, key, doneBy(k, name)).some((v) => v?.url === url);
 const inPinnedGroup = (key) => Object.values(S().groups).some((g) => g.pinned && g.tabIds.includes(tabFor(key)?.id));
 function navigate(key, url) {
   const t = tabFor(key);
@@ -196,13 +195,13 @@ const OPS = [
   {
     name: "xTile",
     steps: [(k) => { const t = tabFor(k.X); if (t?.pinned && t.pinnedAsRow) (S().placeTabs([t.id], { pinned: true, row: false }), done(k, "xTile")); }],
-    touches: ["X.kind"],
+    touches: ["X", "X.kind"],
     final: (k) => { const t = tabFor(k.X); if (t?.pinned) assert.equal(!!t.pinnedAsRow, false, "X a tile"); },
   },
   {
     name: "xRow",
     steps: [(k) => { const t = tabFor(k.X); if (t?.pinned && !t.pinnedAsRow) (S().placeTabs([t.id], { pinned: true, row: true }), done(k, "xRow")); }],
-    touches: ["X.kind"],
+    touches: ["X", "X.kind"],
     final: (k) => { const t = tabFor(k.X); if (t?.pinned) assert.equal(!!t.pinnedAsRow, true, "X a row"); },
   },
   {
@@ -242,7 +241,7 @@ const OPS = [
       const t = tabFor(k.X);
       if (!t || !inContainer(S(), t)) return;
       assert.equal(t.customTitle, "Renamed", "X renamed");
-      assert.equal(record(mac, "default", `pin:t:${k.X}`)?.t, "Renamed", "X renamed in its record");
+      assert.equal(record(mac, "default", `pt:n:t:${k.X}`)?.customTitle, "Renamed", "X renamed in its record");
     },
   },
   { name: "loadX", steps: [loadX], touches: [] },
@@ -287,7 +286,7 @@ const OPS = [
       const g = groupFor(k.G);
       if (!g?.pinned) return;
       assert.deepEqual([g.icon, g.color], ["star", "green"], "G restyled");
-      assert.deepEqual([record(mac, "default", `pin:g:${k.G}`)?.i, record(mac, "default", `pin:g:${k.G}`)?.c], ["star", "green"], "G restyled in its record");
+      assert.deepEqual([record(mac, "default", `pt:n:g:${k.G}`)?.icon, record(mac, "default", `pt:n:g:${k.G}`)?.color], ["star", "green"], "G restyled in its record");
     },
   },
   {
@@ -306,7 +305,7 @@ const OPS = [
     touches: ["M"],
     final: (k, mac) => {
       if (!inPinnedGroup(k.M) || !k.done.has(`navMThereAndBack@${mac.id}`)) return;
-      assert.equal(sentBy(k, k.M, mac.id).at(-1)?.u, k.mStart[mac.id], "going back to where M started is sent");
+      assert.equal(sentBy(k, k.M, mac.id).at(-1)?.url, k.mStart[mac.id], "going back to where M started is sent");
     },
   },
   {
@@ -337,7 +336,7 @@ const OPS = [
   {
     name: "workTile",
     steps: [(k) => { const t = tabFor(k.W1, "work"); if (t?.pinned && t.pinnedAsRow) (S().placeTabs([t.id], { pinned: true, row: false }), done(k, "workTile")); }],
-    touches: ["W1.kind"],
+    touches: ["W1", "W1.kind"],
     final: (k) => { const t = tabFor(k.W1, "work"); if (t?.pinned) assert.equal(!!t.pinnedAsRow, false, "W1 a tile"); },
   },
 ];
@@ -384,10 +383,6 @@ const SCHEDULES = {
     w.folder.hidden.clear();
     return "A";
   },
-  "both, with an older Mac": async (w, opA, opB) => {
-    w.withOld = true;
-    return SCHEDULES["both, A syncs first"](w, opA, opB);
-  },
   "A's first log 44 days late, C joins from a snapshot meanwhile": async (w, opA, opB) => {
     await runOp(w.a, opA, w.k, { folder: w.folder, hideFirst: true });
     await w.b.sync();
@@ -426,7 +421,7 @@ function structure(mac) {
   });
 }
 
-function signature(mac, { rows = true } = {}) {
+function signature(mac) {
   return mac.with(() => {
     const s = S();
     const out = {};
@@ -436,7 +431,7 @@ function signature(mac, { rows = true } = {}) {
       const win = Object.values(s.windows).find((w) => w.profileId === p);
       const ids = win ? win.tabIds.filter((id) => s.tabs[id]?.profileId === p) : [];
       const park = s.parkedPins[p];
-      const isRow = (t) => rows && !!t.pinnedAsRow;
+      const isRow = (t) => !!t.pinnedAsRow;
       out[p] = {
         tiles: ids.filter((id) => s.tabs[id].pinned && !isRow(s.tabs[id])).map((id) => meta(s.tabs[id])).concat((park?.tabs ?? []).filter((t) => !t.groupId && !isRow(t)).map(parked)),
         rows: ids.filter((id) => s.tabs[id].pinned && isRow(s.tabs[id])).map((id) => meta(s.tabs[id])).concat((park?.tabs ?? []).filter((t) => !t.groupId && isRow(t)).map(parked)),
@@ -451,13 +446,13 @@ function signature(mac, { rows = true } = {}) {
   });
 }
 
-function records(mac, { rows = true, loose = new Set() } = {}) {
+function records(mac) {
   const out = {};
   for (const p of PROFILES)
     out[p] = Object.fromEntries(
       Object.entries(mac.scopes[p]?.records ?? {})
-        .filter(([key, r]) => r.v !== null && (rows || !key.startsWith("pinrow:")))
-        .map(([key, r]) => [key, JSON.stringify(loose.has(`${p}|${key}`) ? { ...r.v, u: undefined, ti: undefined } : r.v)])
+        .filter(([, r]) => r.v !== null)
+        .map(([key, r]) => [key, JSON.stringify(r.v)])
         .sort(([x], [z]) => (x < z ? -1 : 1)),
     );
   return out;
@@ -473,63 +468,29 @@ async function runPair(startRow, opA, opB, schedule) {
   const w = { folder, a: base.a.fork(folder), b: base.b.fork(folder), k: { ...base.k, done: new Set() } };
   w.k.macs = { [w.a.id]: w.a, [w.b.id]: w.b };
   const later = await SCHEDULES[schedule](w, opA, opB);
-  const macs = [w.a, w.b, ...(w.c ? [w.c] : []), ...(w.withOld ? [base.old.fork(folder)] : [])];
+  const macs = [w.a, w.b, ...(w.c ? [w.c] : [])];
   for (let i = 0; i < 4; i++) for (const m of macs) await m.sync();
-  const stamps = () => macs.map((m) => Object.fromEntries(PROFILES.flatMap((p) => Object.entries(m.scopes[p]?.records ?? {}).map(([key, r]) => [`${p}|${key}`, r.h]))));
-  const before = stamps();
   let idle = 0;
   for (const m of macs) idle += await m.sync();
-  const after = stamps();
-  const resent = new Set(after.flatMap((st, i) => Object.keys(st).filter((key) => st[key] !== before[i][key])));
-  const pingPong = (scoped, among = macs) => {
-    const [p, key] = scoped.split("|");
-    if (!key.startsWith("pin:t:")) return false;
-    const pages = new Set();
-    let holders = 0;
-    for (const m of among) m.with(() => {
-      const shown = Object.values(S().tabs).filter((t) => t.profileId === p && keyOf(t) === key.slice(6) && inContainer(S(), t) && !t.unloaded);
-      if (shown.length) holders++;
-      for (const t of shown) pages.add(`${t.url}|${t.title}`);
-    });
-    return holders >= 2 && pages.size >= 2;
-  };
-  if (idle && [...resent].every((key) => pingPong(key))) idle = 0;
   const resentBy = async (among) => {
-    const was = among.map((m) => Object.fromEntries(PROFILES.flatMap((p) => Object.entries(m.scopes[p]?.records ?? {}).map(([key, r]) => [`${p}|${key}`, r.h]))));
     let sent = 0;
     for (const m of among) sent += await m.sync();
-    const now = among.map((m) => Object.fromEntries(PROFILES.flatMap((p) => Object.entries(m.scopes[p]?.records ?? {}).map(([key, r]) => [`${p}|${key}`, r.h]))));
-    return sent > 0 && !now.flatMap((st, i) => Object.keys(st).filter((key) => st[key] !== was[i][key])).every((key) => pingPong(key, among));
+    return sent > 0;
   };
-  const looseAmong = (among) => new Set(among.flatMap((m) => PROFILES.flatMap((p) => Object.keys(m.scopes[p]?.records ?? {}).map((key) => `${p}|${key}`))).filter((key) => pingPong(key, among)));
-  const loose = looseAmong(macs);
   for (const m of macs) structure(m);
   assert.deepEqual(signature(w.b), signature(w.a), "both Macs converge");
-  assert.deepEqual(records(w.b, { loose }), records(w.a, { loose }), "both Macs hold the same records");
+  assert.deepEqual(records(w.b), records(w.a), "both Macs hold the same records");
   if (w.c) {
     assert.deepEqual(signature(w.c), signature(w.a), "the Mac that joined from the snapshot converges");
-    assert.deepEqual(records(w.c, { loose }), records(w.a, { loose }), "and holds the same records");
+    assert.deepEqual(records(w.c), records(w.a), "and holds the same records");
   }
   assert.equal(idle, 0, "nothing more is sent once settled");
-  for (const p of PROFILES) {
-    const live = records(w.a)[p];
-    for (const [key, json] of Object.entries(live)) {
-      const g = key.startsWith("pin:t:") && JSON.parse(json).g;
-      if (g) assert.ok(live[`pin:g:${g}`], `${key} is in a group that exists`);
-    }
-  }
-  if (w.withOld) {
-    const old = macs.at(-1);
-    assert.deepEqual(signature(old, { rows: false }), signature(w.a, { rows: false }), "the older Mac converges, rows as tiles");
-    assert.deepEqual(records(old, { rows: false, loose }), records(w.a, { rows: false, loose }), "and holds the same pin records");
-  }
   if (schedule === "B's log delayed") {
     const fresh = freshMac("devC", folder);
     for (let i = 0; i < 3; i++) for (const m of [fresh, w.a, w.b]) await m.sync();
     assert.deepEqual(signature(fresh), signature(w.a), "a Mac joining afterwards gets the same pins");
-    const joined = looseAmong([fresh, w.a, w.b]);
-    assert.deepEqual(records(fresh, { loose: joined }), records(w.a, { loose: joined }), "and the same records");
-    assert.equal(await resentBy([fresh, w.a, w.b]), false, "and nothing is sent once it has joined, except pages two Macs show differently");
+    assert.deepEqual(records(fresh), records(w.a), "and the same records");
+    assert.equal(await resentBy([fresh, w.a, w.b]), false, "and nothing is sent once it has joined");
   }
   const removed = new Set([...(did(w.k, opA, w.a) ? (opA.unpins ?? []) : []), ...(did(w.k, opB, w.b) ? (opB.unpins ?? []) : [])]);
   for (const m of [w.a, w.b]) {
@@ -578,25 +539,25 @@ test(`concurrent pinned-tab edits on two Macs converge (${cases.length} runs)`, 
   assert.equal(failures.length, 0, `${failures.length} runs failed:\n${failures.slice(0, 40).join("\n")}`);
 });
 
-test("a pin waiting for a group that never arrives stands alone once the wait is over, even on an idle Mac", async () => {
+test("a pinned tab whose folder never arrives shows as a pin and keeps its folder, even after the 90-day hold and a relaunch", async () => {
   wall += DAY;
   const folder = new Folder();
   const b = freshMac("waitB", folder);
   const remote = new Clock("remote", null, () => wall);
-  const value = { g: "never-seen", u: "https://wait.example/", t: null, i: null, ti: "Wait", pos: "V" };
-  await folder.transport().write("p:default", JSON.stringify({ v: 1, kind: "log", device: "remote", seq: 1, at: wall, ops: [{ k: "pin:t:wait", h: remote.tick(), v: value }] }));
+  const value = { kind: "tab", parent: "g:never-seen", pos: "V", url: "https://wait.example/", title: "Wait", customTitle: null, customIcon: null };
+  await folder.transport().write("p:default", JSON.stringify({ v: 1, kind: "log", device: "remote", seq: 1, at: wall, ops: [{ k: "pt:n:t:wait", h: remote.tick(), v: value }] }));
   await b.sync();
-  assert.equal(record(b, "default", "pin:t:wait").g, "never-seen", "it waits at first");
+  assert.equal(record(b, "default", "pt:n:t:wait").parent, "g:never-seen", "it keeps its folder at first");
   b.relaunch();
   wall += 89 * DAY;
   await b.sync();
-  assert.equal(record(b, "default", "pin:t:wait").g, "never-seen", "still waiting within the 90-day hold");
+  assert.equal(record(b, "default", "pt:n:t:wait").parent, "g:never-seen", "and within the 90-day hold");
   wall += 2 * DAY;
   for (let i = 0; i < 3; i++) await b.sync();
-  assert.equal(record(b, "default", "pin:t:wait").g, null, "it stops waiting without any new change");
+  assert.equal(record(b, "default", "pt:n:t:wait").parent, "g:never-seen", "and after it, without any new change");
   b.relaunch();
   await b.sync();
-  assert.equal(record(b, "default", "pin:t:wait").g, null, "and stays a standalone pin after a relaunch");
+  assert.equal(record(b, "default", "pt:n:t:wait").parent, "g:never-seen", "and after a relaunch");
   b.with(() => assert.ok(tabFor("wait")?.pinned, "shown as a pin"));
 });
 
@@ -649,7 +610,7 @@ const PAGE_CASES = {
     }
     return { key: k.M, page: "https://m.example/unsent-copy" };
   },
-  "a third window copied from a copy another window's page matches": async ({ a, b, k }, variant) => {
+  "a third window copied from a copy whose page matches another window's keeps the later canonical page": async ({ a, b, k }, variant) => {
     const P = "https://m.example/p";
     const Q = "https://m.example/q";
     let w1;
@@ -677,7 +638,7 @@ const PAGE_CASES = {
       a.with(() => S().updateTab(tabFor(k.M).id, { customTitle: "Renamed" }));
       await a.sync();
     }
-    return { key: k.M, page: Q };
+    return { key: k.M, page: P };
   },
   "a new group's mirror navigated before its first sync": async ({ a, b }, variant) => {
     const P = "https://p.example/";
@@ -706,7 +667,7 @@ const PAGE_CASES = {
     b.with(() => S().setFocusedWindow(w2));
     return { key, page: Q };
   },
-  "a member navigated and unpinned, then re-pinned into a group elsewhere": async ({ a, b, k }) => {
+  "a member navigated and unpinned before it was sent, then re-pinned into a group elsewhere, keeps the re-pinning Mac's page": async ({ a, b, k }) => {
     const Q = "https://m.example/before-unpin";
     b.with(() => {
       navigate(k.M, Q);
@@ -714,10 +675,12 @@ const PAGE_CASES = {
     });
     await b.sync();
     await a.sync();
+    const kept = a.with(() => Object.values(S().tabs).find((x) => keyOf(x) === k.M).url);
     a.with(() => S().groupTabs([Object.values(S().tabs).find((x) => keyOf(x) === k.M).id], { pinned: true, name: "Again" }));
     await a.sync();
     await b.sync();
-    return { key: k.M, page: Q };
+    assert.notEqual(kept, Q, "A never received the page B left before unpinning");
+    return { key: k.M, page: kept };
   },
   "a tile navigated and synced, then moved into a pinned group": async ({ b, k }) => {
     const Q = "https://x.example/navigated";
@@ -738,28 +701,23 @@ const PAGE_CASES = {
 };
 
 for (const [name, run] of Object.entries(PAGE_CASES)) {
-  test(`a page change publishes as in 0.2.38: ${name}`, async () => {
+  test(`a page change settles in the record: ${name}`, async () => {
     for (const variant of [false, true]) {
-      const outcomes = [];
-      for (const shipped of [true, false]) {
-        const base = await world(false);
-        wall = base.wall;
-        const folder = base.folder.clone();
-        const a = base.a.fork(folder);
-        const b = base.b.fork(folder);
-        b.legacy = shipped;
-        const { key, page } = await run({ a, b, k: base.k }, variant);
-        await b.sync();
-        await a.sync();
-        outcomes.push([record(b, "default", `pin:t:${key}`)?.u, record(a, "default", `pin:t:${key}`)?.u]);
-        if (!variant) assert.deepEqual(outcomes.at(-1), [page, page], `${shipped ? "0.2.38" : "this build"}: the page is sent and reaches the other Mac`);
-      }
-      assert.deepEqual(outcomes[1], outcomes[0], `same outcome as 0.2.38${variant ? " with an edit from the other Mac" : ""}`);
+      const base = await world(false);
+      wall = base.wall;
+      const folder = base.folder.clone();
+      const a = base.a.fork(folder);
+      const b = base.b.fork(folder);
+      const { key, page } = await run({ a, b, k: base.k }, variant);
+      await b.sync();
+      await a.sync();
+      const outcome = [record(b, "default", `pt:n:t:${key}`)?.url, record(a, "default", `pt:n:t:${key}`)?.url];
+      if (!variant) assert.deepEqual(outcome, [page, page], "both Macs hold the canonical page in the record");
     }
   });
 }
 
-test("known residual: two Macs with a pin loaded at different pages keep sending their pages", async () => {
+test("two Macs with a pin loaded at different pages settle on one page in its record and keep both pages open", async () => {
   const base = await world(false);
   wall = base.wall;
   const folder = base.folder.clone();
@@ -768,9 +726,13 @@ test("known residual: two Macs with a pin loaded at different pages keep sending
   const k = base.k;
   a.with(() => navigate(k.M, "https://m.example/on-a"));
   b.with(() => navigate(k.M, "https://m.example/on-b"));
-  const seen = new Set();
-  for (let i = 0; i < 4; i++) for (const m of [a, b]) (await m.sync(), seen.add(record(m, "default", `pin:t:${k.M}`).u));
-  assert.deepEqual([...seen].sort(), ["https://m.example/on-a", "https://m.example/on-b"], "documented in docs/sync.md: each sync sends its own page, as in 0.2.38");
+  for (let i = 0; i < 4; i++) for (const m of [a, b]) await m.sync();
+  const settled = record(a, "default", `pt:n:t:${k.M}`).url;
+  assert.equal(record(b, "default", `pt:n:t:${k.M}`).url, settled, "both Macs hold the same page in its record");
+  assert.ok(["https://m.example/on-a", "https://m.example/on-b"].includes(settled), "one of the two pages");
+  assert.equal((await a.sync()) + (await b.sync()), 0, "and nothing more is sent");
+  assert.equal(a.with(() => tabFor(k.M).url), "https://m.example/on-a", "A keeps its page open");
+  assert.equal(b.with(() => tabFor(k.M).url), "https://m.example/on-b", "and so does B");
   for (const m of [a, b]) m.with(() => assert.ok(inPinnedGroup(k.M), `${m.id}: nothing is lost`));
 });
 
@@ -860,7 +822,7 @@ test("known residual: a Mac joining from a snapshot during a gap holds tombstone
   for (const id of second) folder.files.delete(id);
   const c = freshMac("lateC", folder);
   await c.sync();
-  assert.equal(c.scopes.default.records[`pin:t:${key}`]?.v, null, "C has the tombstone from B's snapshot");
+  assert.equal(c.scopes.default.records[`pt:n:t:${key}`]?.v, null, "C has the tombstone from B's snapshot");
   assert.deepEqual(c.scopes.default.extra, {}, "but not B's gap");
   await c.compact(0);
   folder.hidden.clear();

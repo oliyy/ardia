@@ -1,5 +1,6 @@
 import { writeDocument } from "@ardia/shell";
 import { sidebarEntries } from "../components/sidebar/entries";
+import { pinnedRoot } from "../components/sidebar/pinnedTree";
 import { rowIds, rowView } from "../components/sidebar/state";
 import { useBrowser } from "../store/browser";
 
@@ -36,8 +37,9 @@ function missingRows(): string[] {
   for (const windowId of s.windowOrder) {
     const w = s.windows[windowId];
     if (!w || !w.sidebarOpen) continue;
-    const { tiles, pinned, list } = sidebarEntries(s, windowId, w.profileId);
-    const ids = [...tiles, ...[...pinned, ...list].map((e) => (e.startsWith("s:") ? e : e.slice(2)))];
+    const { tiles, list } = sidebarEntries(s, windowId, w.profileId);
+    const rowOf = (e: string) => (e.startsWith("s:") ? e : e.startsWith("l:") ? `livefolder|${e.slice(2)}` : e.slice(2));
+    const ids = [...tiles, ...pinnedRoot(s, windowId, w.profileId).map(rowOf), ...list.map(rowOf)];
     for (const id of ids) if (!rowView(windowId, id)) missing.push(`${windowId}|${id}`);
   }
   return missing;

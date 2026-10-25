@@ -10,6 +10,7 @@ import { MAX_DRAFT_LINKS } from "../../store/draftGroups";
 import { plural } from "../../store/model";
 import type { ProfileColor } from "../../store/types";
 import { useHover } from "../primitives";
+import { arcIconImage, arcSpaceIcon, isEmojiIcon } from "../profiles/icons";
 import { Button, Checkbox, PopUp, useFormColors } from "../settings/controls";
 import { useOnboarding } from "../onboarding/state";
 import { IMPORT_WINDOW_ID, takePreferredImportSource } from "../settings/windows";
@@ -177,8 +178,12 @@ export function ImportWindow() {
     }
   };
 
-  const destination = async (index: number, name: string, color?: string, emoji?: string, shareWith?: string | null): Promise<string> => {
-    if (index === 0) return target;
+  const destination = async (index: number, name: string, color?: string, icon: string | null = null, shareWith?: string | null): Promise<string> => {
+    if (index === 0) {
+      const current = useBrowser.getState().profiles[target];
+      if (icon && current && !current.icon) useBrowser.getState().updateProfile(target, { icon });
+      return target;
+    }
     const s = useBrowser.getState();
     const clash = s.profileOrder.find((id) => s.profiles[id]!.name.trim().toLowerCase() === name.trim().toLowerCase());
     if (clash) {
@@ -191,7 +196,7 @@ export function ImportWindow() {
       });
       if (!confirmed) return clash;
     }
-    return s.createProfile({ name, color: profileColorFor(color) as ProfileColor | undefined, icon: emoji ?? null, shareWith });
+    return s.createProfile({ name, color: profileColorFor(color) as ProfileColor | undefined, icon, shareWith });
   };
 
   const run = async (wanted: Set<ImportKind>, withoutKey = false) => {
@@ -247,7 +252,7 @@ export function ImportWindow() {
         let first: string | null = null;
         for (const space of profileSpaces) {
           const name = space.name || "Space";
-          const dest = await destination(destinationIndex++, name, space.color, space.emoji, first);
+          const dest = await destination(destinationIndex++, name, space.color, arcSpaceIcon(space), first);
           first ??= dest;
           const r = importArcSpace(dest, space, result.favicons);
           add({ ...emptyCounts(), tabs: r.tabs, bookmarks: r.bookmarks });
@@ -1025,9 +1030,17 @@ function Monogram({ name, color }: { name: string; color?: string }) {
 }
 
 function SpaceIcon({ space }: { space: SpaceSummary }) {
+  const icon = arcSpaceIcon(space);
+  const arcImage = arcIconImage(icon);
   return (
     <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: space.color ?? "#8E8E93", alignItems: "center", justifyContent: "center" }}>
-      {space.emoji ? <Text style={{ fontSize: 15 }}>{space.emoji}</Text> : <Symbol name="square.stack" size={12} color="#FFFFFF" style={{ width: 16, height: 16 }} />}
+      {arcImage ? (
+        <Image source={arcImage} style={{ width: 14, height: 14, tintColor: "#FFFFFF" }} />
+      ) : isEmojiIcon(icon) ? (
+        <Text style={{ fontSize: 15 }}>{icon}</Text>
+      ) : (
+        <Symbol name="square.stack" size={12} color="#FFFFFF" style={{ width: 16, height: 16 }} />
+      )}
     </View>
   );
 }

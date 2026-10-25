@@ -1,5 +1,5 @@
 import { breadcrumb, urlForDisplay } from "@ardia/core";
-import { ContextMenuArea, FadeLabel, MouseArea, Symbol, WindowDragRegion } from "@ardia/shell";
+import { ArcUrlFieldBackground, ArcUrlFieldText, ArcUrlInsecureIcon, ContextMenuArea, MouseArea, Symbol, WindowDragRegion, type SymbolProps } from "@ardia/shell";
 import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Animated, Easing, Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
@@ -36,6 +36,15 @@ export const URL_FIELD = { top: 21.2 - 15, height: 30 } as const;
 export const GLYPH = 13;
 export const urlFieldRight = (inSplit: boolean, extensionsWidth: number) => (inSplit ? 12 + 2 * 28 : 12) + extensionsWidth;
 const LOCK = { left: 7, width: 18, gap: 3 } as const;
+const ARC_INSECURE_ICON = 22;
+const SIDEBAR_URL = { lightText: "#00000099", darkText: "#FFFFFF99" } as const;
+const HOVER_BUTTON_BOX = 24;
+const RAW_WEB_AUTHORITY = /^https?:\/\/([^/?#]*)/i;
+function urlTextAlignment(url: string): "leading" | "trailing" {
+  const authority = RAW_WEB_AUTHORITY.exec(url)?.[1] ?? "";
+  const host = authority.slice(authority.lastIndexOf("@") + 1).replace(/:\d*$/, "");
+  return host ? "trailing" : "leading";
+}
 export const urlTextLeft = (insecure: boolean) => (insecure ? LOCK.left + LOCK.width + LOCK.gap : 8);
 export const insecureLevel = (p: PageState) =>
   p.security && (p.security.level === "insecure" || p.security.level === "certificateError") ? p.security.level : null;
@@ -144,6 +153,9 @@ export const ReloadButton = memo(function ReloadButton({
   style,
   hit,
   onFocus,
+  size = GLYPH,
+  weight = "regular",
+  inactiveOpacity,
 }: {
   tab: Pick<Tab, "id" | "url" | "windowId">;
   loading: boolean;
@@ -151,6 +163,9 @@ export const ReloadButton = memo(function ReloadButton({
   style?: ViewStyle;
   hit?: ButtonHit;
   onFocus: () => void;
+  size?: number;
+  weight?: SymbolProps["weight"];
+  inactiveOpacity?: number;
 }) {
   const web = () => webviews.get(tab.id);
   return (
@@ -158,7 +173,9 @@ export const ReloadButton = memo(function ReloadButton({
       style={style}
       palette={palette}
       icon={loading ? "xmark" : "arrow.clockwise"}
-      size={GLYPH}
+      size={size}
+      weight={weight}
+      inactiveOpacity={inactiveOpacity}
       hit={hit}
       disabled={!tab.url}
       onPress={(m) => {
@@ -208,7 +225,11 @@ export const HistoryButton = memo(function HistoryButton({
   palette,
   style,
   hit,
+  icon,
   onFocus,
+  size = GLYPH,
+  weight = "regular",
+  inactiveOpacity,
 }: {
   tabId: string;
   windowId: string;
@@ -217,7 +238,11 @@ export const HistoryButton = memo(function HistoryButton({
   palette: ToolbarPalette;
   style?: object;
   hit?: ButtonHit;
+  icon?: string;
   onFocus: () => void;
+  size?: number;
+  weight?: SymbolProps["weight"];
+  inactiveOpacity?: number;
 }) {
   const openMenu = () => {
     onFocus();
@@ -237,8 +262,10 @@ export const HistoryButton = memo(function HistoryButton({
     <MouseArea style={style} onMiddleClick={(e) => !disabled && void onPress({ ...e, middle: true })}>
       <ToolbarButton
         palette={palette}
-        icon={direction < 0 ? "chevron.left" : "chevron.right"}
-        size={GLYPH}
+        icon={icon ?? (direction < 0 ? "chevron.left" : "chevron.right")}
+        size={size}
+        weight={weight}
+        inactiveOpacity={inactiveOpacity}
         hit={hit}
         disabled={disabled}
         onPress={onPress}
@@ -287,6 +314,7 @@ export const UrlField = memo(function UrlField({
     setPopover(tab.id, currentPopover(tab.id) === "siteControls" ? null : "siteControls");
   };
   const { hovered: pointerOver, hoverProps } = useHover();
+  const arcInsecure = Boolean(sidebar) && insecure === "insecure";
   const popover = usePages((p) => p.popover[tab.id] ?? null);
   const hovered = pointerOver || popover === "siteControls";
   const isFile = tab.url.startsWith("file:");
@@ -295,6 +323,7 @@ export const UrlField = memo(function UrlField({
   const path = !isFile && full.startsWith(host) ? full.slice(host.length) : full;
   const web = isWebUrl(tab.url);
   const trail = hovered ? path : showFullUrl ? path.replace(/\/$/, "") : !web && tab.title ? ` / ${tab.title}` : "";
+  const hoverButtons = sidebar && hovered ? 2 * HOVER_BUTTON_BOX : 0;
 
   return (
     <View
@@ -306,22 +335,22 @@ export const UrlField = memo(function UrlField({
           ? {
               height: sidebar.height,
               borderRadius: SIDEBAR_FIELD.radius,
-              borderWidth: StyleSheet.hairlineWidth * 2,
-              borderColor: liquidGlass ? "transparent" : theme.pinnedRestingStroke,
-              backgroundColor: liquidGlass ? undefined : hovered ? theme.tabHover : theme.pinnedResting,
+              borderCurve: "continuous" as const,
               overflow: "hidden",
             }
           : { height: 30, borderRadius: 8, backgroundColor: hovered && !liquidGlass ? palette.pill : undefined },
       ]}
     >
-      {liquidGlass ? (
-        sidebar ? (
-          <GlassFill tint={null} opacity={hovered ? FIELD_GLASS_HOVER_OPACITY : FIELD_GLASS_OPACITY} radius={SIDEBAR_FIELD.radius} border={StyleSheet.hairlineWidth * 2} fill={theme.pinnedResting} />
-        ) : (
-          <GlassFill tint={null} opacity={hovered ? FIELD_GLASS_HOVER_OPACITY : FIELD_GLASS_OPACITY} radius={8} fill={palette.pill} dark={palette.background ? palette.text.startsWith("#FFFFFF") : undefined} />
-        )
+      {sidebar ? <ArcUrlFieldBackground dark={theme.dark} hovered={hovered} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
+      {liquidGlass && !sidebar ? (
+        <GlassFill tint={null} opacity={hovered ? FIELD_GLASS_HOVER_OPACITY : FIELD_GLASS_OPACITY} radius={8} fill={palette.pill} dark={palette.background ? palette.text.startsWith("#FFFFFF") : undefined} />
       ) : null}
-      {insecure && (
+      {arcInsecure ? (
+        <Pressable onPress={toggleSiteControls} accessibilityRole="button" accessibilityLabel="Connection is not secure" style={{ paddingLeft: LOCK.left }} tooltip="Connection is not secure">
+          <InsecureLock dark={theme.dark} />
+        </Pressable>
+      ) : null}
+      {insecure && !arcInsecure && (
         <Pressable onPress={toggleSiteControls} style={{ paddingLeft: LOCK.left }} tooltip="Connection is not secure">
           <Symbol
             name="lock.open.trianglebadge.exclamationmark.fill"
@@ -332,20 +361,16 @@ export const UrlField = memo(function UrlField({
         </Pressable>
       )}
       <ContextMenuArea style={{ flex: 1 }} onContextMenu={() => void showUrlBarMenu(tab)}>
-      <Pressable onPress={() => openPanel(tab.url)} style={{ flex: 1, height: sidebar?.height ?? 30, justifyContent: "center", paddingLeft: insecure ? LOCK.gap : sidebar ? 10 : urlTextLeft(false) }}>
+      <Pressable onPress={() => openPanel(tab.url)} style={{ flex: 1, height: sidebar?.height ?? 30, justifyContent: "center", paddingLeft: insecure ? LOCK.gap : sidebar ? SIDEBAR_FIELD.textLeft : urlTextLeft(false) }}>
         {sidebar ? (
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 13, fontWeight: "500", color: palette.text }}>
-              {host}
-            </Text>
-            <FadeLabel
-              text={trail}
-              fontSize={13}
-              color={palette.secondary}
-              fadeWidth={14}
-              style={{ flex: 1, height: 18, marginLeft: -2 }}
-            />
-          </View>
+          <ArcUrlFieldText
+            text={host + trail}
+            alignment={urlTextAlignment(tab.url)}
+            color={theme.dark ? SIDEBAR_URL.darkText : SIDEBAR_URL.lightText}
+            hoverButtonsWidth={hoverButtons}
+            pointerEvents="none"
+            style={{ position: "absolute", left: insecure ? LOCK.gap : SIDEBAR_FIELD.textLeft, right: -hoverButtons, top: 0, bottom: 0 }}
+          />
         ) : (
           <Text numberOfLines={1} style={{ fontSize: 13, color: palette.text }}>
             <Text style={{ fontWeight: "500" }}>{host}</Text>
@@ -375,19 +400,19 @@ export const UrlField = memo(function UrlField({
         )}
         {hovered && (
           <>
-            <ToolbarButton palette={palette} icon={bookmarked ? "bookmark.fill" : "bookmark"} size={13} box={24} radius={6} onPress={toggleBookmark} tooltip={bookmarked ? "Remove Bookmark" : "Bookmark This Page (⌘D)"} />
+            <ToolbarButton palette={palette} icon={bookmarked ? "bookmark.fill" : "bookmark"} size={13} box={HOVER_BUTTON_BOX} radius={6} onPress={toggleBookmark} tooltip={bookmarked ? "Remove Bookmark" : "Bookmark This Page (⌘D)"} />
             {!inSplit && !sidebar && (
               <ToolbarButton
                 palette={palette}
                 icon="rectangle.split.2x1"
                 size={13}
-                box={24}
+                box={HOVER_BUTTON_BOX}
                 radius={6}
                 onPress={() => openSplitPane(windowId, { anchorTabId: tab.id })}
                 tooltip="Open Split View (⌃⇧=)"
               />
             )}
-            <ToolbarButton palette={palette} icon="slider.horizontal.3" size={13} box={24} radius={6} onPress={toggleSiteControls} active={popover === "siteControls"} tooltip="Site Controls" />
+            <ToolbarButton palette={palette} icon="slider.horizontal.3" size={13} box={HOVER_BUTTON_BOX} radius={6} onPress={toggleSiteControls} active={popover === "siteControls"} tooltip="Site Controls" />
           </>
         )}
         {sidebar?.accessory}
@@ -396,6 +421,15 @@ export const UrlField = memo(function UrlField({
     </View>
   );
 });
+
+function InsecureLock({ dark }: { dark: boolean }) {
+  const { hovered, hoverProps } = useHover();
+  return (
+    <View {...hoverProps} style={{ width: ARC_INSECURE_ICON, height: ARC_INSECURE_ICON }}>
+      <ArcUrlInsecureIcon dark={dark} hovered={hovered} pointerEvents="none" style={StyleSheet.absoluteFill} />
+    </View>
+  );
+}
 
 function CaptureIndicator({ camera, microphone, screen, onPress }: { camera: boolean; microphone: boolean; screen: boolean; onPress: () => void }) {
   const icon = screen ? "rectangle.inset.filled.on.rectangle" : camera ? "video.fill" : "mic.fill";

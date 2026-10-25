@@ -13,11 +13,16 @@ public final class SyncVault {
   }
 
   public var chainURL: URL { folder.appendingPathComponent(keys.chainTag, isDirectory: true) }
+  var previousChainURL: URL { folder.appendingPathComponent(keys.previousChainTag, isDirectory: true) }
   func scopeURL(_ scope: String) -> URL { chainURL.appendingPathComponent(keys.scopeTag(scope), isDirectory: true) }
 
-  public func chainExists() -> Bool {
+  public func chainExists() -> Bool { directoryExists(chainURL) }
+
+  public func previousChainExists() -> Bool { directoryExists(previousChainURL) }
+
+  private func directoryExists(_ url: URL) -> Bool {
     var isDirectory: ObjCBool = false
-    return fileManager.fileExists(atPath: chainURL.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
   }
 
   public func createChain() throws {
@@ -52,8 +57,9 @@ public final class SyncVault {
   }
 
   public func deleteChain() throws {
-    guard chainExists() else { return }
-    try coordinate(writing: chainURL, options: .forDeleting) { url in try self.fileManager.removeItem(at: url) }
+    for url in [chainURL, previousChainURL] where directoryExists(url) {
+      try coordinate(writing: url, options: .forDeleting) { url in try self.fileManager.removeItem(at: url) }
+    }
   }
 
   public struct File {
@@ -68,11 +74,11 @@ public final class SyncVault {
     public var present: [String] = []
   }
 
-  public func read(scope: String, skipping known: Set<String>) -> Listing {
+  public func read(scope: String, skipping known: Set<String>) throws -> Listing {
     var listing = Listing()
     let directory = scopeURL(scope)
     let keysToRead: [URLResourceKey] = [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey, .contentModificationDateKey]
-    guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return listing }
+    guard let names = try scopeEntries(scope) else { return listing }
     let suffix = ".\(Self.fileExtension)"
     let scopeTag = keys.scopeTag(scope)
     for name in names.sorted() {
@@ -107,6 +113,17 @@ public final class SyncVault {
       }
     }
     return listing
+  }
+
+  private func scopeEntries(_ scope: String) throws -> [String]? {
+    do {
+      return try fileManager.contentsOfDirectory(atPath: scopeURL(scope).path)
+    } catch {
+      let tag = keys.scopeTag(scope)
+      let chainEntries = try fileManager.contentsOfDirectory(atPath: chainURL.path)
+      if chainEntries.contains(where: { $0 == tag || $0.hasPrefix(".\(tag).") }) { throw error }
+      return nil
+    }
   }
 
   private func coordinate(writing url: URL, options: NSFileCoordinator.WritingOptions, _ body: (URL) throws -> Void) throws {

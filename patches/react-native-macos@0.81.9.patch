@@ -1,3 +1,42 @@
+diff --git a/Libraries/Components/TextInput/RCTSingelineTextInputNativeComponent.js b/Libraries/Components/TextInput/RCTSingelineTextInputNativeComponent.js
+index 470f59a5317a019f8cbb57547b6ebb8af6031845..e9520cda2d594afd073a13ef596a95c46f79bf19 100644
+--- a/Libraries/Components/TextInput/RCTSingelineTextInputNativeComponent.js
++++ b/Libraries/Components/TextInput/RCTSingelineTextInputNativeComponent.js
+@@ -27,6 +27,10 @@ export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
+ export const __INTERNAL_VIEW_CONFIG: PartialViewConfig = {
+   uiViewClassName: 'RCTSinglelineTextInputView',
+   ...RCTTextInputViewConfig,
++  validAttributes: {
++    ...RCTTextInputViewConfig.validAttributes,
++    ardiaEditorStyle: true,
++  },
+ };
+ 
+ const SinglelineTextInputNativeComponent: HostComponent<{...}> =
+diff --git a/Libraries/Components/TextInput/TextInput.d.ts b/Libraries/Components/TextInput/TextInput.d.ts
+index 88f53ca8437b40c8404cda8a73c20e3f624f32a5..df6c7dcedee4cfc3952758455d0df5ff706aa878 100644
+--- a/Libraries/Components/TextInput/TextInput.d.ts
++++ b/Libraries/Components/TextInput/TextInput.d.ts
+@@ -1054,6 +1054,19 @@ export interface TextInputProps
+    */
+   selectionColor?: ColorValue | undefined;
+ 
++  ardiaEditorStyle?:
++    | {
++        appearance: 'light' | 'dark';
++        selectionColor?:
++          | {
++              light: {r: number; g: number; b: number; a: number};
++              dark: {r: number; g: number; b: number; a: number};
++            }
++          | undefined;
++      }
++    | null
++    | undefined;
++
+   /**
+    * Styles
+    */
 diff --git a/Libraries/Text/TextInput/RCTBackedTextInputDelegateAdapter.mm b/Libraries/Text/TextInput/RCTBackedTextInputDelegateAdapter.mm
 index 18bbe64f657a36596563b3eb6d135284e28c674a..a4046a33e13d35cac155e306f368e04ef8d1f51e 100644
 --- a/Libraries/Text/TextInput/RCTBackedTextInputDelegateAdapter.mm
@@ -165,11 +204,224 @@ index cac171e70c9fa225cdec45b205086342a0d50f06..17c3a781c5243fdf33d0f03ea75ac123
  }
  
  - (void)reactBlur
+diff --git a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.h b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.h
+index 4846f7d7701bd2824028a90822885a8de8f5f6e2..b8a41e2de7bd57b17316ce5be99e7914973e57a1 100644
+--- a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.h
++++ b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.h
+@@ -11,6 +11,10 @@ NS_ASSUME_NONNULL_BEGIN
+ 
+ @interface RCTSinglelineTextInputView : RCTBaseTextInputView
+ 
++#if TARGET_OS_OSX
++@property (nonatomic, copy, nullable) NSDictionary *ardiaEditorStyle;
++#endif
++
+ @end
+ 
+ NS_ASSUME_NONNULL_END
+diff --git a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.mm b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.mm
+index 9973da7611fc92df7e66010350504bf077a9f2d9..31773c5420d3c7475890318d71fcdfdb22ab4bad 100644
+--- a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.mm
++++ b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputView.mm
+@@ -17,6 +17,9 @@
+ @implementation RCTSinglelineTextInputView {
+   RCTUITextField *_backedTextInputView;
+   BOOL _useSecureTextField; // [macOS]
++#if TARGET_OS_OSX
++  NSDictionary *_ardiaEditorStyle;
++#endif
+ }
+ 
+ - (instancetype)initWithBridge:(RCTBridge *)bridge
+@@ -87,10 +90,22 @@ - (void)setUseSecureTextField:(BOOL)useSecureTextField {
+     _backedTextInputView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+     _backedTextInputView.textInputDelegate = self;
+     _backedTextInputView.text = previousTextField.text;
++    _backedTextInputView.ardiaEditorStyle = _ardiaEditorStyle;
+     [self replaceSubview:previousTextField with:_backedTextInputView];
+   }
+ }
+ 
++- (void)setArdiaEditorStyle:(NSDictionary *)ardiaEditorStyle
++{
++  _ardiaEditorStyle = [ardiaEditorStyle copy];
++  _backedTextInputView.ardiaEditorStyle = _ardiaEditorStyle;
++}
++
++- (NSDictionary *)ardiaEditorStyle
++{
++  return _ardiaEditorStyle;
++}
++
+ - (void)setEnableFocusRing:(BOOL)enableFocusRing {
+   [super setEnableFocusRing:enableFocusRing];
+   if ([_backedTextInputView respondsToSelector:@selector(setEnableFocusRing:)]) {
+diff --git a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm
+index 386405335b411e70a82909033febc7dd5b4adabe..23b663148a3e897f836a18b7841249c915a09262 100644
+--- a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm
++++ b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm
+@@ -29,5 +29,6 @@ - (RCTPlatformView *)view // [macOS]
+ }
+ 
+ RCT_REMAP_OSX_VIEW_PROPERTY(secureTextEntry, useSecureTextField, BOOL) // [macOS]
++RCT_EXPORT_OSX_VIEW_PROPERTY(ardiaEditorStyle, NSDictionary)
+ 
+ @end
+diff --git a/Libraries/Text/TextInput/Singleline/RCTUITextField.h b/Libraries/Text/TextInput/Singleline/RCTUITextField.h
+index 61242af88da2f235e5ae506e79dfb9898742eb51..d942993deacd63a73a361fdb9f559c760ee14069 100644
+--- a/Libraries/Text/TextInput/Singleline/RCTUITextField.h
++++ b/Libraries/Text/TextInput/Singleline/RCTUITextField.h
+@@ -63,6 +63,7 @@ NS_ASSUME_NONNULL_BEGIN
+ @property (nonatomic, getter=isGrammarCheckingEnabled) BOOL grammarCheckingEnabled;
+ @property (nonatomic, assign) BOOL enableFocusRing;
+ @property (nonatomic, strong, nullable) RCTUIColor *selectionColor;
++@property (nonatomic, copy, nullable) NSDictionary *ardiaEditorStyle;
+ @property (weak, nullable) id<RCTUITextFieldDelegate> delegate;
+ @property (nonatomic, assign) CGFloat pointScaleFactor;
+ 
 diff --git a/Libraries/Text/TextInput/Singleline/RCTUITextField.mm b/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
-index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d0e39e4697737ae037fadc8d335aebfa0547c4b4 100644
+index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..885cc78c93208498431a82757df8c0e1420feb2d 100644
 --- a/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
 +++ b/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
-@@ -155,6 +155,11 @@ - (BOOL)hasMarkedText
+@@ -15,6 +15,8 @@
+ 
+ #import <React/RCTTouchHandler.h> // [macOS]
+ 
++#include <cmath>
++
+ #if TARGET_OS_OSX // [macOS
+ 
+ @interface RCTUITextFieldCell : NSTextFieldCell
+@@ -26,9 +28,74 @@ @interface RCTUITextFieldCell : NSTextFieldCell
+ @property (nonatomic, getter=isGrammarCheckingEnabled) BOOL grammarCheckingEnabled;
+ @property (nonatomic, strong, nullable) RCTUIColor *selectionColor;
+ @property (nonatomic, strong, nullable) RCTUIColor *insertionPointColor;
++@property (nonatomic, assign) BOOL ardiaEditorOptIn;
++@property (nonatomic, strong, nullable) NSColor *ardiaSelectionColor;
++@property (nonatomic, assign) BOOL ardiaSessionOwned;
++@property (nonatomic, copy, nullable) NSDictionary<NSAttributedStringKey, id> *ardiaSavedSelectionAttributes;
++@property (nonatomic, weak, nullable) NSTextView *ardiaSavedEditor;
++
++- (void)ardiaApplyEditorPolicy:(NSTextView *)fieldEditor;
++- (void)ardiaEndEditingSession;
+ 
+ @end
+ 
++static NSArray<NSNumber *> *RCTArdiaEditorComponents(id value)
++{
++  if (![value isKindOfClass:[NSDictionary class]]) {
++    return nil;
++  }
++  NSDictionary *color = value;
++  NSMutableArray<NSNumber *> *components = [NSMutableArray arrayWithCapacity:4];
++  for (NSString *key in @[ @"r", @"g", @"b", @"a" ]) {
++    id channel = color[key];
++    if (![channel isKindOfClass:[NSNumber class]] || CFGetTypeID((__bridge CFTypeRef)channel) == CFBooleanGetTypeID()) {
++      return nil;
++    }
++    double number = [channel doubleValue];
++    if (!std::isfinite(number)) {
++      return nil;
++    }
++    [components addObject:@(number)];
++  }
++  return [components copy];
++}
++
++static NSDictionary<NSString *, NSArray<NSNumber *> *> *RCTArdiaEditorCanonicalPair(id value)
++{
++  if (![value isKindOfClass:[NSDictionary class]]) {
++    return nil;
++  }
++  NSArray<NSNumber *> *light = RCTArdiaEditorComponents(((NSDictionary *)value)[@"light"]);
++  NSArray<NSNumber *> *dark = RCTArdiaEditorComponents(((NSDictionary *)value)[@"dark"]);
++  if (light == nil || dark == nil) {
++    return nil;
++  }
++  return @{@"light" : light, @"dark" : dark};
++}
++
++static NSColor *RCTArdiaEditorColor(NSArray<NSNumber *> *components)
++{
++  return [NSColor colorWithRed:components[0].doubleValue
++                         green:components[1].doubleValue
++                          blue:components[2].doubleValue
++                         alpha:components[3].doubleValue];
++}
++
++static NSColor *RCTArdiaEditorSelectionColor(NSDictionary<NSString *, NSArray<NSNumber *> *> *pair)
++{
++  if (pair == nil) {
++    return nil;
++  }
++  NSColor *light = RCTArdiaEditorColor(pair[@"light"]);
++  NSColor *dark = RCTArdiaEditorColor(pair[@"dark"]);
++  return [NSColor colorWithName:nil
++                dynamicProvider:^NSColor *(NSAppearance *appearance) {
++                  NSAppearanceName match =
++                      [appearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
++                  return [match isEqualToString:NSAppearanceNameDarkAqua] ? dark : light;
++                }];
++}
++
+ @implementation RCTUITextFieldCell
+ 
+ - (NSRect)titleRectForBounds:(NSRect)rect
+@@ -63,11 +130,42 @@ - (NSText *)setUpFieldEditorAttributes:(NSText *)textObj
+   fieldEditor.automaticTextReplacementEnabled = self.isAutomaticTextReplacementEnabled;
+   fieldEditor.continuousSpellCheckingEnabled = self.isContinuousSpellCheckingEnabled;
+   fieldEditor.grammarCheckingEnabled = self.isGrammarCheckingEnabled;
++  [self ardiaApplyEditorPolicy:fieldEditor];
++  return fieldEditor;
++}
++
++- (void)ardiaApplyEditorPolicy:(NSTextView *)fieldEditor
++{
++  if (self.ardiaEditorOptIn) {
++    if (self.ardiaSavedEditor != fieldEditor) {
++      self.ardiaSavedSelectionAttributes = fieldEditor.selectedTextAttributes;
++      self.ardiaSavedEditor = fieldEditor;
++    }
++    self.ardiaSessionOwned = YES;
++    fieldEditor.selectedTextAttributes = @{
++      NSBackgroundColorAttributeName : self.ardiaSelectionColor ?: [[NSColor controlAccentColor] colorWithAlphaComponent:0.3]
++    };
++    fieldEditor.insertionPointColor = nil;
++    return;
++  }
++  if (self.ardiaSavedSelectionAttributes != nil) {
++    if (self.ardiaSavedEditor == fieldEditor) {
++      fieldEditor.selectedTextAttributes = self.ardiaSavedSelectionAttributes;
++    }
++    self.ardiaSavedSelectionAttributes = nil;
++    self.ardiaSavedEditor = nil;
++  }
+   NSMutableDictionary *selectTextAttributes = fieldEditor.selectedTextAttributes.mutableCopy;
+   selectTextAttributes[NSBackgroundColorAttributeName] = self.selectionColor ?: [NSColor selectedControlColor];
+   fieldEditor.selectedTextAttributes = selectTextAttributes;
+   fieldEditor.insertionPointColor = self.insertionPointColor ?: [NSColor textColor];
+-  return fieldEditor;
++}
++
++- (void)ardiaEndEditingSession
++{
++  self.ardiaSavedSelectionAttributes = nil;
++  self.ardiaSavedEditor = nil;
++  self.ardiaSessionOwned = NO;
+ }
+ 
+ @end
+@@ -84,6 +182,9 @@ @implementation RCTUITextField {
+ #if TARGET_OS_OSX // [macOS
+   BOOL _isUpdatingPlaceholderText;
+   NSArray<NSPasteboardType> *_readablePasteboardTypes;
++  NSDictionary *_ardiaEditorStyle;
++  NSAppearanceName _ardiaAppearanceName;
++  NSDictionary *_ardiaSelectionPair;
+ #endif // macOS]
+ }
+ 
+@@ -155,6 +256,11 @@ - (BOOL)hasMarkedText
  	return ((NSTextView *)self.currentEditor).validAttributesForMarkedText ?: @[];
  }
  
@@ -181,7 +433,71 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d0e39e4697737ae037fadc8d335aebfa
  #endif // macOS]
  
  #pragma mark - Accessibility
-@@ -330,7 +335,9 @@ - (void)setPlaceholder:(NSString *)placeholder
+@@ -281,9 +387,63 @@ - (BOOL)isGrammarCheckingEnabled
+   return ((RCTUITextFieldCell*)self.cell).isGrammarCheckingEnabled;
+ }
+ 
++- (RCTUITextFieldCell *)ardiaEditorCell
++{
++  return [self.cell isKindOfClass:[RCTUITextFieldCell class]] ? (RCTUITextFieldCell *)self.cell : nil;
++}
++
++- (void)setArdiaEditorStyle:(NSDictionary *)ardiaEditorStyle
++{
++  _ardiaEditorStyle = [ardiaEditorStyle copy];
++  RCTUITextFieldCell *cell = [self ardiaEditorCell];
++  if (cell == nil) {
++    return;
++  }
++  NSAppearanceName appearanceName = nil;
++  NSDictionary<NSString *, NSArray<NSNumber *> *> *selectionPair = nil;
++  if ([ardiaEditorStyle isKindOfClass:[NSDictionary class]]) {
++    id appearance = ardiaEditorStyle[@"appearance"];
++    if ([appearance isEqual:@"dark"]) {
++      appearanceName = NSAppearanceNameDarkAqua;
++    } else if ([appearance isEqual:@"light"]) {
++      appearanceName = NSAppearanceNameAqua;
++    }
++    if (appearanceName != nil) {
++      selectionPair = RCTArdiaEditorCanonicalPair(ardiaEditorStyle[@"selectionColor"]);
++    }
++  }
++  BOOL appearanceChanged = !(appearanceName == _ardiaAppearanceName || [appearanceName isEqualToString:_ardiaAppearanceName]);
++  BOOL selectionChanged = !(selectionPair == _ardiaSelectionPair || [selectionPair isEqual:_ardiaSelectionPair]);
++  if (!appearanceChanged && !selectionChanged) {
++    return;
++  }
++  BOOL wasOptedIn = cell.ardiaEditorOptIn;
++  if (appearanceChanged) {
++    _ardiaAppearanceName = appearanceName;
++    self.appearance = appearanceName != nil ? [NSAppearance appearanceNamed:appearanceName] : nil;
++  }
++  if (selectionChanged) {
++    _ardiaSelectionPair = selectionPair;
++    cell.ardiaSelectionColor = RCTArdiaEditorSelectionColor(selectionPair);
++  }
++  cell.ardiaEditorOptIn = appearanceName != nil;
++  if (self.currentEditor != nil && (wasOptedIn != cell.ardiaEditorOptIn || selectionChanged)) {
++    [cell ardiaApplyEditorPolicy:(NSTextView *)self.currentEditor];
++  }
++}
++
++- (NSDictionary *)ardiaEditorStyle
++{
++  return _ardiaEditorStyle;
++}
++
+ - (void)setSelectionColor:(RCTUIColor *)selectionColor
+ {
+   ((RCTUITextFieldCell*)self.cell).selectionColor = selectionColor;
++  RCTUITextFieldCell *cell = [self ardiaEditorCell];
++  if (self.currentEditor != nil && (cell.ardiaEditorOptIn || cell.ardiaSessionOwned)) {
++    [cell ardiaApplyEditorPolicy:(NSTextView *)self.currentEditor];
++  }
+ }
+ 
+ - (RCTUIColor*)selectionColor
+@@ -330,7 +490,9 @@ - (void)setPlaceholder:(NSString *)placeholder
  #if !TARGET_OS_OSX // [macOS]
    [super setPlaceholder:placeholder];
  #else // [macOS
@@ -191,7 +507,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d0e39e4697737ae037fadc8d335aebfa
  #endif // macOS]
    [self _updatePlaceholder];
  }
-@@ -385,6 +392,9 @@ - (void)_updatePlaceholder
+@@ -385,6 +547,9 @@ - (void)_updatePlaceholder
    _isUpdatingPlaceholderText = YES;
    self.placeholderAttributedString = [[NSAttributedString alloc] initWithString:self.placeholder ?: @""
  																	 attributes:[self _placeholderTextAttributes]];
@@ -201,6 +517,15 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d0e39e4697737ae037fadc8d335aebfa
    _isUpdatingPlaceholderText = NO;
  #endif // macOS]
  }
+@@ -541,6 +706,8 @@ - (void)textDidEndEditing:(NSNotification *)notification
+     return;
+   }
+ 
++  [[self ardiaEditorCell] ardiaEndEditingSession];
++
+   id<RCTUITextFieldDelegate> delegate = self.delegate;
+   if ([delegate respondsToSelector:@selector(textFieldEndEditing:)]) {
+     [delegate textFieldEndEditing:self];
 diff --git a/Libraries/Text/TextInput/Singleline/macOS/RCTUISecureTextField.mm b/Libraries/Text/TextInput/Singleline/macOS/RCTUISecureTextField.mm
 index 6f332dc1701cada0aff0e9a2678fa7bdcea0ef85..462853ec8b76f004cd5b9e92291473bc673a7ed1 100644
 --- a/Libraries/Text/TextInput/Singleline/macOS/RCTUISecureTextField.mm

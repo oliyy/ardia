@@ -8,9 +8,11 @@ import { SOURCES } from "../../live/sources";
 import { hideItems, live, markRead, setLive, updateCalendarSettings, updateFolder } from "../../live/store";
 import type { LiveItem, LiveSourceId } from "../../live/types";
 import { useBrowser } from "../../store/browser";
+import { liveNode } from "../../store/pinTree";
 import { openSettings } from "../settings/windows";
 import { openIconPicker } from "./actions";
-import { LIVE, moveLiveFolder, pinnedSequence } from "./pinnedOrder";
+import { windowHierarchy } from "./entries";
+import { shownNodes } from "./pinnedTree";
 
 const sep = { separator: true } as const;
 
@@ -24,6 +26,30 @@ export function newLiveFolderMenuItem(): MenuItem {
       { id: "live:documents", title: "Documents", symbol: "doc.text" },
     ],
   };
+}
+
+export function removeLiveFolder(folderId: string) {
+  const profileId = live().folders[folderId]?.profileId;
+  deleteLiveFolder(folderId);
+  if (profileId) useBrowser.getState().dropPinned(profileId, [liveNode(folderId)]);
+}
+
+function livePlace(windowId: string, folderId: string) {
+  const s = useBrowser.getState();
+  const profileId = live().folders[folderId]?.profileId;
+  if (!profileId) return null;
+  const node = liveNode(folderId);
+  const parent = windowHierarchy(s, windowId, profileId).tree.parent.get(node) ?? null;
+  const siblings = shownNodes(s, windowId, profileId, parent);
+  return { profileId, node, parent, siblings, index: siblings.indexOf(node) };
+}
+
+function moveLiveFolder(windowId: string, folderId: string, delta: -1 | 1) {
+  const place = livePlace(windowId, folderId);
+  if (!place || place.index < 0) return;
+  const before = delta < 0 ? place.siblings[place.index - 1] : place.siblings[place.index + 2];
+  if (delta < 0 && !before) return;
+  useBrowser.getState().placePinned(place.profileId, [place.node], place.parent, before ?? null, place.siblings);
 }
 
 export function runNewLiveFolder(windowId: string, choice: string): boolean {
@@ -44,9 +70,8 @@ export async function openLiveFolderMenu(windowId: string, folderId: string) {
   const s = live();
   const folder = s.folders[folderId];
   if (!folder) return;
-  const b = useBrowser.getState();
-  const sequence = pinnedSequence(b, s.folders, s.folderOrder, windowId, folder.profileId);
-  const index = sequence.indexOf(`${LIVE}${folderId}`);
+  const place = livePlace(windowId, folderId);
+  const index = place?.index ?? -1;
   const pr = folder.kind === "pullRequests";
   const status = s.status[folderId];
   const choice = await showMenu([
@@ -79,7 +104,7 @@ export async function openLiveFolderMenu(windowId: string, folderId: string) {
     { id: "read", title: "Mark All as Read", symbol: "circle", enabled: (s.unread[folderId]?.length ?? 0) > 0 },
     { id: "collapse", title: folder.collapsed ? "Expand" : "Collapse", symbol: folder.collapsed ? "chevron.down" : "chevron.up" },
     { id: "up", title: "Move Up", enabled: index > 0 },
-    { id: "down", title: "Move Down", enabled: index >= 0 && index < sequence.length - 1 },
+    { id: "down", title: "Move Down", enabled: index >= 0 && index < (place?.siblings.length ?? 0) - 1 },
     sep,
     { id: "settings", title: "Live Folder Settings…", symbol: "gearshape" },
     { id: "delete", title: "Delete Live Folder", symbol: "trash" },
@@ -107,7 +132,7 @@ export async function openLiveFolderMenu(windowId: string, folderId: string) {
   else if (choice === "up") moveLiveFolder(windowId, folderId, -1);
   else if (choice === "down") moveLiveFolder(windowId, folderId, 1);
   else if (choice === "settings") openSettings("liveFolders");
-  else if (choice === "delete") deleteLiveFolder(folderId);
+  else if (choice === "delete") removeLiveFolder(folderId);
 }
 
 export async function openLiveItemMenu(windowId: string, folderId: string, item: LiveItem, tabId: string | null) {

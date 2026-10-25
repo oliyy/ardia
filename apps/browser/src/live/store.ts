@@ -38,6 +38,7 @@ type LiveState = {
   hidden: Record<string, LiveItem[]>;
   completed: Record<string, CompletedItem[]>;
   completing: Record<string, string[]>;
+  completions: Record<string, Record<string, number>>;
   status: Record<string, FolderStatus>;
   expandedStacks: Record<string, boolean>;
   showAll: Record<string, boolean>;
@@ -46,7 +47,10 @@ type LiveState = {
   calendar: CalendarSettings;
   meetingGroups: Record<string, MeetingGroup>;
   dismissedAlerts: string[];
+  generations: Record<string, number>;
 };
+
+export type LiveFolderSnapshot = LiveFolder;
 
 export const DEFAULT_CONFIG: LiveConfig = { githubClientId: "", bitbucketUser: "", confluenceSite: "", confluenceEmail: "", googleClientId: "" };
 
@@ -87,6 +91,7 @@ export const useLive = create<LiveState>()(() => ({
   hidden: saved.hidden ?? {},
   completed: saved.completed ?? {},
   completing: {},
+  completions: {},
   status: {},
   expandedStacks: saved.expandedStacks ?? {},
   showAll: {},
@@ -95,6 +100,7 @@ export const useLive = create<LiveState>()(() => ({
   calendar: { ...DEFAULT_CALENDAR, ...saved.calendar },
   meetingGroups: saved.meetingGroups ?? {},
   dismissedAlerts: saved.dismissedAlerts ?? [],
+  generations: {},
 }));
 
 export const live = () => useLive.getState();
@@ -144,8 +150,40 @@ export function createFolder(profileId: string, kind: LiveFolderKind, sources?: 
   return id;
 }
 
+export const folderGeneration = (id: string) => live().generations[id] ?? 0;
+
+const bumped = (generations: Record<string, number>, ids: string[]) =>
+  ids.length ? { ...generations, ...Object.fromEntries(ids.map((id) => [id, (generations[id] ?? 0) + 1])) } : generations;
+
+const foldersUsing = (s: LiveState, sources: LiveSourceId[]) =>
+  Object.values(s.folders)
+    .filter((f) => f.sources.some((id) => sources.includes(id)))
+    .map((f) => f.id);
+
+type Animated = Pick<LiveState, "items" | "completing" | "completions" | "unread">;
+
+const finished = (s: Animated, folderId: string, ids: string[]): Animated => ({
+  items: { ...s.items, [folderId]: (s.items[folderId] ?? []).filter((it) => !ids.includes(it.id)) },
+  completing: { ...s.completing, [folderId]: (s.completing[folderId] ?? []).filter((id) => !ids.includes(id)) },
+  completions: { ...s.completions, [folderId]: Object.fromEntries(Object.entries(s.completions[folderId] ?? {}).filter(([id]) => !ids.includes(id))) },
+  unread: { ...s.unread, [folderId]: (s.unread[folderId] ?? []).filter((id) => !ids.includes(id)) },
+});
+
+const invalidated = (s: LiveState, ids: string[]) => ({
+  generations: bumped(s.generations, ids),
+  ...ids
+    .filter((id) => s.completing[id]?.length)
+    .reduce<Animated>((acc, id) => finished(acc, id, acc.completing[id] ?? []), { items: s.items, completing: s.completing, completions: s.completions, unread: s.unread }),
+});
+
 export function updateFolder(id: string, patch: Partial<Omit<LiveFolder, "id" | "profileId" | "kind">>) {
-  setLive((s) => (s.folders[id] ? { folders: { ...s.folders, [id]: { ...s.folders[id]!, ...patch } } } : {}));
+  setLive((s) => {
+    const folder = s.folders[id];
+    if (!folder) return {};
+    const next = { ...folder, ...patch };
+    const refetch = next.sources !== folder.sources || next.filters !== folder.filters;
+    return { folders: { ...s.folders, [id]: next }, ...invalidated(s, refetch ? [id] : []) };
+  });
 }
 
 const without = <T>(record: Record<string, T>, key: string) => {
@@ -153,18 +191,46 @@ const without = <T>(record: Record<string, T>, key: string) => {
   return rest;
 };
 
-export function removeFolder(id: string) {
+const withoutFetched = (s: LiveState, id: string) => ({
+  hidden: without(s.hidden, id),
+  items: without(s.items, id),
+  known: without(s.known, id),
+  unread: without(s.unread, id),
+  completed: without(s.completed, id),
+  completing: without(s.completing, id),
+  completions: without(s.completions, id),
+});
+
+const copyFolder = (folder: LiveFolder): LiveFolder => ({ ...folder, sources: [...folder.sources], filters: { ...folder.filters } });
+
+export function snapshotFolder(id: string): LiveFolderSnapshot | null {
+  const folder = live().folders[id];
+  return folder ? copyFolder(folder) : null;
+}
+
+export function removeFolder(id: string): LiveFolderSnapshot | null {
+  const snapshot = snapshotFolder(id);
   setLive((s) => ({
     folders: without(s.folders, id),
     folderOrder: s.folderOrder.filter((f) => f !== id),
-    items: without(s.items, id),
-    known: without(s.known, id),
-    unread: without(s.unread, id),
-    hidden: without(s.hidden, id),
-    completed: without(s.completed, id),
-    completing: without(s.completing, id),
+    ...withoutFetched(s, id),
     status: without(s.status, id),
+    generations: bumped(s.generations, [id]),
   }));
+  return snapshot;
+}
+
+export function restoreFolder(snapshot: LiveFolderSnapshot): string {
+  const folder = copyFolder(snapshot);
+  const { id } = folder;
+  setLive((s) => ({
+    folders: { ...s.folders, [id]: folder },
+    folderOrder: s.folderOrder.includes(id) ? s.folderOrder : [...s.folderOrder, id],
+    ...withoutFetched(s, id),
+    status: { ...s.status, [id]: { state: "initializing", lastFetch: null, error: null } },
+    generations: bumped(s.generations, [id]),
+  }));
+  return id;
 }
 
 export function arrangeFolders(placed: { id: string; after: string | null }[]) {
@@ -188,7 +254,10 @@ export function arrangeFolders(placed: { id: string; after: string | null }[]) {
 const MAX_KNOWN = 600;
 const MAX_COMPLETED = 20;
 
-export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<string, CompletionState>, now = Date.now(), quiet: Set<string> = new Set()) {
+let completionCounter = 0;
+
+export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<string, CompletionState>, now = Date.now(), quiet: Set<string> = new Set()): number {
+  const token = ++completionCounter;
   setLive((s) => {
     if (!s.folders[folderId]) return {};
     const closed = (id: string) => gone[id] === "merged" || gone[id] === "closed";
@@ -210,24 +279,30 @@ export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<s
       ...(s.completed[folderId] ?? []).filter((c) => !ids.has(c.item.id) && !leaving.some((l) => l.id === c.item.id)),
     ].slice(0, MAX_COMPLETED);
     const stillThere = new Set(merged.map((it) => it.id));
+    const completionChanged = leaving.length > 0 || [...animating].some((id) => ids.has(id));
     return {
       items: { ...s.items, [folderId]: merged },
       hidden: stillHidden.length === (s.hidden[folderId] ?? []).length ? s.hidden : { ...s.hidden, [folderId]: stillHidden },
       known: { ...s.known, [folderId]: [...known, ...fresh].slice(-MAX_KNOWN) },
       unread: { ...s.unread, [folderId]: first ? [] : [...new Set([...(s.unread[folderId] ?? []), ...unreadFresh])].filter((id) => stillThere.has(id)) },
       completed: leaving.length || (s.completed[folderId] ?? []).length !== completed.length ? { ...s.completed, [folderId]: completed } : s.completed,
-      completing: leaving.length ? { ...s.completing, [folderId]: [...(s.completing[folderId] ?? []), ...leaving.map((l) => l.id)] } : s.completing,
+      completing: completionChanged ? { ...s.completing, [folderId]: [...[...animating].filter((id) => !ids.has(id)), ...leaving.map((l) => l.id)] } : s.completing,
+      completions: completionChanged
+        ? { ...s.completions, [folderId]: Object.fromEntries([...Object.entries(s.completions[folderId] ?? {}).filter(([id]) => !ids.has(id)), ...leaving.map((l) => [l.id, token] as const)]) }
+        : s.completions,
       status: { ...s.status, [folderId]: { state: "idle", lastFetch: now, error: null } },
     };
   });
+  return token;
 }
 
-export function finishCompleting(folderId: string, ids: string[]) {
-  setLive((s) => ({
-    items: { ...s.items, [folderId]: (s.items[folderId] ?? []).filter((it) => !ids.includes(it.id)) },
-    completing: { ...s.completing, [folderId]: (s.completing[folderId] ?? []).filter((id) => !ids.includes(id)) },
-    unread: { ...s.unread, [folderId]: (s.unread[folderId] ?? []).filter((id) => !ids.includes(id)) },
-  }));
+export function finishCompleting(folderId: string, generation: number, token: number) {
+  setLive((s) => {
+    const tokens = s.completions[folderId] ?? {};
+    const done = (s.completing[folderId] ?? []).filter((id) => tokens[id] === token);
+    if (!s.folders[folderId] || (s.generations[folderId] ?? 0) !== generation || !done.length) return {};
+    return finished(s, folderId, done);
+  });
 }
 
 export function setStatus(folderId: string, status: Partial<FolderStatus>) {
@@ -269,11 +344,24 @@ export function setAccount(source: LiveSourceId, account: LiveAccount | null) {
     const accounts = { ...s.accounts };
     if (account) accounts[source] = account;
     else delete accounts[source];
-    return { accounts };
+    return { accounts, ...invalidated(s, foldersUsing(s, [source])) };
   });
 }
 
-export const updateConfig = (patch: Partial<LiveConfig>) => setLive((s) => ({ config: { ...s.config, ...patch } }));
+const CONFIG_SOURCES: Record<keyof LiveConfig, LiveSourceId[]> = {
+  githubClientId: [],
+  bitbucketUser: ["bitbucket"],
+  confluenceSite: ["confluence"],
+  confluenceEmail: ["confluence"],
+  googleClientId: ["gdrive"],
+};
+
+export const updateConfig = (patch: Partial<LiveConfig>) =>
+  setLive((s) => {
+    const changed = (Object.keys(patch) as (keyof LiveConfig)[]).filter((k) => patch[k] !== s.config[k]).flatMap((k) => CONFIG_SOURCES[k]);
+    return { config: { ...s.config, ...patch }, ...invalidated(s, foldersUsing(s, changed)) };
+  });
+
 export const updateCalendarSettings = (patch: Partial<CalendarSettings>) => setLive((s) => ({ calendar: { ...s.calendar, ...patch } }));
 
 export function dismissAlert(occurrence: string) {

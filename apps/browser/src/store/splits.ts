@@ -3,6 +3,7 @@ import type { BrowserState } from "./browser";
 import { innermostGroupOf, leaveGroups, syncGroupOrder } from "./groups";
 import { inPinnedContainer, isPinnedRow, newId } from "./model";
 import { placing } from "./organize";
+import { dropNodes, pinKeyOf, placeNodes, siblingsOf, tableOf, tabNode } from "./pinTree";
 import { choose } from "./settings";
 import { activated, apply, removeTabs, withNewTab } from "./tabs";
 import type { BrowserWindow, SplitView, Tab } from "./types";
@@ -154,7 +155,18 @@ function gather(s: BrowserState, anchorId: string, members: string[]): BrowserSt
   let groups = leaveGroups(s.groups, moving);
   const group = innermostGroupOf(s.groups, anchorId);
   if (group && groups[group.id]) groups = { ...groups, [group.id]: { ...groups[group.id]!, tabIds: [...groups[group.id]!.tabIds, ...moving] } };
-  return { ...s, windows: { ...s.windows, [w.id]: window }, groups: syncGroupOrder(groups, window) };
+  const table = tableOf(s.pinPlace, anchor.profileId);
+  const anchorNode = tabNode(pinKeyOf(anchor));
+  const movingNodes = block.filter((id) => moving.has(id)).map((id) => tabNode(pinKeyOf(s.tabs[id]!)));
+  const movingSet = new Set(movingNodes);
+  let pinPlace = s.pinPlace;
+  const place = table[anchorNode];
+  if (place) {
+    const peers = siblingsOf(table, place.parent);
+    const next = peers.slice(peers.indexOf(anchorNode) + 1).find((n) => !movingSet.has(n)) ?? null;
+    pinPlace = placeNodes(pinPlace, anchor.profileId, movingNodes, place.parent, next);
+  } else pinPlace = dropNodes(pinPlace, anchor.profileId, movingNodes);
+  return { ...s, pinPlace, windows: { ...s.windows, [w.id]: window }, groups: syncGroupOrder(groups, window) };
 }
 
 function withPane(existing: SplitView | undefined, anchorId: string, tabId: string, side: SplitSide, windowId: string): SplitView | null {
@@ -233,6 +245,8 @@ export const createSplitsSlice: StateCreator<BrowserState, [], [], SplitsSlice> 
     s = gather(s, paneTabId, [paneTabId, tabId]);
     const current = s.splits[split.id]!;
     s = { ...s, splits: { ...s.splits, [split.id]: { ...current, tabIds: current.tabIds.map((id) => (id === paneTabId ? tabId : id)) } } };
+    const outgoing = tabNode(pinKeyOf(pane));
+    if (s.pinPlace[pane.profileId]?.[outgoing]) s = { ...s, pinPlace: dropNodes(s.pinPlace, pane.profileId, [outgoing]) };
     s = removeTabs(s, [paneTabId], false);
     set(apply(s, activated(s, tabId)));
   },

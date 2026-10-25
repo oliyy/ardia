@@ -60,7 +60,8 @@ public class SyncModule: Module {
         }
       }
       let folderURL = URL(fileURLWithPath: folder, isDirectory: true)
-      if !SyncVault(folder: folderURL, keys: SyncKeys(entropy: entropy)).chainExists() {
+      let vault = SyncVault(folder: folderURL, keys: SyncKeys(entropy: entropy))
+      if !vault.chainExists() && !vault.previousChainExists() {
         return ["error": SyncFolder.hasSyncData(folderURL) ? "mismatch" : "noData"]
       }
       guard Self.keyStore.save(entropy, account: account) else { return ["error": "keychain"] }
@@ -83,7 +84,8 @@ public class SyncModule: Module {
       let vault = try self.vault(folder)
       var isDirectory: ObjCBool = false
       guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else { return "unavailable" }
-      return vault.chainExists() ? "ok" : "missing"
+      if vault.chainExists() { return "ok" }
+      return vault.previousChainExists() ? "previous" : "missing"
     }.runOnQueue(Self.work)
 
     AsyncFunction("createChain") { (folder: String) throws in

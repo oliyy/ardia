@@ -21,6 +21,7 @@ import {
 import { nextPinChoice, placeChoiceKey, restoringGroup } from "./organize";
 import { adoptParkedPins, parkWindowPins } from "./parkedPins";
 import { settleMovedPins } from "./pinMirror";
+import { dropNodes, FAVORITES, pinKeyOf, placeNodes, tabNode } from "./pinTree";
 import { holderOf, returnSharedPages, swapPinPage } from "./pinShare";
 import { sharedElsewhere, sharesTabs } from "./tabShare";
 import { isSmall, isSmallWindow, lastActiveProfile, linkProfileOf, mainWindowFor } from "./small";
@@ -95,6 +96,17 @@ export function moveTabsInto(s: BrowserState, ids: string[], targetId: string): 
 
   const sources = new Set(moving.map((t) => t.windowId));
   let next = removeTabs(s, moving.map((t) => t.id), false);
+  const vanished = [...sources].filter((id) => !next.windows[id]);
+  if (vanished.length) {
+    const groups = { ...next.groups };
+    for (const g of Object.values(next.groups)) {
+      if (!g.pinned || !vanished.includes(g.windowId)) continue;
+      const twin = Object.values(groups).some((x) => x.id !== g.id && x.pinned && x.windowId === targetId && x.profileId === g.profileId && pinKeyOf(x) === pinKeyOf(g));
+      if (twin) delete groups[g.id];
+      else groups[g.id] = { ...g, windowId: targetId, tabIds: [] };
+    }
+    next = { ...next, groups };
+  }
   const w = next.windows[targetId]!;
   const tabs = { ...next.tabs };
   const live = { ...next.live };
@@ -111,13 +123,14 @@ export function moveTabsInto(s: BrowserState, ids: string[], targetId: string): 
     live,
     windows: { ...next.windows, [targetId]: { ...w, tabIds: pinnedFirst([...w.tabIds, ...moving.map((t) => t.id)], tabs, next.groups), activeTabIds } },
   };
+  next = settleMovedPins(s, next, moving.map((t) => t.id), targetId);
   for (const id of sources) {
     const src = next.windows[id];
     if (!src || viewTabIds(next, id).length) continue;
     const recent = src.tabIds.map((t) => next.tabs[t]!).sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
     if (recent) next = apply(next, activated(next, src.activeTabIds[recent.profileId] ?? recent.id));
   }
-  return settleMovedPins(s, next, moving.map((t) => t.id), targetId);
+  return next;
 }
 
 function restoreGroup(groups: Record<string, TabGroup>, g: Omit<TabGroup, "tabIds">, tabIds: string[]): [Record<string, TabGroup>, string] {
@@ -187,6 +200,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     const next = removeTabs(s, w.tabIds, small);
     set({
       ...next,
+      groups: without(next.groups, Object.values(next.groups).filter((g) => g.windowId === id).map((g) => g.id)),
       windows: without(next.windows, [id]),
       windowOrder: next.windowOrder.filter((w) => w !== id),
       windowUi: without(next.windowUi, [id]),
@@ -260,6 +274,10 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     const { adoptId: _, wakeAdoptId: _w, ...rest } = tab;
     const moved: Tab = { ...rest, profileId, navigation: loaded ? navigationTo(tab.url) : null, lastActiveAt: Date.now() };
     const movedKey = moved.pinKey ?? moved.id;
+    const movedNode = tabNode(pinKeyOf(moved));
+    const held = Object.values(next.tabs).some((t) => t.id !== tabId && t.profileId === tab.profileId && !t.liveItem && pinKeyOf(t) === pinKeyOf(tab));
+    let pinPlace = held ? next.pinPlace : dropNodes(next.pinPlace, tab.profileId, [movedNode]);
+    if (tab.pinned) pinPlace = placeNodes(pinPlace, profileId, [movedNode], tab.pinnedAsRow ? null : FAVORITES, null);
     const pinChoices = tab.pinned
       ? { ...next.pinChoices, [profileId]: { ...next.pinChoices[profileId], [movedKey]: nextPinChoice(), [placeChoiceKey(movedKey)]: nextPinChoice() } }
       : next.pinChoices;
@@ -271,6 +289,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
       ...next,
       tabs,
       pinChoices,
+      pinPlace,
       live: { ...next.live, [tabId]: IDLE_LIVE },
       windows: { ...next.windows, [w.id]: { ...base, tabIds: pinnedFirst(tabIds, tabs, next.groups) } },
       windowOrder: next.windowOrder.includes(w.id) ? next.windowOrder : s.windowOrder,

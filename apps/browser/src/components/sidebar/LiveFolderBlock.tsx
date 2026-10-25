@@ -1,6 +1,6 @@
-import { ContextMenuArea, FadeLabel, Surface, Symbol } from "@ardia/shell";
+import { ArcTabRowBackground, ContextMenuArea, FadeLabel, Surface, Symbol } from "@ardia/shell";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, Pressable, Text, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
@@ -9,38 +9,46 @@ import { prBadge } from "../../live/github";
 import { folderRows, liveTabPlace, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import { setLive, updateFolder, useLive } from "../../live/store";
-import type { CompletedItem, LiveFolder, LiveItem } from "../../live/types";
+import type { CompletedItem, LiveItem } from "../../live/types";
 import { useBrowser } from "../../store/browser";
-import { usePageProfileId } from "../../store/hooks";
+import { usePageProfileId, useWindowId } from "../../store/hooks";
 import { activeTabId, viewTabIds } from "../../store/model";
 import { openSettings } from "../settings/windows";
 import { HoverSlot } from "../HoverSlot";
 import { IconButton, useHover } from "../primitives";
 import { useLiveColors, type LiveColors } from "../live/colors";
+import { openPath } from "./actions";
 import { clickMods, TabRow } from "./TabRow";
-import { Fold, useFold, type FoldEntry } from "./Fold";
-import { GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS } from "./geometry";
-import { useDragFolded, useDragItem } from "./dnd";
+import { useDragFolded, useDragItem, useDragging } from "./dnd";
+import { useShift, type EntryMotion } from "./entryMotion";
+import { Fold, useFold, useFoldHidden, type FoldEntry } from "./Fold";
+import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS, groupFrame } from "./geometry";
+import { useAddressBarInSidebar } from "../layout/windowLayout";
+import { FolderGlyph, folderSymbol, useFolderColors } from "./FolderGlyph";
+import { bundledSiteIcon } from "../../lib/siteIcons";
 import { dismissHover, useRowHover } from "./hover";
 import { openLiveFolderMenu, openLiveItemMenu, openLiveStackMenu } from "./liveMenus";
+import { noteLiveHeight } from "./pinnedTree";
 import { registerRow } from "./state";
 import { TabIcon } from "./TabIcon";
-import { useSidebarTokens } from "./tokens";
+import { ARC_SELECTED_INACTIVE, arcSelectedLabel, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 
 const PAD = GROUP_PAD;
 const EMPTY: LiveItem[] = [];
 const NONE: string[] = [];
 const NONE_COMPLETED: CompletedItem[] = [];
 
+const APPROVED_CUTOUT: [number, number, number] = [12.5, 12.5, 4.5];
 const liveRowKey = (folderId: string, itemId: string) => `live|${folderId}|${itemId}`;
 
-export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, windowId }: { folderId: string; windowId: string }) {
+export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion = null, peek = false }: { folderId: string; motion?: EntryMotion | null; peek?: boolean }) {
+  const windowId = useWindowId();
   const tokens = useSidebarTokens();
   const folder = useLive((s) => s.folders[folderId]);
   const items = useLive((s) => s.items[folderId] ?? EMPTY);
   const showAll = useLive((s) => s.showAll);
-  const folded = useDragFolded(`lf:${folderId}`);
-  const collapsed = folded || !!folder?.collapsed;
+  const folded = useDragFolded(`l:${folderId}`);
+  const collapsed = folded || !!folder?.collapsed || peek;
   const rows = useMemo(() => (folder ? folderRows(folder, items, showAll) : []), [folder, items, showAll]);
   const itemIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
   const hiddenList = useLive((s) => s.hidden[folderId] ?? EMPTY);
@@ -59,8 +67,12 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, windowI
   const activeItem = useBrowser((s) => (activeTab ? (s.tabs[activeTab]?.liveItem?.itemId ?? null) : null));
   const completed = useCompletedShown(folderId).length > 0;
   const fold = useFold(collapsed);
-  const foldedHeight = () => GROUP_BORDER * 2 + layout.rowHeight + (activeTab ? layout.rowHeight + PAD : 0);
-  const { wrapper, handle, headerRef } = useDragItem(`lf:${folderId}`, { kind: "live", tabIds: NONE, section: "pinnedGroups", liveFolderId: folderId, collapsed: !!folder?.collapsed, foldedHeight });
+  const flat = useAddressBarInSidebar();
+  const frame = groupFrame(flat);
+  const foldedHeight = () => frame.border * 2 + layout.rowHeight + (activeTab ? layout.rowHeight + frame.padTop + frame.padBottom : 0);
+  const { wrapper, handle, headerRef } = useDragItem(`l:${folderId}`, { kind: "live", tabIds: [], section: "pinned", liveId: folderId, collapsed: !!folder?.collapsed, foldedHeight }, undefined, motion?.clip);
+  const [moved, movedRef] = useShift(motion?.shift ?? null);
+  useEffect(() => () => noteLiveHeight(windowId, profileId, folderId, null), [windowId, profileId, folderId]);
   if (!folder) return null;
 
   const entries: FoldEntry[] = rows.length
@@ -76,11 +88,18 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, windowI
 
   return (
     <Animated.View ref={wrapper.ref} style={wrapper.style}>
-      <View style={{ borderRadius: GROUP_RADIUS, backgroundColor: tokens.groupFill, borderWidth: GROUP_BORDER, borderColor: tokens.groupStroke, paddingHorizontal: PAD }}>
-        <View ref={headerRef} {...handle} style={{ marginHorizontal: -PAD }}>
-          <FolderHeader folderId={folderId} windowId={windowId} collapsed={collapsed} />
+      <View
+        {...moved}
+        ref={movedRef}
+        onLayout={(e) => noteLiveHeight(windowId, profileId, folderId, e.nativeEvent.layout.height)}
+        style={[flat ? null : { borderRadius: GROUP_RADIUS, backgroundColor: tokens.groupFill, borderWidth: GROUP_BORDER, borderColor: tokens.groupStroke, paddingHorizontal: PAD }, moved.style as object]}
+      >
+        <View ref={headerRef} {...handle}>
+          <FolderHeader folderId={folderId} windowId={windowId} collapsed={collapsed} peek={peek} flat={flat} />
         </View>
-        <Fold fold={fold} collapsed={collapsed} entries={entries} keep={keep} gap={layout.rowGap} padBottom={PAD} />
+        <View style={flat ? { marginLeft: ARC_FOLDER_INDENT } : null}>
+          <Fold fold={fold} collapsed={collapsed} entries={entries} keep={keep} gap={layout.rowGap} padTop={frame.padTop} padBottom={frame.padBottom} />
+        </View>
       </View>
     </Animated.View>
   );
@@ -109,21 +128,29 @@ function FolderNote({ folderId }: { folderId: string }) {
   return <NoteRow text={kind === "pullRequests" ? "No open pull requests" : "No recent documents"} />;
 }
 
-function FolderHeader({ folderId, windowId, collapsed }: { folderId: string; windowId: string; collapsed: boolean }) {
+function FolderHeader({ folderId, windowId, collapsed, peek, flat }: { folderId: string; windowId: string; collapsed: boolean; peek: boolean; flat: boolean }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
+  const arcLabel = useArcLabel();
+  const arcTitle = useArcTitle();
+  const hidden = useFoldHidden();
   const colors = useLiveColors();
   const folder = useLive((s) => s.folders[folderId]);
   const count = useLive((s) => s.items[folderId]?.length ?? 0);
   const unread = useLive((s) => (s.unread[folderId]?.length ?? 0) > 0);
   const status = useLive((s) => s.status[folderId]);
   const { hovered, hoverProps } = useHover();
+  const dragging = useDragging();
+  const folderColors = useFolderColors(null);
   if (!folder) return null;
   const updating = status?.state === "updating" || status?.state === "initializing";
   const { site: sourceSite, icon } = liveFolderIcon(folder);
+  const initialLoading = !status || status.state === "initializing" || (status.state === "updating" && !status.lastFetch);
+  const sourceMark = folder.sources[0] === "github" && !initialLoading ? bundledSiteIcon(SOURCES.github.site, theme.dark) : undefined;
+  const customSymbol = folderSymbol(folder.icon);
 
   return (
-    <View ref={(v) => registerRow(windowId, `livefolder|${folderId}`, v)} {...hoverProps}>
+    <View ref={(v) => registerRow(windowId, `livefolder|${folderId}`, hidden ? null : v)} {...hoverProps} style={{ marginHorizontal: flat ? 0 : -PAD }}>
       <ContextMenuArea
         onContextMenu={() => {
           dismissHover();
@@ -131,19 +158,34 @@ function FolderHeader({ folderId, windowId, collapsed }: { folderId: string; win
         }}
       >
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={folder.name}
+          accessibilityState={{ expanded: !collapsed }}
           onPress={() => {
             dismissHover();
-            updateFolder(folderId, { collapsed: !collapsed });
+            if (peek && !folder.collapsed) openPath(windowId, { kind: "live", id: folderId });
+            else updateFolder(folderId, { collapsed: !collapsed });
           }}
         >
           {({ pressed }) => (
             <Surface
-              fill={hex(pressed ? theme.tabPressed : hovered ? tokens.groupHeaderHover : "rgba(0,0,0,0)")}
-              cornerRadius={GROUP_HEADER_RADIUS}
-              style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: 9 + PAD, paddingRight: 6 }}
+              fill={flat ? undefined : hex(pressed ? theme.tabPressed : hovered ? tokens.groupHeaderHover : "rgba(0,0,0,0)")}
+              cornerRadius={flat ? layout.rowRadius : GROUP_HEADER_RADIUS}
+              style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: flat ? layout.rowPadding : 9 + PAD, paddingRight: 6 }}
             >
-              <TabIcon url={sourceSite} icon={icon} />
-              <FadeLabel text={folder.name} fontSize={13} weight="medium" color={tokens.groupTitle} style={{ flex: 1, height: 18, marginLeft: 5 }} />
+              {flat ? <ArcTabRowBackground dark={theme.dark} hovered={hovered && !dragging} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
+              {flat && (!folder.icon || customSymbol) ? (
+                <FolderGlyph colors={folderColors} open={!collapsed} symbol={customSymbol} image={customSymbol ? undefined : sourceMark} dots={!customSymbol && sourceMark === undefined} />
+              ) : (
+                <TabIcon url={sourceSite} icon={icon} />
+              )}
+              <FadeLabel
+                text={folder.name}
+                fontSize={flat ? layout.rowFontSize : 13}
+                weight={flat ? "semibold" : "medium"}
+                color={flat ? (arcTitle ?? arcLabel ?? theme.textTab) : tokens.groupTitle}
+                style={{ flex: 1, height: 18, marginLeft: flat ? layout.rowLabelGap : 5 }}
+              />
               {status?.error ? (
                 <Pressable onPress={() => openSettings("liveFolders")} tooltip={errorText(status.error.kind, status.error.source)} style={{ marginRight: 2 }}>
                   <Symbol name="exclamationmark.triangle.fill" size={10} color={colors.pending} style={{ width: 18, height: 18 }} />
@@ -159,9 +201,11 @@ function FolderHeader({ folderId, windowId, collapsed }: { folderId: string; win
                 ) : collapsed ? (
                   <View style={{ flexDirection: "row", alignItems: "center", marginRight: 2, gap: 5 }}>
                     {unread ? <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.pip }} /> : null}
-                    <View style={{ minWidth: 20, height: 18, borderRadius: 9, paddingHorizontal: 6, backgroundColor: tokens.countPill, alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ fontSize: 11, fontWeight: "600", color: theme.textTab, fontVariant: ["tabular-nums"] }}>{count}</Text>
-                    </View>
+                    {flat ? null : (
+                      <View style={{ minWidth: 20, height: 18, borderRadius: 9, paddingHorizontal: 6, backgroundColor: tokens.countPill, alignItems: "center", justifyContent: "center" }}>
+                        <Text style={{ fontSize: 11, fontWeight: "600", color: theme.textTab, fontVariant: ["tabular-nums"] }}>{count}</Text>
+                      </View>
+                    )}
                   </View>
                 ) : null}
               </HoverSlot>
@@ -301,7 +345,13 @@ function StackRow({ folderId, windowId, stack }: { folderId: string; windowId: s
 function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean }) {
   const indent = inStack ? 10 : 0;
   const theme = useTheme();
+  const tokens = useSidebarTokens();
+  const arcLabel = useArcLabel();
+  const arcTitle = useArcTitle();
+  const hidden = useFoldHidden();
+  const flat = useAddressBarInSidebar();
   const colors = useLiveColors();
+  const subtitle = item.pr?.author || item.subtitle;
   const key = liveRowKey(folderId, item.id);
   const profileId = usePageProfileId();
   const tabId = useBrowser((s) => viewTabIds(s, windowId, profileId).find((id) => s.tabs[id]?.liveItem?.itemId === item.id && s.tabs[id]?.liveItem?.folderId === folderId) ?? null);
@@ -318,11 +368,20 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
       Animated.timing(fold, { toValue: 0, duration: 360, easing: Easing.bezier(0.2, 0.9, 0.3, 1), useNativeDriver: false }),
     ]).start();
   }, [completion]);
-  const fill = active ? theme.tabSelected : hovered ? theme.tabHover : "rgba(0,0,0,0)";
+  const fill = active ? tokens.selectedFill : hovered ? theme.tabHover : "rgba(0,0,0,0)";
+  const label = (completion ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completion ? theme.textSecondary : (arcLabel ?? theme.textTab));
+  const approved = flat && !completion && !!item.pr && prBadge(item.pr) === "approved";
+  const subtitleText = approved ? [subtitle, "Approved"].filter(Boolean).join(" · ") : subtitle;
 
   return (
     <Animated.View style={completion ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
-      <View ref={(v) => registerRow(windowId, key, v)} {...hoverProps}>
+      <View
+        ref={(v) => {
+          registerRow(windowId, key, hidden ? null : v);
+          if (tabId) registerRow(windowId, tabId, hidden ? null : v);
+        }}
+        {...hoverProps}
+      >
         <ContextMenuArea
           onContextMenu={() => {
             dismissHover();
@@ -338,31 +397,38 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
             {({ pressed }) => (
               <Surface
                 fill={hex(!active && pressed ? theme.tabPressed : fill)}
-                cornerRadius={10}
-                borderWidth={active ? 1 : 0}
-                borderColors={active ? theme.tabSelectedBorder.map(hex) : undefined}
-                shadowColor={active ? hex(theme.tabSelectedShadow) : undefined}
-                shadowOpacity={active ? 1 : 0}
-                shadowRadius={theme.tabSelectedShadowRadius}
-                shadowOffset={[0, 0.5]}
-                style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: 9 + indent, paddingRight: 6 }}
+                inactiveFillOpacity={arcLabel && active ? ARC_SELECTED_INACTIVE : undefined}
+                cornerRadius={layout.rowRadius}
+                style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}
               >
-                {unread ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-                <ItemIcon item={item} completion={completion} colors={colors} />
-                <FadeLabel
-                  text={item.title}
-                  fontSize={13}
-                  weight={unread ? "medium" : undefined}
-                  color={active ? theme.tabSelectedText : completion ? theme.textSecondary : theme.textTab}
-                  style={{ flex: 1, height: 18, marginLeft: 5 }}
-                />
+                {unread && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
+                <ItemIcon item={item} completion={completion} colors={colors} flat={flat} approved={approved} />
+                {flat && subtitle ? (
+                  <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
+                    <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} style={{ height: 18 }} />
+                    <FadeLabel text={subtitleText} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />
+                  </View>
+                ) : (
+                  <FadeLabel
+                    text={item.title}
+                    fontSize={layout.rowFontSize}
+                    weight={unread && !flat ? "medium" : undefined}
+                    color={label}
+                    style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }}
+                  />
+                )}
                 {inStack && item.pr?.stack ? <PositionChip position={item.pr.stack.position} /> : null}
                 <HoverSlot
                   hovered={hovered && !!tabId && !completion}
                   width={22}
                   hover={<IconButton icon="xmark" size={10} weight="semibold" box={22} radius={6} onPress={() => tabId && void closeTab(tabId)} tooltip="Close Tab (⌘W)" />}
                 >
-                  <Trailing item={item} completion={completion} colors={colors} />
+                  {unread && flat ? (
+                    <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
+                    </View>
+                  ) : null}
+                  <Trailing item={item} completion={completion} colors={colors} approved={approved} />
                 </HoverSlot>
               </Surface>
             )}
@@ -373,7 +439,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   );
 }
 
-function PositionChip({ position }: { position: number }) {
+export function PositionChip({ position }: { position: number }) {
   const theme = useTheme();
   const colors = useLiveColors();
   return (
@@ -389,10 +455,24 @@ const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: 
   closed: { symbol: "xmark.circle.fill", color: "draft" },
 };
 
-function ItemIcon({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }) {
-  const pop = useRef(new Animated.Value(completion ? 0 : 1)).current;
+export function ItemIcon({
+  item,
+  completion,
+  colors,
+  flat,
+  approved,
+  animate = true,
+}: {
+  item: LiveItem;
+  completion: CompletedItem["state"] | null;
+  colors: LiveColors;
+  flat: boolean;
+  approved: boolean;
+  animate?: boolean;
+}) {
+  const pop = useRef(new Animated.Value(completion && animate ? 0 : 1)).current;
   useEffect(() => {
-    if (!completion) return;
+    if (!completion || !animate) return;
     pop.setValue(0);
     Animated.spring(pop, { toValue: 1, speed: 14, bounciness: 14, useNativeDriver: true }).start();
   }, [completion]);
@@ -402,6 +482,24 @@ function ItemIcon({ item, completion, colors }: { item: LiveItem; completion: Co
       <Animated.View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center", transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] }}>
         <Symbol name={glyph.symbol} size={14} weight="semibold" color={colors[glyph.color]} style={{ width: 16, height: 16 }} />
       </Animated.View>
+    );
+  }
+  if (item.pr && flat) {
+    return (
+      <View style={{ width: 16, height: 16 }}>
+        {approved ? (
+          <Surface cutout={APPROVED_CUTOUT} style={{ width: 16, height: 16 }}>
+            <TabIcon url={SOURCES[item.source].site} />
+          </Surface>
+        ) : (
+          <TabIcon url={SOURCES[item.source].site} />
+        )}
+        {approved ? (
+          <View style={{ position: "absolute", right: 0, bottom: 0, width: 8, height: 8, alignItems: "center", justifyContent: "center" }}>
+            <Symbol name="checkmark" size={7} weight="bold" color={colors.success} style={{ width: 8, height: 8 }} />
+          </View>
+        ) : null}
+      </View>
     );
   }
   if (item.pr) {
@@ -420,12 +518,12 @@ const BADGES: Record<NonNullable<ReturnType<typeof prBadge>>, { symbol: string |
   passed: { symbol: "checkmark", color: "success", tip: "All checks have passed" },
 };
 
-function Trailing({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }): ReactNode {
+export function Trailing({ item, completion, colors, approved }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors; approved: boolean }): ReactNode {
   const theme = useTheme();
   if (completion) {
     return <Text style={{ fontSize: 11, fontWeight: "500", color: colors[COMPLETION_GLYPH[completion].color], marginRight: 4 }}>{completion === "merged" ? "Merged" : completion === "reviewed" ? "Reviewed" : "Closed"}</Text>;
   }
-  const badge = item.pr ? prBadge(item.pr) : null;
+  const badge = item.pr && !approved ? prBadge(item.pr) : null;
   if (!badge) return null;
   const spec = BADGES[badge];
   return (

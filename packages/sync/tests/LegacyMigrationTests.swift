@@ -608,11 +608,12 @@ final class LegacyMigrationTests: XCTestCase {
 
   func testSyncFormatIsUnchanged() throws {
     let keys = SyncKeys(entropy: Data(repeating: 0, count: 32))
-    XCTAssertEqual(keys.chainTag, "gbcx4r55mk3rlaegbggknyx4ta")
+    XCTAssertEqual(keys.previousChainTag, "gbcx4r55mk3rlaegbggknyx4ta")
+    XCTAssertEqual(keys.chainTag, "bz3k2da6xy3o4lqnknfewlr34y")
     XCTAssertEqual(keys.scopeTag("app"), "nr4ncp5iyqzqgjn6ol4zksqtne")
     let sealed = try XCTUnwrap(Data(base64Encoded: try String(contentsOf: URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent().appendingPathComponent("fixtures/sealed-0.2.32.b64"), encoding: .utf8)
       .trimmingCharacters(in: .whitespacesAndNewlines)))
-    XCTAssertEqual(try keys.open(sealed, scopeTag: keys.scopeTag("app"), fileId: "f1"), Data("from 0.2.32".utf8))
+    XCTAssertThrowsError(try keys.open(sealed, scopeTag: keys.scopeTag("app"), fileId: "f1")) { XCTAssertEqual($0 as? SyncKeys.Failure, .authentication) }
   }
 }

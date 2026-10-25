@@ -1,16 +1,17 @@
 import { onWindowEvent } from "@ardia/shell";
 import { everySlowly } from "../lib/slowTimers";
 import { useBrowser } from "../store/browser";
-import { activeTabId, viewTabIds } from "../store/model";
+import { activeTabId, isIncognitoProfile, viewTabIds } from "../store/model";
+import { liveNode, migrateLivePlaces } from "../store/pinTree";
 import { SOURCES } from "./sources";
-import { applyFetch, createFolder, finishCompleting, live, markRead, removeFolder, setStatus, unhide, useLive } from "./store";
+import { applyFetch, createFolder, finishCompleting, folderGeneration, live, markRead, removeFolder, setStatus, unhide, useLive, type LiveFolderSnapshot } from "./store";
 import { LiveError, type CompletionState, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
 
 const INTERVAL_MS: Record<LiveFolderKind, number> = { pullRequests: 3 * 60_000, documents: 10 * 60_000 };
 const STALE_ON_FOCUS_MS = 60_000;
 export const COMPLETION_MS = 2600;
 
-const inflight = new Map<string, Promise<void>>();
+const inflight = new Map<string, { generation: number; task: Promise<void> }>();
 const fetchedSources = new Map<string, Set<LiveSourceId>>();
 
 const SECTION_ORDER: Record<PullRequestSection, number> = { authored: 0, review: 1, team: 2 };
@@ -22,10 +23,13 @@ function order(items: LiveItem[]): LiveItem[] {
 }
 
 export function refreshFolder(folderId: string): Promise<void> {
+  const generation = folderGeneration(folderId);
   const running = inflight.get(folderId);
-  if (running) return running;
-  const task = run(folderId).finally(() => inflight.delete(folderId));
-  inflight.set(folderId, task);
+  if (running?.generation === generation) return running.task;
+  const task: Promise<void> = run(folderId, generation).finally(() => {
+    if (inflight.get(folderId)?.task === task) inflight.delete(folderId);
+  });
+  inflight.set(folderId, { generation, task });
   return task;
 }
 
@@ -34,12 +38,15 @@ export function manualRefresh(folderId: string): Promise<void> {
   return refreshFolder(folderId);
 }
 
-async function run(folderId: string) {
+const isCurrent = (folderId: string, generation: number) => !!live().folders[folderId] && folderGeneration(folderId) === generation;
+
+async function run(folderId: string, generation: number) {
   const folder = live().folders[folderId];
   if (!folder) return;
   const before = live();
   setStatus(folderId, { state: before.status[folderId]?.lastFetch ? "updating" : "initializing" });
   const results = await Promise.allSettled(folder.sources.map((id) => SOURCES[id].fetch(folder)));
+  if (!isCurrent(folderId, generation)) return;
 
   const fetched: LiveItem[] = [];
   const failed: { source: LiveSourceId; error: unknown }[] = [];
@@ -61,7 +68,9 @@ async function run(folderId: string) {
   for (const source of new Set(missing.map((it) => it.source))) {
     const resolve = SOURCES[source].resolveGone;
     if (!resolve) continue;
-    Object.assign(gone, await resolve(missing.filter((it) => it.source === source)).catch(() => ({})));
+    const resolved = await resolve(missing.filter((it) => it.source === source)).catch(() => ({}));
+    if (!isCurrent(folderId, generation)) return;
+    Object.assign(gone, resolved);
   }
 
   const current = live();
@@ -77,10 +86,9 @@ async function run(folderId: string) {
   const lastSources = fetchedSources.get(folderId);
   const quiet = new Set(lastSources ? next.filter((it) => !lastSources.has(it.source)).map((it) => it.id) : []);
   fetchedSources.set(folderId, new Set(folder.sources.filter((id) => !failed.some((f) => f.source === id))));
-  applyFetch(folderId, order(next), gone, Date.now(), quiet);
+  const token = applyFetch(folderId, order(next), gone, Date.now(), quiet);
   if (firstFailure) setStatus(folderId, { state: "error", error: describe(firstFailure.source, firstFailure.error) });
-  const leaving = Object.keys(gone);
-  if (leaving.length) setTimeout(() => finishCompleting(folderId, leaving), COMPLETION_MS);
+  if (Object.keys(gone).length) setTimeout(() => finishCompleting(folderId, generation, token), COMPLETION_MS);
 }
 
 function describe(source: LiveSourceId, error: unknown) {
@@ -134,6 +142,7 @@ export function newProfileLiveFolder(profileId: string, kind: LiveFolderKind, so
       ? (["github", "bitbucket"] as const).filter((id) => s.accounts[id])
       : (["notion", "confluence", "gdrive"] as const).filter((id) => s.accounts[id]);
   const id = createFolder(profileId, kind, sources ?? (connected.length ? connected : undefined));
+  useBrowser.getState().placePinned(profileId, [liveNode(id)], null);
   void refreshFolder(id);
   return id;
 }
@@ -151,11 +160,11 @@ export function openLiveItem(windowId: string, folderId: string, item: LiveItem,
   return id;
 }
 
-export function deleteLiveFolder(folderId: string) {
+export function deleteLiveFolder(folderId: string): LiveFolderSnapshot | null {
   const s = useBrowser.getState();
   const tabs = Object.values(s.tabs).filter((t) => t.liveItem?.folderId === folderId).map((t) => t.id);
   if (tabs.length) s.closeTabs(tabs);
-  removeFolder(folderId);
+  return removeFolder(folderId);
 }
 
 let started = false;
@@ -164,6 +173,13 @@ const lastNudge = new Map<string, number>();
 export function startLiveEngine() {
   if (started) return;
   started = true;
+  const browser = useBrowser.getState();
+  const saved = live();
+  const pinPlace = migrateLivePlaces(browser.pinPlace, saved.folderOrder.flatMap((id) => {
+    const folder = saved.folders[id];
+    return folder && browser.profiles[folder.profileId] && !isIncognitoProfile(folder.profileId) ? [folder] : [];
+  }));
+  if (pinPlace !== browser.pinPlace) useBrowser.setState({ pinPlace });
 
   const orphans = () => {
     const s = useBrowser.getState();
@@ -173,6 +189,11 @@ export function startLiveEngine() {
   orphans();
   useLive.subscribe((s, prev) => {
     if (s.folders !== prev.folders) orphans();
+  });
+
+  useLive.subscribe((s, prev) => {
+    if (s.generations === prev.generations) return;
+    for (const id in s.generations) if (s.generations[id] !== prev.generations[id] && s.folders[id]) queueMicrotask(() => void refreshFolder(id));
   });
 
   useBrowser.subscribe((s, prev) => {

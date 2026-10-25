@@ -1,8 +1,12 @@
+import { Surface } from "@ardia/shell";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, View } from "react-native";
 
-const FOLD_MS = 150;
+import { FOLD_MS } from "./geometry";
 const FOLD_EASING = Easing.bezier(0.2, 0.9, 0.3, 1);
+
+const FoldHidden = createContext(false);
+export const useFoldHidden = () => useContext(FoldHidden);
 
 type FoldState = { open: Animated.Value; moving: boolean };
 
@@ -60,7 +64,8 @@ export function Fold({
   footer?: ReactNode;
 }) {
   const { open, moving } = fold;
-  const parentAway = useContext(FoldedAway);
+  const outerHidden = useFoldHidden();
+  const parentAway = useFoldedAway();
   const measuring = rowHeight === undefined;
   const [measured, setMeasured] = useState<Record<string, number>>({});
   const styles = useRef(new Map<number, object>()).current;
@@ -93,6 +98,7 @@ export function Fold({
         ? { height: 0, opacity: 0, overflow: "hidden" as const }
         : null;
   const mountAll = !collapsed || moving || mountClosed || measuring;
+  const footerHidden = outerHidden || collapsed;
 
   return (
     <Animated.View style={outer} pointerEvents={collapsed ? "box-none" : "auto"}>
@@ -100,27 +106,39 @@ export function Fold({
         {entries.map(({ key, node }) => {
           const stays = key === kept;
           if (!stays && !mountAll) return null;
+          const hidden = outerHidden || (collapsed && !stays);
           return (
-            <FoldedAway.Provider key={key} value={parentAway || ((collapsed || moving) && !stays)}>
-              <Animated.View style={folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : null} pointerEvents={collapsed && !stays ? "none" : "auto"}>
-                {measuring ? (
-                  <View
-                    onLayout={(e) => {
-                      if (state.current.moving || (state.current.folding && key !== state.current.kept)) return;
-                      const height = e.nativeEvent.layout.height;
-                      setMeasured((all) => (all[key] === height ? all : { ...all, [key]: height }));
-                    }}
-                  >
-                    {node}
-                  </View>
-                ) : (
-                  node
-                )}
-              </Animated.View>
-            </FoldedAway.Provider>
+            <Animated.View
+              key={key}
+              style={folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : null}
+              pointerEvents={collapsed && !stays ? "none" : "auto"}
+            >
+              <FoldedAway.Provider value={parentAway || ((collapsed || moving) && !stays)}>
+                <FoldHidden.Provider value={hidden}>
+                  {measuring || mountClosed ? (
+                    <Surface
+                      hidesAccessibility={hidden}
+                      onLayout={
+                        measuring
+                          ? (e) => {
+                              if (state.current.moving || (state.current.folding && key !== state.current.kept)) return;
+                              const height = e.nativeEvent.layout.height;
+                              setMeasured((all) => (all[key] === height ? all : { ...all, [key]: height }));
+                            }
+                          : undefined
+                      }
+                    >
+                      {node}
+                    </Surface>
+                  ) : (
+                    node
+                  )}
+                </FoldHidden.Provider>
+              </FoldedAway.Provider>
+            </Animated.View>
           );
         })}
-        {footer}
+        {footer ? <FoldHidden.Provider value={footerHidden}>{footer}</FoldHidden.Provider> : null}
       </View>
     </Animated.View>
   );

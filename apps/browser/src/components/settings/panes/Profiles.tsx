@@ -12,7 +12,7 @@ import type { Profile } from "../../../store/types";
 import { ClearDataDialog } from "../../pages/ClearDataDialog";
 import { useHover } from "../../primitives";
 import { ColorStack } from "../../profiles/CreateProfile";
-import { iconMenuItems, PROFILE_SYMBOLS, ProfileBadge, profileSymbol } from "../../profiles/icons";
+import { iconMenuItems, isArcIcon, PROFILE_SYMBOLS, ProfileBadge, profileSymbol } from "../../profiles/icons";
 import { Button, Group, PopUp, Row, SectionHeader, TextField, useFormColors } from "../controls";
 import { closeSettingsSheet, showSettingsSheet } from "../sheet";
 import { ThemeSection } from "../ThemeEditor";
@@ -225,6 +225,7 @@ function ProfileRow({
 function iconTitle(icon: string | null): string {
   const symbol = profileSymbol(icon);
   if (symbol) return PROFILE_SYMBOLS.find((s) => s.name === symbol)?.title ?? "Symbol";
+  if (isArcIcon(icon)) return "Imported Arc icon";
   return icon ?? "Initial";
 }
 

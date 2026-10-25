@@ -105,7 +105,9 @@ export function setRowsCovered(windowId: string, on: boolean) {
   for (const refresh of pointedRows.get(windowId) ?? []) refresh();
 }
 
-function pointed(windowId: string, refresh: () => void, on: boolean) {
+export const rowsCovered = (windowId: string) => covered.has(windowId);
+
+export function pointed(windowId: string, refresh: () => void, on: boolean) {
   let rows = pointedRows.get(windowId);
   if (on) {
     if (!rows) pointedRows.set(windowId, (rows = new Set()));

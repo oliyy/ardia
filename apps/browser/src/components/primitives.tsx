@@ -1,9 +1,9 @@
 import { displayHost } from "@ardia/core";
 import { Symbol, type SymbolProps } from "@ardia/shell";
-import { memo, useState } from "react";
+import { memo, useLayoutEffect, useState, type ReactNode } from "react";
 import { Image, Pressable, Text, View, type ViewStyle } from "react-native";
 import { markHoverProps } from "../lib/hoverShift";
-import { faviconFailed, useAppearanceDark, useFavicon, useFaviconTheme } from "../lib/favicons";
+import { faviconFailed, useAppearanceDark, useFavicon, useFaviconTheme, type ResolvedFavicon } from "../lib/favicons";
 import { bundledSiteIcon } from "../lib/siteIcons";
 import { useTheme } from "../lib/theme";
 
@@ -15,6 +15,7 @@ export function useHover() {
 
 export const IconButton = memo(function IconButton({
   icon,
+  glyph,
   onPress,
   disabled,
   active,
@@ -26,7 +27,8 @@ export const IconButton = memo(function IconButton({
   color,
   style,
 }: {
-  icon: string;
+  icon?: string;
+  glyph?: (tint: string) => ReactNode;
   onPress?: () => void;
   disabled?: boolean;
   active?: boolean;
@@ -40,9 +42,10 @@ export const IconButton = memo(function IconButton({
 }) {
   const theme = useTheme();
   const { hovered, hoverProps } = useHover();
+  const tint = color ?? (disabled ? theme.iconDisabled : theme.icon);
   return (
     <View tooltip={tooltip} style={style} {...hoverProps}>
-      <Pressable onPress={onPress} disabled={disabled}>
+      <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={tooltip}>
         {({ pressed }) => (
           <View
             style={{
@@ -54,13 +57,7 @@ export const IconButton = memo(function IconButton({
               backgroundColor: disabled ? undefined : pressed || active ? theme.toolbarPressed : hovered ? theme.toolbarHover : undefined,
             }}
           >
-            <Symbol
-              name={icon}
-              size={size}
-              weight={weight}
-              color={color ?? (disabled ? theme.iconDisabled : theme.icon)}
-              style={{ width: box, height: box }}
-            />
+            {glyph ? glyph(tint) : <Symbol name={icon ?? ""} size={size} weight={weight} color={tint} style={{ width: box, height: box }} />}
           </View>
         )}
       </Pressable>
@@ -68,18 +65,38 @@ export const IconButton = memo(function IconButton({
   );
 });
 
+export type FaviconSourceListener = (source: ResolvedFavicon | null) => void;
+
+function providerFavicon(url: string, resolved: ResolvedFavicon | null, broken: string | null, dark: boolean): ResolvedFavicon | null {
+  if (resolved && broken !== resolved.uri) return resolved;
+  const bundled = bundledSiteIcon(url, dark);
+  return bundled === undefined ? null : { uri: Image.resolveAssetSource(bundled).uri, profileId: "" };
+}
+
+function useReportedFavicon(onSource: FaviconSourceListener | undefined, shown: ResolvedFavicon | null) {
+  const uri = shown?.uri ?? null;
+  const profileId = shown?.profileId ?? "";
+  useLayoutEffect(() => {
+    if (!onSource) return;
+    onSource(uri === null ? null : { uri, profileId });
+    return () => onSource(null);
+  }, [onSource, uri, profileId]);
+}
+
 export const Favicon = memo(function Favicon({
   url,
   favicon,
   size = 16,
   profileId,
   direct,
+  onSource,
 }: {
   url: string;
   favicon?: string | null;
   size?: number;
   profileId?: string;
   direct?: boolean;
+  onSource?: FaviconSourceListener;
 }) {
   const theme = useTheme();
   useAppearanceDark();
@@ -88,6 +105,7 @@ export const Favicon = memo(function Favicon({
   const shape = useFaviconTheme(theme.dark || direct ? "" : url, favicon, profileId);
   const white = shape?.kind === "template" && !!shape.stroke;
   const [broken, setBroken] = useState<string | null>(null);
+  useReportedFavicon(onSource, onSource ? providerFavicon(url, resolved, broken, theme.dark) : null);
   if (!url && !resolved) return <NewTabIcon size={size} />;
   if (!resolved || broken === resolved.uri) return <FaviconFallback url={url} size={size} />;
   return (

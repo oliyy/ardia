@@ -1,9 +1,9 @@
 import { showMenu, type MenuItem } from "@ardia/shell";
-import { closeGroup, closeTab, moveTabToProfile, moveTabToWindow, switchToTab, toggleMute } from "../../lib/actions";
+import { closeGroup, closeTab, createProfile, moveTabToProfile, moveTabToWindow, switchProfile, switchToTab, toggleMute } from "../../lib/actions";
 import { folderChildren } from "../../store/bookmarks";
 import { useBrowser } from "../../store/browser";
 import { bookmarkProfileId, isIncognitoProfile, isPinnedRow, pinnedSectionTitle, pinSection, plural, tabLabel, togglePinTitle, viewTabIds, windowTitle } from "../../store/model";
-import { awayFromPin, canUndoClear, cleanedTabsFor, groupLabel, groupOf, keptDeletedGroups, selectedTabIds, type ClearedTabs } from "../../store/organize";
+import { awayFromPin, bookmarkableGroup, canUndoClear, cleanedTabsFor, groupLabel, groupOf, keptDeletedGroups, selectedTabIds, type ClearedTabs } from "../../store/organize";
 import { groupPath } from "../../store/groups";
 import { splitOf, splitRowPanes } from "../../store/splits";
 import type { GroupColor, Tab } from "../../store/types";
@@ -20,9 +20,12 @@ import {
 } from "./actions";
 import { isCalendarUrl } from "../../live/meetings";
 import { bookmarkTab } from "../bookmarks/actions";
-import { hideKeyedToast, showToast, useToasts } from "../layout/splitActions";
+import { hideKeyedToast, openNewTabInSplit, showToast, useToasts } from "../layout/splitActions";
+import { iconMenuItems } from "../profiles/icons";
+import { openSettings } from "../settings/windows";
 import { canShare, shareTab } from "../site/share";
 import { calendarMenuItem, newLiveFolderMenuItem, runCalendarMenu, runNewLiveFolder } from "./liveMenus";
+import { shownNodes } from "./pinnedTree";
 import { openSyncedTab, syncedDevicesMenuItem } from "../../sync/menu";
 import { setSidebarUi } from "./state";
 import { hasOwnGroupIcon } from "./TabIcon";
@@ -253,7 +256,7 @@ export async function openGroupMenu(windowId: string, groupId: string) {
     sep,
     { id: "newTab", title: "New Tab in Group", symbol: "plus", ...hint("t", "option", "command") },
     { id: "nest", title: "New Nested Group", symbol: "plus.rectangle.on.rectangle" },
-    ...(g.parentId ? [] : [{ id: "pin", title: g.pinned ? "Unpin Group" : "Pin Group", symbol: g.pinned ? "pin.slash" : "pin" }]),
+    ...(g.parentId ? [] : [{ id: "pin", title: g.pinned ? "Unpin Group" : "Pin Group", symbol: g.pinned ? "pin.slash" : "pin", enabled: !g.pinned || g.tabIds.length > 0 }]),
     { id: "duplicate", title: "Duplicate Group", symbol: "plus.square.on.square" },
     { id: "collapse", title: g.collapsed ? "Expand Group" : "Collapse Group", symbol: g.collapsed ? "chevron.down" : "chevron.up" },
     sep,
@@ -261,7 +264,7 @@ export async function openGroupMenu(windowId: string, groupId: string) {
     { id: "copyMd", title: "Copy All Links as Markdown", symbol: "text.badge.checkmark" },
     sep,
     { id: "ungroup", title: "Ungroup", symbol: "folder.badge.minus" },
-    { id: "bookmarkBar", title: "Move to Bookmark Bar", symbol: "bookmark" },
+    { id: "bookmarkBar", title: "Move to Bookmark Bar", symbol: "bookmark", enabled: bookmarkableGroup(s, groupId) },
     { id: "close", title: "Close Group", symbol: "xmark" },
     { id: "delete", title: "Delete Group", symbol: "trash" },
   ]);
@@ -349,23 +352,123 @@ export function middleClickTab(tabId: string) {
   if (removed.entries.length) showUndoToast(removed, "Removed Pinned Tab", "pin.slash");
 }
 
-export async function openOverflowMenu(windowId: string) {
+function recentlyClosedItem(profileId: string): MenuItem {
   const s = store();
-  const w = s.windows[windowId];
-  if (!w) return;
-  const muted = allMuted(windowId);
-  const open = viewTabIds(s, windowId).map((id) => s.tabs[id]!);
   const closed = [
     ...s.closedTabs
-      .filter((c) => c.tab.profileId === w.profileId)
+      .filter((c) => c.tab.profileId === profileId)
       .map((c) => ({ id: `restore:${c.id}`, title: c.tab.customTitle || c.tab.title || tabLabel(c.tab), symbol: "clock.arrow.circlepath", at: c.closedAt })),
     ...s.closedGroups.map((c) => ({ id: `restore:${c.id}`, title: `${c.group.name} (${plural(c.tabs.length, "Tab")})`, symbol: "rectangle.stack", at: c.closedAt })),
   ]
     .sort((a, b) => b.at - a.at)
     .slice(0, 15)
     .map(({ at: _, ...item }) => item);
-  const allCleaned = cleanedTabsFor(s, windowId);
+  return { id: "closed", title: "Recently Closed", symbol: "clock.arrow.circlepath", enabled: closed.length > 0, children: closed.length ? closed : [{ id: "none", title: "Empty", enabled: false }] };
+}
+
+function recentlyCleanedItem(windowId: string): MenuItem {
+  const allCleaned = cleanedTabsFor(store(), windowId);
   const cleaned = [...allCleaned].reverse().slice(0, 20);
+  return {
+    id: "cleaned",
+    title: "Recently Cleaned",
+    symbol: "wand.and.stars",
+    enabled: cleaned.length > 0,
+    children: cleaned.length
+      ? [
+          ...cleaned.map((c) => ({ id: `cleaned:${c.id}`, title: c.tab.customTitle || c.tab.title || tabLabel(c.tab) })),
+          sep,
+          { id: "restoreAll", title: `Restore ${plural(allCleaned.length, "Tab")}` },
+        ]
+      : [{ id: "none", title: "Empty", enabled: false }],
+  };
+}
+
+function runRestoreChoice(windowId: string, choice: string): boolean {
+  const s = store();
+  if (choice.startsWith("restore:")) s.restoreClosed(choice.slice(8), windowId);
+  else if (choice.startsWith("cleaned:")) s.restoreCleaned(choice.slice(8), windowId);
+  else if (choice === "restoreAll") s.restoreCleaned(undefined, windowId);
+  else return false;
+  return true;
+}
+
+export async function openLibraryMenu(windowId: string) {
+  const s = store();
+  const w = s.windows[windowId];
+  if (!w) return;
+  const choice = await showMenu([
+    { id: "downloads", title: "Downloads", symbol: "arrow.down.circle", ...hint("j", "shift", "command") },
+    sep,
+    recentlyCleanedItem(windowId),
+    recentlyClosedItem(w.profileId),
+    sep,
+    { id: "profiles", title: "Profiles", symbol: "person.2" },
+  ]);
+  if (!choice || runRestoreChoice(windowId, choice)) return;
+  if (choice === "downloads") s.setDownloadsOpen(windowId, !s.windowUi[windowId]?.downloadsOpen);
+  else if (choice === "profiles") openSettings("profiles", w.profileId);
+}
+
+async function changeProfileIcon(profileId: string) {
+  const profile = store().profiles[profileId];
+  if (!profile) return;
+  const choice = await showMenu(iconMenuItems(profile.icon));
+  if (!choice?.startsWith("icon:") || !store().profiles[profileId]) return;
+  store().updateProfile(profileId, { icon: choice.slice("icon:".length) || null });
+}
+
+const newFolderItem = (id: string): MenuItem => ({ id, title: "New Folder", symbol: "folder.badge.plus" });
+
+export function newPinnedFolder(windowId: string, profileId = store().windows[windowId]?.profileId) {
+  if (!profileId) return;
+  const id = store().newFolder(windowId, { profileId, siblings: shownNodes(store(), windowId, profileId, null) });
+  if (id) void startRename(windowId, { kind: "group", id });
+}
+
+export async function openSpaceMenu(windowId: string, profileId: string) {
+  const s = store();
+  if (!s.profiles[profileId]) return;
+  const showsProfile = () => store().windows[windowId]?.profileId === profileId;
+  const choice = await showMenu([
+    { id: "space:icon", title: "Change Profile Icon…" },
+    { id: "space:rename", title: "Rename Profile…" },
+    { id: "space:theme", title: "Edit Theme Color…" },
+    ...(showsProfile() ? [sep, newFolderItem("space:folder"), newLiveFolderMenuItem()] : []),
+    sep,
+    { id: "space:manage", title: "Manage Profiles…" },
+  ]);
+  if (!choice) return;
+  if (choice === "space:manage") openSettings("profiles");
+  else if (!store().profiles[profileId]) return;
+  else if (choice === "space:icon") void changeProfileIcon(profileId);
+  else if (choice === "space:rename" || choice === "space:theme") openSettings("profiles", profileId);
+  else if (!showsProfile()) return;
+  else if (choice === "space:folder") newPinnedFolder(windowId, profileId);
+  else runNewLiveFolder(windowId, choice);
+}
+
+export async function openNewMenu(windowId: string) {
+  const choice = await showMenu([
+    { id: "profile", title: "New Profile", symbol: "person.crop.circle.badge.plus" },
+    ...(store().windows[windowId]?.incognito ? [] : [newFolderItem("folder")]),
+    { id: "split", title: "New Split Pane", symbol: "rectangle.split.2x1", ...hint("=", "control", "shift") },
+    { id: "tab", title: "New Tab", symbol: "plus", ...hint("t", "command") },
+  ]);
+  if (choice === "folder") newPinnedFolder(windowId);
+  else if (choice === "profile") {
+    const id = await createProfile(windowId);
+    if (id) switchProfile(windowId, id);
+  } else if (choice === "split") openNewTabInSplit(windowId);
+  else if (choice === "tab" && !toggleNewTabBar(windowId)) store().newTab(windowId);
+}
+
+export async function openOverflowMenu(windowId: string) {
+  const s = store();
+  const w = s.windows[windowId];
+  if (!w) return;
+  const muted = allMuted(windowId);
+  const open = viewTabIds(s, windowId).map((id) => s.tabs[id]!);
   const deleted = keptDeletedGroups(s.deletedGroups)
     .reverse()
     .map((c) => ({ id: `restore:${c.id}`, title: `${c.group.name} (${plural(c.tabs.length, "Tab")})`, symbol: "trash" }));
@@ -382,20 +485,8 @@ export async function openOverflowMenu(windowId: string) {
       children: open.map((t) => ({ id: `tab:${t.id}`, title: tabTitle(t), checked: w.activeTabIds[w.profileId] === t.id })),
     },
     ...(synced ? [synced] : []),
-    { id: "closed", title: "Recently Closed", symbol: "clock.arrow.circlepath", enabled: closed.length > 0, children: closed.length ? closed : [{ id: "none", title: "Empty", enabled: false }] },
-    {
-      id: "cleaned",
-      title: "Recently Cleaned",
-      symbol: "wand.and.stars",
-      enabled: cleaned.length > 0,
-      children: cleaned.length
-        ? [
-            ...cleaned.map((c) => ({ id: `cleaned:${c.id}`, title: c.tab.customTitle || c.tab.title || tabLabel(c.tab) })),
-            sep,
-            { id: "restoreAll", title: `Restore ${plural(allCleaned.length, "Tab")}` },
-          ]
-        : [{ id: "none", title: "Empty", enabled: false }],
-    },
+    recentlyClosedItem(w.profileId),
+    recentlyCleanedItem(windowId),
     ...(deleted.length ? [{ id: "deleted", title: "Recently Deleted Groups", symbol: "trash", children: deleted }] : []),
     sep,
     { id: "clean", title: "Clean Up Tabs", symbol: "wand.and.stars", ...hint("k", "option", "command") },
@@ -408,9 +499,7 @@ export async function openOverflowMenu(windowId: string) {
   if (choice === "search") setSidebarUi({ searchTabs: windowId });
   else if (choice.startsWith("tab:")) switchToTab(choice.slice(4));
   else if (openSyncedTab(choice, windowId, w.profileId)) return;
-  else if (choice.startsWith("restore:")) s.restoreClosed(choice.slice(8), windowId);
-  else if (choice.startsWith("cleaned:")) s.restoreCleaned(choice.slice(8), windowId);
-  else if (choice === "restoreAll") s.restoreCleaned(undefined, windowId);
+  else if (runRestoreChoice(windowId, choice)) return;
   else if (choice === "clean") s.cleanUpTabs(windowId);
   else if (choice === "daily") s.updateSettings({ cleanUpInactiveTabsAfterHours: daily ? null : 24 });
   else if (choice === "mute") muteAll(windowId, !muted);

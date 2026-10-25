@@ -10,7 +10,9 @@ const listSpots = new Map<string, ListSpot>();
 let spotOrder = 0;
 const store = () => useBrowser.getState();
 
-export const movePinnedTitle = (s: BrowserState, tab: Tab | undefined) => (tab?.pinned ? "Move out of Pinned" : `Move to ${pinnedSectionTitle(s, tab)}`);
+const pinnedHere = (s: BrowserState, t: Tab) => t.pinned || !!groupOf(s, t.id)?.pinned;
+
+export const movePinnedTitle = (s: BrowserState, tab: Tab | undefined) => (tab && pinnedHere(s, tab) ? "Move out of Pinned" : `Move to ${pinnedSectionTitle(s, tab)}`);
 
 const listTabIds = (s: BrowserState, windowId: string, profileId: string, except: Set<string>) =>
   (s.windows[windowId]?.tabIds ?? []).filter((id) => {
@@ -23,8 +25,8 @@ export function togglePinnedRows(windowId: string) {
   const tab = activeTab(s, windowId);
   if (!tab) return;
   const selected = selectedTabIds(s, windowId).map((id) => s.tabs[id]!).filter((t) => t.profileId === tab.profileId);
-  if (!tab.pinned) return moveToPinnedRows(s, windowId, selected.filter((t) => !t.pinned));
-  moveOutOfPinned(selected.filter((t) => t.pinned));
+  if (!pinnedHere(s, tab)) return moveToPinnedRows(s, windowId, selected.filter((t) => !pinnedHere(s, t)));
+  moveOutOfPinned(selected.filter((t) => pinnedHere(s, t)));
 }
 
 function moveToPinnedRows(s: BrowserState, windowId: string, tabs: Tab[]) {

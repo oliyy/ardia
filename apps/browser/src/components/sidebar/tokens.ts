@@ -1,9 +1,16 @@
+import { colorHexAlpha } from "../../lib/profileTheme";
 import { layout, useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import type { GroupColor } from "../../store/types";
+import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { useSidebarUi } from "./state";
 
 const DARK = {
+  fieldFill: "rgba(255,255,255,0.1)",
+  selectedFill: "rgba(255,255,255,0.2)",
+  favoriteActiveFill: "rgba(255,255,255,0.47)",
+  favoriteActiveRim: ["rgba(255,255,255,0.72)", "rgba(255,255,255,0.65)"] as [string, string],
+  spaceDivider: "rgba(255,255,255,0.05)",
   groupFill: "rgba(255,255,255,0.1)",
   groupFillEmphasized: "rgba(255,255,255,0.12)",
   groupHeaderHover: "rgba(255,255,255,0.12)",
@@ -28,6 +35,11 @@ const DARK = {
 };
 
 const LIGHT: typeof DARK = {
+  fieldFill: "rgba(0,0,0,0.05)",
+  selectedFill: "rgba(255,255,255,0.7)",
+  favoriteActiveFill: "rgba(255,255,255,0.7)",
+  favoriteActiveRim: ["rgba(255,255,255,0)", "rgba(255,255,255,0)"],
+  spaceDivider: "rgba(0,0,0,0.05)",
   groupFill: "rgba(0,0,0,0.05)",
   groupFillEmphasized: "rgba(0,0,0,0.07)",
   groupHeaderHover: "rgba(255,255,255,0.4)",
@@ -55,6 +67,24 @@ type SidebarTokens = typeof DARK;
 
 export function useSidebarTokens(): SidebarTokens {
   return useTheme().dark ? DARK : LIGHT;
+}
+
+export const ARC_DARK_LABEL = "#FFFFFFD3";
+export const ARC_DARK_SELECTED_LABEL = "#FFFFFFCC";
+export const ARC_SELECTED_INACTIVE = 0.525;
+
+export function useArcLabel(): string | null {
+  const dark = useTheme().dark;
+  const flat = useAddressBarInSidebar();
+  return flat && dark ? ARC_DARK_LABEL : null;
+}
+
+export const arcSelectedLabel = (arcLabel: string | null) => (arcLabel ? ARC_DARK_SELECTED_LABEL : null);
+
+export function useArcTitle(): string | null {
+  const theme = useTheme();
+  const supplied = useAddressBarInSidebar() ? theme.custom?.favoriteMutedColor : undefined;
+  return supplied ? colorHexAlpha(theme.dark ? supplied.dark : supplied.light) : null;
 }
 
 export const GROUP_COLORS: Record<GroupColor, { name: string; hex: string }> = {
@@ -105,7 +135,7 @@ export function withAlpha(hex: string, alpha: number): string {
 }
 
 export const SIDEBAR_MIN_WIDTH = 160;
-export const SIDEBAR_MAX_WIDTH = 400;
+export const SIDEBAR_MAX_WIDTH = 500;
 
 export function useSidebarWidth(windowId: string): number {
   const saved = useBrowser((s) => s.settings.sidebarWidth ?? layout.sidebarWidth);

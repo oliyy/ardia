@@ -5,6 +5,7 @@ import { setSidebarUi, sidebarUi } from "./state";
 
 const SHOW_AFTER_MS = 140;
 const POINTER_POLL_MS = 50;
+const MAX_TABS = 5;
 let showTimer: ReturnType<typeof setTimeout> | undefined;
 let pointerTimer: ReturnType<typeof setInterval> | undefined;
 let hoveredRow: number | null = null;
@@ -14,7 +15,7 @@ let pointerStale = false;
 export function switcherStep(windowId: string, backward: boolean) {
   const current = sidebarUi().switcher;
   if (current && current.windowId === windowId) return moveSwitcher(backward ? -1 : 1);
-  const ids = recentTabIds(useBrowser.getState(), windowId);
+  const ids = recentTabIds(useBrowser.getState(), windowId).slice(0, MAX_TABS);
   if (ids.length < 2) return;
   setSidebarUi({ switcher: { windowId, ids, index: backward ? ids.length - 1 : 1, visible: false } });
   setSwitcherCapture(true);

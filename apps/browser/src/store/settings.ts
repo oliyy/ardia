@@ -150,7 +150,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bookmarksBar: "never",
   hideBookmarksBarImport: false,
   appearance: "auto",
-  addressBar: "toolbar",
+  addressBar: "sidebar",
   commandBarPlacement: "field",
   defaultProfileId: DEFAULT_PROFILE_ID,
   shortcuts: {},

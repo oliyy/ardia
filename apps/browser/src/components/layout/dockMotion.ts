@@ -25,7 +25,7 @@ export function springAt(
 }
 
 export const LIGHTS_CENTER: readonly [number, number] = [25, 27];
-export const ARC_LIGHTS_CENTER: readonly [number, number] = [25, 24];
+export const ARC_LIGHTS_CENTER: readonly [number, number] = [20, 24];
 export const TOP_STRIP_LIGHTS_CENTER: readonly [number, number] = [20.75, 20.75];
 
 export const PEEK_ORIGIN: readonly [number, number] = [5, 5];
@@ -64,7 +64,7 @@ export const overPeek = (windowId: string, x: number) => x < (useDockMotion.getS
 export const usePeekEdge = (windowId: string): number | undefined => useDockMotion((m) => m.peeks[windowId]);
 export const devPeeks: Record<string, { show(): void; hide(): void }> = {};
 
-export const HEADER_TOOLS = { toggleX: 70.75 + 27, pitch: 35, edge: 7, lightsRight: 70.75 + 7 } as const;
+export const HEADER_TOOLS = { toggleX: 65.75 + 27, pitch: 34, edge: 7, lightsRight: 65.75 + 7 } as const;
 
 export const HEADER_MIN_GAP = 2;
 

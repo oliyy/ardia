@@ -62,13 +62,13 @@ test("the peek panel covers the card's rounded corners, so no sliver of the page
   }
 });
 
-test("with the address field in the sidebar the lights sit Arc's 3 pt higher, docked, sliding and in the peek", () => {
+test("with the address field in the sidebar the lights sit Arc's 3 pt higher and 5 pt further left, docked, sliding and in the peek", () => {
   const arc = dm.ARC_LIGHTS_CENTER;
-  assert.deepEqual(arc, [dm.LIGHTS_CENTER[0], dm.LIGHTS_CENTER[1] - 3]);
-  assert.deepEqual(dm.lightsCenter(0, 0, arc), [25, 24], "docked: placed, not left at AppKit's default");
-  assert.deepEqual(dm.lightsCenter(95, 0, arc), [25 - 95, 24], "half way out on the same row");
+  assert.deepEqual(arc, [dm.LIGHTS_CENTER[0] - 5, dm.LIGHTS_CENTER[1] - 3]);
+  assert.deepEqual(dm.lightsCenter(0, 0, arc), [20, 24], "docked: placed, not left at AppKit's default");
+  assert.deepEqual(dm.lightsCenter(95, 0, arc), [20 - 95, 24], "half way out on the same row");
   const [px, py] = dm.PEEK_ORIGIN;
-  assert.deepEqual(dm.lightsCenter(-px, py, arc), [25 + px, 24 + py], "in the peek panel");
+  assert.deepEqual(dm.lightsCenter(-px, py, arc), [20 + px, 24 + py], "in the peek panel");
 });
 
 test("the card's left edge runs from the inset to the sidebar's width", () => {
@@ -99,12 +99,12 @@ test("the sidebar's own button (address bar in the sidebar) always fits; back, f
   assert.deepEqual(dm.navButtonsFitting(160).buttons, ["back"]);
   const narrow = dm.navButtonsFitting(190);
   assert.deepEqual(narrow.buttons, ["back", "forward"], "the default width keeps the back and forward pair, as Arc and Dia show it; reload gives way first");
-  assert.equal(narrow.step, 35, "Dia's pitch");
-  const closing = dm.navButtonsFitting(220);
+  assert.equal(narrow.step, 34, "Arc's pitch");
+  const closing = dm.navButtonsFitting(214);
   assert.deepEqual(closing.buttons, ["back", "forward", "reload"]);
-  assert.ok(closing.step >= 30 + dm.HEADER_MIN_GAP && closing.step < 35, "closed up, plates apart");
-  assert.deepEqual(dm.navButtonsFitting(224.75), { buttons: ["back", "forward", "reload"], step: 35 });
-  assert.deepEqual(dm.navButtonsFitting(400), { buttons: ["back", "forward", "reload"], step: 35 });
+  assert.ok(closing.step >= 30 + dm.HEADER_MIN_GAP && closing.step < 34, "closed up, plates apart");
+  assert.deepEqual(dm.navButtonsFitting(216.75), { buttons: ["back", "forward", "reload"], step: 34 });
+  assert.deepEqual(dm.navButtonsFitting(400), { buttons: ["back", "forward", "reload"], step: 34 });
   assert.equal(dm.navButtonsFitting(100).buttons.length, 0);
   for (let w = 150; w <= 400; w += 0.5) {
     const { buttons, step } = dm.navButtonsFitting(w);
@@ -115,7 +115,7 @@ test("the sidebar's own button (address bar in the sidebar) always fits; back, f
 });
 
 test("with the sidebar button hidden (Settings › Tabs), back, forward and reload take its place and all fit at the default width", () => {
-  assert.deepEqual(dm.navButtonsFitting(190, 30, false), { buttons: ["back", "forward", "reload"], step: 35 });
+  assert.deepEqual(dm.navButtonsFitting(190, 30, false), { buttons: ["back", "forward", "reload"], step: 34 });
   assert.deepEqual(dm.navButtonsFitting(150, 30, false).buttons, ["back", "forward"]);
   for (let w = 120; w <= 400; w += 0.5) {
     const { buttons, step } = dm.navButtonsFitting(w, 30, false);

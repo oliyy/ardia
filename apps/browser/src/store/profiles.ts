@@ -152,12 +152,13 @@ export const createProfilesSlice: StateCreator<BrowserState, [], [], ProfilesSli
         groups: Object.fromEntries(Object.entries(s.groups).filter(([, g]) => g.profileId !== id)),
         closedTabs: s.closedTabs.filter((c) => c.tab.profileId !== id),
         cleanedTabs: s.cleanedTabs.filter((c) => c.tab.profileId !== id),
-        closedGroups: s.closedGroups.filter((c) => c.tabs.every((t) => t.profileId !== id)),
-        deletedGroups: s.deletedGroups.filter((c) => c.tabs.every((t) => t.profileId !== id)),
+        closedGroups: s.closedGroups.filter((c) => c.tree?.profileId !== id && c.tabs.every((t) => t.profileId !== id)),
+        deletedGroups: s.deletedGroups.filter((c) => c.tree?.profileId !== id && c.tabs.every((t) => t.profileId !== id)),
         closedWindows: s.closedWindows
           .map((c) => ({ ...c, tabs: c.tabs.filter((t) => t.profileId !== id) }))
           .filter((c) => c.tabs.length > 0),
         parkedPins: without(s.parkedPins, [id]),
+        pinPlace: without(s.pinPlace, [id]),
       });
       for (const w of Object.values(get().windows)) {
         if (!viewTabIds(get(), w.id).length) get().newTab(w.id);

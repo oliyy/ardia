@@ -12,6 +12,8 @@ export type ThemeMode = "auto" | "light" | "dark";
 
 export type ThemeTexture = "grain" | "sand" | "denim" | "tweed";
 
+export type ArcStyle = "auto" | "light" | "dark";
+
 export type ThemeLook = {
   stops: ThemeStop[];
   intensity: number;
@@ -19,11 +21,17 @@ export type ThemeLook = {
   texture: ThemeTexture;
   translucency: number;
   angle?: number;
+  arcStyle?: ArcStyle;
 };
 
 export type ProfileTheme = ThemeLook & {
   mode: ThemeMode;
   dark?: ThemeLook;
+  foregroundSecondary?: { light: ThemeColor; dark: ThemeColor };
+  maxContrastColor?: { light: ThemeColor; dark: ThemeColor };
+  favoriteMutedColor?: { light: ThemeColor; dark: ThemeColor };
+  minContrastColor?: { light: ThemeColor; dark: ThemeColor };
+  subtitle?: { light: ThemeColor; dark: ThemeColor };
 };
 
 export type Profile = {
@@ -179,6 +187,15 @@ export type ParkedPins = {
 
 export type NestedGroupSnapshot = Pick<TabGroup, "id" | "name" | "icon" | "color" | "collapsed"> & { parentId: string; tabIndexes: number[] };
 
+export type ClosedTree = {
+  root: string;
+  profileId: string;
+  places: Record<string, { parent: string | null; pos: string; url?: string; title?: string }>;
+  tabs: string[];
+  folders: (Pick<TabGroup, "name" | "icon" | "color" | "collapsed"> & { node: string })[];
+  live: unknown[];
+};
+
 export type ClosedGroup = {
   kind: "group";
   id: string;
@@ -189,6 +206,7 @@ export type ClosedGroup = {
   windowId: string;
   index: number;
   closedAt: number;
+  tree?: ClosedTree;
 };
 
 export type FindState = {

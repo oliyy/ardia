@@ -1,13 +1,15 @@
+import { markLocalDataReady } from "@ardia/sync";
 import { create, type StateCreator } from "zustand";
 import { createBookmarksSlice, ensureRoots, type BookmarksSlice } from "./bookmarks";
 import { changedIds } from "./changes";
-import { createGroupsSlice, settleNesting, type GroupsSlice } from "./groups";
+import { createGroupsSlice, nestGroups, settleNesting, type GroupsSlice } from "./groups";
 import { createHistorySlice, type HistorySlice } from "./history";
 import { normalizeLinkRouting } from "./linkRouting";
 import { IDLE_LIVE, isIncognitoProfile, pinnedFirst } from "./model";
 import { createOrganizeSlice, forgetClosedPrivateWindows, keptCleanedTabs, keptDeletedGroups, livePinTable, notePinChoices, type OrganizeSlice } from "./organize";
 import { createPeekSlice, settlePeeks, type PeekSlice } from "./peek";
-import { mirrorPins } from "./pinMirror";
+import { mirrorPins, settlePinHierarchy, trackHomeTitles, trackPinStructure } from "./pinMirror";
+import { migratedPlaces, placementMayDiffer, trackLeafAddresses } from "./pinTree";
 import { settleSharedPins } from "./pinShare";
 import { mirrorTabs, pagesIntoSplits, unshareTabs } from "./tabShare";
 import { settleTileFolders } from "./tileFolders";
@@ -49,7 +51,7 @@ export type HydrateData = Partial<
     | "closedWindows"
     | "parkedPins"
     | "pinChoices"
-    | "pinSync"
+    | "pinPlace"
     | "closedGroups"
     | "deletedGroups"
     | "cleanedTabs"
@@ -136,12 +138,12 @@ export const useBrowser = create<BrowserState>()(transactions.middleware(batched
     for (const t of Object.values(tabs)) if (!windows[t.windowId]) delete tabs[t.id];
     const windowOrder = [...(data.windowOrder ?? []).filter((id) => windows[id]), ...Object.keys(windows).filter((id) => !data.windowOrder?.includes(id))];
     const inWindow = (id: string, windowId: string) => tabs[id]?.windowId === windowId;
-    const groups = Object.fromEntries(
+    const groups = nestGroups(Object.fromEntries(
       Object.values(data.groups ?? {})
         .map((g) => ({ ...g, tabIds: g.tabIds.filter((id) => inWindow(id, g.windowId)) }))
-        .filter((g) => g.tabIds.length)
+        .filter((g) => g.tabIds.length || (g.pinned && !!windows[g.windowId]))
         .map((g) => [g.id, g]),
-    );
+    ));
     const splits = sanitizeSplits(data.splits ?? {}, tabs);
     let bookmarks = data.bookmarks ?? s.bookmarks;
     for (const id of profileOrder) bookmarks = ensureRoots(bookmarks, id)[0];
@@ -164,7 +166,7 @@ export const useBrowser = create<BrowserState>()(transactions.middleware(batched
       closedWindows: data.closedWindows ?? [],
       parkedPins: Object.fromEntries(Object.entries(data.parkedPins ?? {}).filter(([p]) => profiles[p])),
       pinChoices: Object.fromEntries(Object.entries(data.pinChoices ?? {}).filter(([p]) => profiles[p])),
-      pinSync: Object.fromEntries(Object.entries(data.pinSync ?? {}).filter(([p]) => profiles[p])),
+      pinPlace: {},
       closedGroups: data.closedGroups ?? [],
       deletedGroups: keptDeletedGroups(data.deletedGroups ?? []),
       cleanedTabs: keptCleanedTabs((data.cleanedTabs ?? []).filter((c) => !isIncognitoProfile(c.tab.profileId))),
@@ -186,8 +188,12 @@ export const useBrowser = create<BrowserState>()(transactions.middleware(batched
         lastProfileId: data.lastProfileId && profiles[data.lastProfileId] ? data.lastProfileId : null,
       },
     };
+    const savedPlaces = data.pinPlace ? Object.fromEntries(Object.entries(data.pinPlace).filter(([p]) => profiles[p])) : undefined;
+    const pinPlace = migratedPlaces(next, savedPlaces);
+    next = settlePinHierarchy({ ...next, pinPlace });
     for (const id of next.ui.focusOrder) next = apply(next, activated(next, windows[id]!.activeTabIds[windows[id]!.profileId]!));
     set(next);
+    markLocalDataReady();
   },
 }))));
 
@@ -203,10 +209,9 @@ useBrowser.subscribe((s, prev) => {
 });
 
 useBrowser.subscribe((s, prev) => {
-  if (s.pinChoices === prev.pinChoices && s.pinSync === prev.pinSync && s.tabs === prev.tabs && s.groups === prev.groups && s.parkedPins === prev.parkedPins && s.profiles === prev.profiles) return;
+  if (s.pinChoices === prev.pinChoices && s.tabs === prev.tabs && s.groups === prev.groups && s.parkedPins === prev.parkedPins && s.profiles === prev.profiles) return;
   const pinChoices = livePinTable(s.pinChoices, s);
-  const pinSync = livePinTable(s.pinSync, s);
-  if (pinChoices !== s.pinChoices || pinSync !== s.pinSync) useBrowser.setState({ pinChoices, pinSync });
+  if (pinChoices !== s.pinChoices) useBrowser.setState({ pinChoices });
 });
 
 useBrowser.subscribe((s, prev) => {
@@ -217,12 +222,18 @@ useBrowser.subscribe((s, prev) => {
 let mirroring = 0;
 useBrowser.subscribe((s, prev) => {
   if (mirroring > 3) return;
-  const unshared = unshareTabs(s, prev) ?? pagesIntoSplits(s, prev);
-  const base = unshared ?? s;
+  const structured = mirroring ? s : trackPinStructure(s, prev);
+  const unshared = unshareTabs(structured, prev) ?? pagesIntoSplits(structured, prev);
+  const base = unshared ?? structured;
   const shared = settleSharedPins(base, prev) ?? unshared;
   const settled = settleTileFolders(shared ?? base, prev) ?? shared;
   const pinned = mirrorPins(settled ?? base, prev) ?? settled;
-  const next = mirrorTabs(pinned ?? base, prev) ?? pinned;
+  const projected = pinned || placementMayDiffer(base, prev) ? settlePinHierarchy(pinned ?? base) : base;
+  let mirrored = mirrorTabs(projected, prev) ?? projected;
+  const tracked = trackHomeTitles({ tabs: mirrored.tabs, pinPlace: trackLeafAddresses(mirrored, prev) }, prev);
+  if (tracked !== mirrored.pinPlace) mirrored = { ...mirrored, pinPlace: tracked };
+  const placed = mirrored !== s || placementMayDiffer(s, prev) ? settlePinHierarchy(mirrored) : mirrored;
+  const next = placed !== s ? placed : null;
   if (!next) return;
   mirroring++;
   try {

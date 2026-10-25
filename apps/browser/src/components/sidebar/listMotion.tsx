@@ -1,11 +1,16 @@
 import { createContext, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Surface } from "@ardia/shell";
 import { Animated, Easing, View } from "react-native";
 import { layout, useTheme } from "../../lib/theme";
 import { useBrowser, type BrowserState } from "../../store/browser";
+import { live } from "../../live/store";
 import { useAnimatedStyle, type ClipSource, type EntryMotion } from "./entryMotion";
-import { groupEntries } from "./entries";
-import { entryHeight } from "./geometry";
-import { ghostEntry, snapshotEntry, type EntrySnapshot } from "./GhostEntry";
+import { addressBarInSidebar } from "../layout/windowLayout";
+import { entryHeight, rootLift, type HeightBasis } from "./geometry";
+import { ghostEntry, snapshotEntry, type EntrySnapshot, type LiveData } from "./GhostEntry";
+import { folderChildren, folderChildrenWith, liveAsOf, liveHeightsNow, retainedLiveHeights, type LiveHeights } from "./pinnedTree";
+import { liveNode } from "../../store/pinTree";
+import { useArcLabel } from "./tokens";
 
 export const SLIDE_MS = 140;
 export const FADE_MS = 100;
@@ -18,44 +23,59 @@ const devScale = () => (__DEV__ ? ((globalThis as { sidebarMotionScale?: number 
 
 type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean };
 type Ghost = { key: string; anchor: string | null; y: number; snapshot: EntrySnapshot; opacity: Animated.Value; until: number };
-type Snapshot = { state: BrowserState; list: string[] };
+type Snapshot = { state: BrowserState; list: string[]; live: LiveData; heights: LiveHeights };
 type Move = { key: string; from: number };
 type Plan = { moves: Move[]; ghosts: Ghost[]; clipped: string[]; below: number };
 type Offsets = { at: Map<string, number>; end: number };
 type Height = (s: BrowserState, entry: string) => number;
 type Planner = (before: Snapshot, after: Snapshot, slides: Map<string, Slide>, ghosts: Ghost[], t: number) => Plan | null;
 export type ListSlot = { entry: string } | { ghost: Ghost; top: number };
-export type Capture = { state: BrowserState | null; list: string[] | null; pending: Snapshot | null };
+export type Capture = { state: BrowserState | null; list: string[] | null; live: LiveData | null; pending: Snapshot | null };
+export type Boundary = (list: string[]) => { above: number; below: number };
 export type ListMotionScope = { enabled: boolean; slideBelow: ((entry: string, delta: number) => void) | null };
 
 export const ListMotionContext = createContext<ListMotionScope>({ enabled: false, slideBelow: null });
-export const newCapture = (): Capture => ({ state: null, list: null, pending: null });
+export const newCapture = (): Capture => ({ state: null, list: null, live: null, pending: null });
+
+const placedAnywhere = (s: BrowserState, folderId: string) => Object.values(s.pinPlace).some((table) => !!table[liveNode(folderId)]);
 
 export function capture<T>(into: Capture, s: BrowserState, list: string[], value: T): T {
-  if (into.list && into.state && list !== into.list && !into.pending) into.pending = { state: into.state, list: into.list };
+  if (into.list && into.state && into.live && list !== into.list && !into.pending) into.pending = { state: into.state, list: into.list, live: liveAsOf(into.live), heights: retainedLiveHeights() };
+  const current = live();
+  const lost = into.live && list === into.list ? Object.keys(into.live.folders).filter((id) => !current.folders[id]) : [];
+  const awaiting = lost.length > 0 && (s === into.state || lost.some((id) => placedAnywhere(s, id)));
   into.list = list;
   into.state = s;
+  if (!awaiting) into.live = current;
   return value;
 }
 
+const basisOf = (snap: Snapshot): HeightBasis => ({ folders: snap.live.folders, heights: snap.heights });
+
 let ghostIds = 0;
 
-const tabsOf = (s: BrowserState, entry: string): string[] => {
+type Subtree = { tabs: string[]; groups: string[]; lives: string[] };
+
+function subtreeOf(snap: Snapshot, windowId: string, profileId: string, entry: string, into: Subtree = { tabs: [], groups: [], lives: [] }): Subtree {
   const id = entry.slice(2);
-  if (entry.startsWith("g:")) return s.groups[id]?.tabIds ?? [];
-  if (entry.startsWith("s:")) return s.splits[id]?.tabIds ?? [];
-  return [id];
+  if (entry.startsWith("l:")) into.lives.push(id);
+  else if (entry.startsWith("s:")) into.tabs.push(...(snap.state.splits[id]?.tabIds ?? []));
+  else if (!entry.startsWith("g:")) into.tabs.push(id);
+  else if (!into.groups.includes(id)) {
+    into.groups.push(id);
+    if (snap.state.groups[id]) for (const child of folderChildrenWith(snap.state, windowId, profileId, id, snap.live.folders)) subtreeOf(snap, windowId, profileId, child, into);
+  }
+  return into;
+}
+
+const goneFrom = (from: Snapshot, to: Snapshot, windowId: string, profileId: string) => (entry: string) => {
+  const { tabs, groups, lives } = subtreeOf(from, windowId, profileId, entry);
+  if (!tabs.length && !groups.length && !lives.length) return false;
+  return tabs.every((id) => !to.state.tabs[id]) && groups.every((id) => !to.state.groups[id]) && lives.every((id) => !to.live.folders[id]);
 };
 
-const closedIn = (before: BrowserState, after: BrowserState) => (entry: string) => {
-  const ids = tabsOf(before, entry);
-  return ids.length > 0 && ids.every((id) => !after.tabs[id]);
-};
-
-const openedIn = (before: BrowserState, after: BrowserState) => (entry: string) => {
-  const ids = tabsOf(after, entry);
-  return ids.length > 0 && ids.every((id) => !before.tabs[id]);
-};
+const closedIn = (before: Snapshot, after: Snapshot, windowId: string, profileId: string) => goneFrom(before, after, windowId, profileId);
+const openedIn = (before: Snapshot, after: Snapshot, windowId: string, profileId: string) => goneFrom(after, before, windowId, profileId);
 
 function offsets(s: BrowserState, entries: string[], height: Height, start = 0, base = 0): Offsets {
   const at = new Map<string, number>();
@@ -135,12 +155,12 @@ function buildPlan({ before, after, old, next, removed, added, slides, ghosts, t
 
 type GroupChange = "same" | "grown" | "extended" | "other";
 
-function groupGrowsAtEnd(before: BrowserState, after: BrowserState, groupId: string): boolean {
-  const last = groupEntries(after, groupId).at(-1);
-  return !!last && !groupEntries(before, groupId).includes(last);
+function groupGrowsAtEnd(before: BrowserState, after: BrowserState, windowId: string, profileId: string, groupId: string): boolean {
+  const last = folderChildren(after, windowId, profileId, groupId).at(-1);
+  return !!last && !folderChildren(before, windowId, profileId, groupId).includes(last);
 }
 
-function groupChange(before: BrowserState, after: BrowserState, groupId: string): GroupChange {
+function groupChange(before: BrowserState, after: BrowserState, windowId: string, profileId: string, groupId: string): GroupChange {
   const was = before.groups[groupId];
   const now = after.groups[groupId];
   if (!was || !now) return "other";
@@ -152,7 +172,7 @@ function groupChange(before: BrowserState, after: BrowserState, groupId: string)
   const expanded = !was.collapsed && !now.collapsed;
   if (expanded && !came.length && gone.every((id) => !after.tabs[id])) return "extended";
   if (!expanded || gone.length || !came.every((id) => !before.tabs[id])) return "other";
-  return groupGrowsAtEnd(before, after, groupId) ? "grown" : "extended";
+  return groupGrowsAtEnd(before, after, windowId, profileId, groupId) ? "grown" : "extended";
 }
 
 type Core = {
@@ -227,7 +247,7 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
   const before = from.pending;
   if (before) {
     from.pending = null;
-    const plan = enabled ? planner(before, { state: useBrowser.getState(), list: entries }, slides, ghosts.current, Date.now()) : null;
+    const plan = enabled ? planner(before, { state: useBrowser.getState(), list: entries, live: live(), heights: liveHeightsNow() }, slides, ghosts.current, Date.now()) : null;
     if (plan) prepare(plan, Date.now());
   }
   if (entries !== seen.current) {
@@ -325,13 +345,15 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
 export function useListMotion(windowId: string, profileId: string, entries: string[], from: Capture, enabled: boolean) {
   const height: Height = (s, e) => entryHeight(s, windowId, profileId, e);
   const planner: Planner = (before, after, slides, ghosts, t) => {
+    const was: Height = (s, e) => entryHeight(s, windowId, profileId, e, basisOf(before));
+    const is: Height = (s, e) => entryHeight(s, windowId, profileId, e, basisOf(after));
     const changes = new Map<string, GroupChange>();
     if (before.state.groups !== after.state.groups) {
       const had = new Set(before.list);
       for (const e of after.list) {
         if (!had.has(e) || !e.startsWith("g:")) continue;
-        const change = groupChange(before.state, after.state, e.slice(2));
-        if (change === "other" && height(before.state, e) !== height(after.state, e)) return null;
+        const change = groupChange(before.state, after.state, windowId, profileId, e.slice(2));
+        if (change === "other" && was(before.state, e) !== is(after.state, e)) return null;
         if (change === "grown" || change === "extended") changes.set(e, change);
       }
     }
@@ -341,17 +363,52 @@ export function useListMotion(windowId: string, profileId: string, entries: stri
     const removed = before.list.slice(start).filter((e) => !kept.has(e));
     const added = after.list.slice(start).filter((e) => !had.has(e));
     if (!removed.length && !added.length && !changes.size) return null;
-    if (!removed.every(closedIn(before.state, after.state)) || !added.every(openedIn(before.state, after.state))) return null;
+    if (!removed.every(closedIn(before, after, windowId, profileId)) || !added.every(openedIn(before, after, windowId, profileId))) return null;
     const grown = [...changes].flatMap(([e, c]) => (c === "grown" ? [e] : []));
     if (!removed.length && !added.length && !grown.length) return null;
-    const now: Height = (s, e) => (changes.get(e) === "extended" ? height(before.state, e) : height(s, e));
+    const now: Height = (s, e) => (changes.get(e) === "extended" ? was(before.state, e) : is(s, e));
     const base = prefixHeight(after.state, after.list, start, now);
-    const old = offsets(before.state, before.list, height, start, base);
+    const old = offsets(before.state, before.list, was, start, base);
     const next = offsets(after.state, after.list, now, start, base);
-    const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e);
+    const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e, before.live);
     return buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: grown, start });
   };
-  return useMotion({ devKey: windowId, entries, from, planner, height: (e) => height(useBrowser.getState(), e), enabled, native: true });
+  return useMotion({ devKey: `${windowId}:${profileId}:today`, entries, from, planner, height: (e) => height(useBrowser.getState(), e), enabled, native: true });
+}
+
+export function usePinnedMotion(windowId: string, profileId: string, entries: string[], from: Capture, enabled: boolean, boundary: Boundary) {
+  const liftIn = (s: BrowserState, list: string[], i: number) => rootLift(addressBarInSidebar(s, windowId), list[i - 1], list[i]!);
+  const rootOffsets = (snap: Snapshot, base: number): Offsets => {
+    const at = new Map<string, number>();
+    let y = base;
+    snap.list.forEach((e, i) => {
+      const lift = liftIn(snap.state, snap.list, i);
+      at.set(e, y + lift);
+      y += lift + entryHeight(snap.state, windowId, profileId, e, basisOf(snap)) + GAP;
+    });
+    return { at, end: snap.list.length ? y - GAP : base };
+  };
+  const planner: Planner = (before, after, slides, ghosts, t) => {
+    const had = new Set(before.list);
+    const kept = new Set(after.list);
+    const removed = before.list.filter((e) => !kept.has(e));
+    const added = after.list.filter((e) => !had.has(e));
+    if (!removed.length === !added.length) return null;
+    if (!removed.every(closedIn(before, after, windowId, profileId)) || !added.every(openedIn(before, after, windowId, profileId))) return null;
+    const was = boundary(before.list);
+    const is = boundary(after.list);
+    const old = rootOffsets(before, was.above - is.above);
+    old.end += was.below - is.below;
+    const next = rootOffsets(after, 0);
+    const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e, before.live);
+    return buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: [], start: 0 });
+  };
+  const height = (e: string) => {
+    const s = useBrowser.getState();
+    const i = entries.indexOf(e);
+    return (i < 0 ? 0 : liftIn(s, entries, i)) + entryHeight(s, windowId, profileId, e);
+  };
+  return useMotion({ devKey: `${windowId}:${profileId}:pinned`, entries, from, planner, height, enabled, native: false });
 }
 
 export function useGroupMotion(windowId: string, profileId: string, groupId: string, entries: string[], from: Capture, scope: ListMotionScope, enabled: boolean) {
@@ -365,11 +422,11 @@ export function useGroupMotion(windowId: string, profileId: string, groupId: str
     const removed = before.list.filter((e) => !kept.has(e));
     const added = after.list.filter((e) => !had.has(e));
     if (!removed.length === !added.length) return null;
-    if (!removed.every(closedIn(before.state, after.state)) || !added.every(openedIn(before.state, after.state))) return null;
-    const old = offsets(before.state, before.list, height);
-    const next = offsets(after.state, after.list, height);
-    const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e);
-    const atEnd = !removed.length && groupGrowsAtEnd(before.state, after.state, groupId);
+    if (!removed.every(closedIn(before, after, windowId, profileId)) || !added.every(openedIn(before, after, windowId, profileId))) return null;
+    const old = offsets(before.state, before.list, (s, e) => entryHeight(s, windowId, profileId, e, basisOf(before)));
+    const next = offsets(after.state, after.list, (s, e) => entryHeight(s, windowId, profileId, e, basisOf(after)));
+    const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e, before.live);
+    const atEnd = !removed.length && groupGrowsAtEnd(before.state, after.state, windowId, profileId, groupId);
     const plan = buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: !atEnd, snapshot, clipAfter: [], start: 0 });
     if (!atEnd) return plan;
     return { ...(plan ?? { moves: [], ghosts: [], clipped: [] }), below: old.end - next.end };
@@ -382,9 +439,12 @@ export const GhostSlot = memo(function GhostSlot({ snapshot, top, opacity }: { s
   const style = useMemo(() => ({ opacity }), [opacity]);
   const [fade, ref] = useAnimatedStyle(style);
   const theme = useTheme();
+  const label = useArcLabel() ?? theme.textTab;
   return (
     <View pointerEvents="none" {...fade} ref={ref} style={[{ height: 0, marginBottom: -GAP }, fade.style as object]}>
-      {ghostEntry(snapshot, theme, top)}
+      <Surface hidesAccessibility style={{ position: "absolute", left: 0, right: 0, top: 0 }}>
+        {ghostEntry(snapshot, theme, top, label)}
+      </Surface>
     </View>
   );
 });

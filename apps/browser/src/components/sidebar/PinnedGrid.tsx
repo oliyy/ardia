@@ -13,7 +13,7 @@ import { cellKey, PIN_SLOT, useDragController, useDragging, useDragItem, useDrop
 import { FolderTile } from "./FolderTile";
 import { dismissHover, useRowHover } from "./hover";
 import { openTabMenu } from "./menus";
-import { pinGrid, pinGridHeight, TILE_GAP } from "./pinZone";
+import { pinColumnCap, pinGrid, pinGridHeight, TILE_GAP } from "./pinZone";
 import { registerRow } from "./state";
 import { clickMods } from "./TabRow";
 import { FolderDropRing, TileFace, useSlotPosition } from "./TileFace";
@@ -24,11 +24,12 @@ export const PinnedGrid = memo(function PinnedGrid({ tabs, innerWidth, flush = f
   const controller = useDragController();
   const count = usePinnedCount(tabs);
   const balanced = useBrowser((s) => s.settings.balancedTopApps);
-  const { columns, width } = pinGrid(count, innerWidth, balanced);
+  const addressBar = useAddressBarInSidebar();
+  const maxColumns = pinColumnCap(addressBar);
+  const { columns, width } = pinGrid(count, innerWidth, maxColumns, balanced);
   const slots = usePinSlots(tabs);
   const tail = useDragItem("tail:tiles", { kind: "tail", tabIds: [], section: "tiles" });
   const dragging = useDragging();
-  const addressBar = useAddressBarInSidebar();
   const topGap = listTopGap(addressBar);
   if (!tabs.length) return dragging && !addressBar && tail.gap ? <Animated.View style={{ height: tail.gap }} /> : null;
   return (
@@ -38,7 +39,7 @@ export const PinnedGrid = memo(function PinnedGrid({ tabs, innerWidth, flush = f
       }}
       style={{ marginTop: flush ? 0 : topGap }}
     >
-      <View style={{ height: pinGridHeight(count, innerWidth, layout.pinnedHeight, balanced) }}>
+      <View style={{ height: pinGridHeight(count, innerWidth, layout.pinnedHeight, maxColumns, balanced) }}>
         {tabs.map((cell, i) => {
           const x = (slots[i]! % columns) * (width + TILE_GAP);
           const y = Math.floor(slots[i]! / columns) * PIN_SLOT;

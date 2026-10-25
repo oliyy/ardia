@@ -1,14 +1,16 @@
 import { savePassword } from "@ardia/ardiacore";
 import type { BookmarkNode as ImportedNode, Credential, DiaTabsProfile, ImportedFavicon, ImportedTab, ImportKind, ImportResult, SafariExport, SpaceSuggestion } from "@ardia/import";
-import { addGroupsFromDrafts } from "../../lib/bookmarkGroups";
 import { adoptFavicons, pageKey as faviconPage } from "../../lib/favicons";
 import type { BookmarkDraft } from "../../store/bookmarks";
-import type { GroupDraft } from "../../store/draftGroups";
+import { MAX_DRAFT_LINKS } from "../../store/draftGroups";
 import { useBrowser } from "../../store/browser";
 import { engineProfile, isIncognitoProfile } from "../../store/model";
 import { openPages, pageKey, pinnedPages } from "../../store/pageKeys";
+import { FAVORITES, groupNode, liveNode, pinKeyOf, placeNodes, tabNode, withLeafPages, type PinPlaces } from "../../store/pinTree";
 import { withNewTab } from "../../store/tabs";
-import type { ProfileColor } from "../../store/types";
+import type { BrowserState } from "../../store/browser";
+import type { ProfileColor, TabGroup } from "../../store/types";
+import { newId } from "../../store/model";
 import { importModule } from "./module";
 import { adoptProfileTheme } from "../../sync/engine";
 import { parseArcTheme } from "./arcTheme";
@@ -25,11 +27,6 @@ const toDraft = (n: ImportedNode): BookmarkDraft =>
     ? { title: n.title || n.url || "", url: n.url ?? "", addedAt: n.dateAdded }
     : { title: n.title, addedAt: n.dateAdded, children: (n.children ?? []).map(toDraft) };
 
-const toGroupDraft = (n: ImportedNode): GroupDraft =>
-  n.type === "url"
-    ? { title: n.pageTitle ?? n.title, url: n.url ?? "", ...(n.pageTitle ? { customTitle: n.title } : {}) }
-    : { title: n.title, children: (n.children ?? []).map(toGroupDraft) };
-
 const LIVE_SOURCES: Partial<Record<NonNullable<ImportedNode["role"]>, LiveSourceId>> = {
   liveGitHubPullRequests: "github",
   liveBitbucketPullRequests: "bitbucket",
@@ -37,9 +34,6 @@ const LIVE_SOURCES: Partial<Record<NonNullable<ImportedNode["role"]>, LiveSource
 const liveSourceOf = (n: ImportedNode) => (n.role ? LIVE_SOURCES[n.role] : undefined);
 const liveSources = (nodes: ImportedNode[]): LiveSourceId[] =>
   nodes.flatMap((n) => [...(liveSourceOf(n) ? [liveSourceOf(n)!] : []), ...liveSources(n.children ?? [])]);
-const withoutLiveFolders = (nodes: ImportedNode[]): ImportedNode[] =>
-  nodes.filter((n) => !liveSourceOf(n)).map((n) => (n.children ? { ...n, children: withoutLiveFolders(n.children) } : n));
-
 function importPullRequestsFolders(profileId: string, nodes: ImportedNode[]) {
   for (const source of new Set(liveSources(nodes))) {
     const have = Object.values(live().folders).some((f) => f.profileId === profileId && f.kind === "pullRequests" && f.sources.includes(source));
@@ -165,33 +159,86 @@ export function importTabs(
     });
     if (!id) continue;
     next = { ...made, tabs: { ...made.tabs, [id]: { ...made.tabs[id]!, navigation: null } } };
-    if (!t.pinned) unpinned.push(id);
+    if (t.pinned) next = { ...next, pinPlace: placeNodes(next.pinPlace, profileId, [tabNode(pinKeyOf(next.tabs[id]!))], t.row ? null : FAVORITES, null) };
+    else unpinned.push(id);
   }
   useBrowser.setState(next);
   if (group && unpinned.length) useBrowser.getState().createGroup(unpinned, { name: group });
   return usable.length;
 }
 
+function importPinnedTree(profileId: string, nodes: ImportedNode[]): { tabs: number; skipped: number } {
+  if (!nodes.length) return { tabs: 0, skipped: 0 };
+  const existingFolders = new Set(Object.keys(live().folders));
+  importPullRequestsFolders(profileId, nodes);
+  const windowId = windowFor(profileId);
+  let s: BrowserState = useBrowser.getState();
+  let places: PinPlaces = s.pinPlace;
+  const seen = pinnedPages(s, profileId);
+  const placedLive = new Set<string>();
+  const groups: Record<string, TabGroup> = {};
+  let count = 0;
+  let skipped = 0;
+  const visit = (list: ImportedNode[], parent: string | null, budget?: { taken: number }) => {
+    for (const n of list) {
+      const source = liveSourceOf(n);
+      if (source) {
+        const folder = Object.values(live().folders).find((f) => f.profileId === profileId && f.kind === "pullRequests" && f.sources.includes(source));
+        if (folder && !existingFolders.has(folder.id) && !placedLive.has(folder.id)) {
+          places = placeNodes(places, profileId, [liveNode(folder.id)], parent, null);
+          placedLive.add(folder.id);
+        }
+        continue;
+      }
+      if (n.type === "folder") {
+        const pages = linksOf([n]).filter((url) => /^(https?|file):/i.test(url));
+        const newLive = liveSources([n]).some((source) => Object.values(live().folders).some((f) => f.profileId === profileId && f.kind === "pullRequests" && f.sources.includes(source) && !existingFolders.has(f.id) && !placedLive.has(f.id)));
+        if (pages.length && pages.every((url) => seen.has(pageKey(url))) && !newLive) continue;
+        const id = newId("g");
+        groups[id] = { id, windowId, profileId, name: n.title, icon: null, color: null, collapsed: false, pinned: true, tabIds: [], createdAt: Date.now(), ...(parent ? { parentId: parent.slice(2) } : {}) };
+        places = placeNodes(places, profileId, [groupNode(id)], parent, null);
+        visit(n.children ?? [], groupNode(id), budget ?? { taken: 0 });
+        continue;
+      }
+      if (!n.url || !/^(https?|file):/i.test(n.url) || seen.has(pageKey(n.url))) continue;
+      if (budget && budget.taken >= MAX_DRAFT_LINKS) {
+        skipped++;
+        continue;
+      }
+      const row = parent === null;
+      const [next, id] = withNewTab(s, windowId, {
+        url: n.url,
+        profileId,
+        background: true,
+        pinned: row,
+        snapshot: { title: n.pageTitle ?? n.title, customTitle: n.pageTitle ? n.title : null, ...(row ? { pinnedAsRow: true as const } : {}) },
+      });
+      if (!id) continue;
+      seen.add(pageKey(n.url));
+      if (budget) budget.taken++;
+      s = { ...next, tabs: { ...next.tabs, [id]: { ...next.tabs[id]!, navigation: null, ...(!row ? { unloaded: true as const } : {}) } } };
+      places = placeNodes(places, profileId, [tabNode(id)], parent, null);
+      if (parent) groups[parent.slice(2)]!.tabIds.push(id);
+      count++;
+    }
+  };
+  visit(nodes, null);
+  places = withLeafPages(places, profileId, Object.values(s.tabs).filter((t) => t.profileId === profileId));
+  useBrowser.setState({ ...s, groups: { ...s.groups, ...groups }, pinPlace: places });
+  return { tabs: count, skipped };
+}
+
 export function importArcSpace(profileId: string, space: SpaceSuggestion, favicons?: ImportedFavicon[]): { tabs: number; bookmarks: number; skipped: number } {
   importFavicons(profileId, favicons, [...linksOf(space.pinned), ...space.tabs.map((t) => t.url)]);
-  const links = space.pinned.filter((n) => n.type === "url" && n.url);
-  importPullRequestsFolders(profileId, space.pinned);
-  const folders = withoutLiveFolders(space.pinned.filter((n) => n.type === "folder"));
-  let tabs = importTabs(
-    profileId,
-    links.map((n) => ({ url: n.url!, title: n.pageTitle ?? n.title, pinned: true, row: true, customTitle: n.pageTitle ? n.title : undefined })),
-    null,
-  );
+  const imported = importPinnedTree(profileId, space.pinned);
+  const skipped = imported.skipped;
+  let tabs = imported.tabs;
   tabs += importTabs(profileId, space.tabs.map((t) => ({ ...t, pinned: false })), "Imported");
   const theme = space.theme ? parseArcTheme(space.theme) : null;
   if (theme) {
     adoptProfileTheme(profileId);
     useBrowser.getState().updateProfile(profileId, { theme });
   }
-  if (!folders.length) return { tabs, bookmarks: 0, skipped: 0 };
-  const { made, skipped } = addGroupsFromDrafts(profileId, folders.map(toGroupDraft), windowFor(profileId));
-  const groups = useBrowser.getState().groups;
-  tabs += made.reduce((n, id) => n + (groups[id]?.tabIds.length ?? 0), 0);
   return { tabs, bookmarks: 0, skipped };
 }
 

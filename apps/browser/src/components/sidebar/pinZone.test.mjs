@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-const { overPins, pinGrid, pinGridHeight, pinSlot, PIN_ZONE_HYSTERESIS } = await import("./pinZone.ts");
+const { overPins, pinGrid, pinGridHeight, pinSlot, PIN_ZONE_HYSTERESIS, TILE_GAP } = await import("./pinZone.ts");
 
 const TILE = 41;
 const grid = { x: 6, y: 54, w: 178 };
 
 test("the grid lays out the count it will have after the drop", () => {
-  assert.deepEqual(pinGrid(3, 178), { columns: 3, width: 55 });
-  assert.deepEqual(pinGrid(4, 178), { columns: 3, width: 55 });
-  assert.deepEqual(pinGrid(2, 178), { columns: 2, width: 86 });
-  assert.deepEqual(pinGrid(4, 240), { columns: 4, width: 55.5 });
+  assert.deepEqual(pinGrid(3, 178), { columns: 3, width: 54 });
+  assert.deepEqual(pinGrid(4, 178), { columns: 3, width: 54 });
+  assert.deepEqual(pinGrid(2, 178), { columns: 2, width: 85 });
+  assert.deepEqual(pinGrid(4, 240), { columns: 4, width: 54 });
   assert.deepEqual(pinGrid(0, 178), { columns: 1, width: 178 });
 });
 
@@ -28,9 +28,9 @@ test("balanced rows keep Arc's layout, at most four across", () => {
   assert.equal(columns(7, 400), 4);
   assert.equal(columns(6, 400), 3);
   assert.equal(columns(3, 400), 3);
-  assert.deepEqual(pinGrid(4, 178, true), { columns: 2, width: 86 });
-  assert.deepEqual(pinGrid(9, 400, true), { columns: 3, width: 129 });
-  assert.deepEqual(pinGrid(9, 400), { columns: 7, width: 52 });
+  assert.deepEqual(pinGrid(4, 178, true), { columns: 2, width: 85 });
+  assert.deepEqual(pinGrid(9, 400, true), { columns: 3, width: 128 });
+  assert.deepEqual(pinGrid(9, 400), { columns: 7, width: 50 });
 });
 
 test("balanced rows grow the tiles, not the columns, as the sidebar widens", () => {
@@ -45,8 +45,8 @@ test("balanced slots and height follow the balanced grid", () => {
   assert.equal(pinSlot(grid, 4, TILE, 155, 120, true), 3);
   assert.equal(pinSlot(grid, 5, TILE, 155, 74, true), 2);
   assert.equal(pinSlot(grid, 5, TILE, 155, 160, true), 4);
-  assert.equal(pinGridHeight(4, 178, TILE, true), 88);
-  assert.equal(pinGridHeight(9, 400, TILE, true), 135);
+  assert.equal(pinGridHeight(4, 178, TILE, true), 90);
+  assert.equal(pinGridHeight(9, 400, TILE, true), 139);
 });
 
 test("a full row never overflows the grid", () => {
@@ -54,7 +54,7 @@ test("a full row never overflows the grid", () => {
     for (let w = 120; w <= 400; w += 0.5)
       for (let n = 1; n <= 12; n++) {
         const { columns, width } = pinGrid(n, w, balanced);
-        assert.ok(columns * width + (columns - 1) * 6 <= w + 1e-9, `${n} tiles in ${w}`);
+        assert.ok(columns * width + (columns - 1) * TILE_GAP <= w + 1e-9, `${n} tiles in ${w}`);
         assert.ok(width >= 50 || columns === 1, `${n} tiles in ${w} at least 50 pt`);
       }
 });
@@ -94,8 +94,8 @@ test("the pin zone reaches the list, and the boundary doesn't flip-flop", () => 
 
 test("the grid's height is its row count after the drop", () => {
   assert.equal(pinGridHeight(3, 178, TILE), 41);
-  assert.equal(pinGridHeight(4, 178, TILE), 88);
+  assert.equal(pinGridHeight(4, 178, TILE), 90);
   assert.equal(pinGridHeight(2, 178, TILE), 41);
   assert.equal(pinGridHeight(0, 178, TILE), 41);
-  assert.equal(pinGridHeight(7, 178, TILE), 135);
+  assert.equal(pinGridHeight(7, 178, TILE), 139);
 });

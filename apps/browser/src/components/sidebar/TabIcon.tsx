@@ -6,7 +6,7 @@ import { useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { engineMark, ENGINE_NAMES, ENGINE_SYMBOLS } from "../../store/engines";
 import { isPageUnloaded } from "../../store/pinShare";
-import { Favicon } from "../primitives";
+import { Favicon, type FaviconSourceListener } from "../primitives";
 
 export const SYMBOL_PREFIX = "symbol:";
 export const NO_GROUP_ICON = `${SYMBOL_PREFIX}square.stack.fill`;
@@ -22,6 +22,7 @@ export const TabIcon = memo(function TabIcon({
   color,
   profileId: profile,
   direct,
+  onSource,
 }: {
   tabId?: string;
   url: string;
@@ -31,10 +32,11 @@ export const TabIcon = memo(function TabIcon({
   color?: string;
   profileId?: string;
   direct?: boolean;
+  onSource?: FaviconSourceListener;
 }) {
   const sleeping = useIsSleeping(tabId ?? "");
   const unloaded = useBrowser((s) => s.settings.fadeUnloadedTabs && !!tabId && isPageUnloaded(s, tabId));
-  const props = { url, favicon, icon, size, color, direct };
+  const props = { url, favicon, icon, size, color, direct, onSource };
   return (
     <View style={{ opacity: sleeping || unloaded ? SLEEPING_OPACITY : 1 }}>
       {profile || !tabId ? <Icon {...props} profileId={profile} /> : <TabProfileIcon {...props} tabId={tabId} />}
@@ -84,6 +86,7 @@ function Icon({
   color,
   profileId,
   direct,
+  onSource,
 }: {
   url: string;
   favicon?: string | null;
@@ -92,6 +95,7 @@ function Icon({
   color?: string;
   profileId?: string;
   direct?: boolean;
+  onSource?: FaviconSourceListener;
 }) {
   const theme = useTheme();
   if (icon?.startsWith(SYMBOL_PREFIX)) {
@@ -105,5 +109,5 @@ function Icon({
       </View>
     );
   }
-  return <Favicon url={url} favicon={favicon} size={size} profileId={profileId} direct={direct} />;
+  return <Favicon url={url} favicon={favicon} size={size} profileId={profileId} direct={direct} onSource={onSource} />;
 }

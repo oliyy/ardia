@@ -1,4 +1,4 @@
-import { padPosition, sanitizeTheme, THEME_TEXTURES } from "../../lib/profileTheme";
+import { isArcStyle, padPosition, sanitizeTheme, THEME_TEXTURES } from "../../lib/profileTheme";
 import type { ProfileTheme, ThemeColor, ThemeLook, ThemeMode, ThemeTexture } from "../../store/types";
 
 type Json = Record<string, unknown>;
@@ -16,6 +16,41 @@ function arcColor(v: unknown): ThemeColor | null {
   const r = num(c.red), g = num(c.green), b = num(c.blue);
   if (r === null || g === null || b === null) return null;
   return { r, g, b, a: num(c.alpha) ?? 1 };
+}
+
+const PRIMARY_KEYS = ["tintedLight", "midTone", "shaded", "shadedDark"];
+const SEMANTIC_KEYS = ["foregroundPrimary", "foregroundSecondary", "foregroundTertiary", "maxContrastColor", "minContrastColor", "backgroundExtra", "background", "focus", "hover", "cutoutColor", "title", "subtitle"];
+
+function paletteColor(v: unknown): ThemeColor | null {
+  const c = obj(v);
+  if (!c || c.colorSpace !== "extendedSRGB") return null;
+  const r = num(c.red), g = num(c.green), b = num(c.blue), a = num(c.alpha);
+  return r === null || g === null || b === null || a === null ? null : { r, g, b, a };
+}
+
+const decodedPalette = (v: unknown, keys: string[]): Json | null => {
+  const palette = obj(v);
+  return palette && keys.every((k) => paletteColor(palette[k])) ? palette : null;
+};
+
+function suppliedPalette(theme: Json): Pick<ProfileTheme, "foregroundSecondary" | "maxContrastColor" | "favoriteMutedColor" | "minContrastColor" | "subtitle"> | null {
+  const primary = decodedPalette(theme.primaryColorPalette, PRIMARY_KEYS);
+  if (!primary) return null;
+  const semantic = obj(theme.semanticColorPalette);
+  const based = obj(semantic?.appearanceBased);
+  const variant = (appearance: Appearance) => decodedPalette(semantic?.single !== undefined ? payload(semantic.single) : based?.[appearance], SEMANTIC_KEYS);
+  const light = variant("light");
+  const dark = variant("dark");
+  const pair = (key: string, l: Json, d: Json) => ({ light: paletteColor(l[key])!, dark: paletteColor(d[key])! });
+  if (light && dark) return { foregroundSecondary: pair("foregroundSecondary", light, dark), maxContrastColor: pair("maxContrastColor", light, dark), favoriteMutedColor: pair("title", light, dark), minContrastColor: pair("minContrastColor", light, dark), subtitle: pair("subtitle", light, dark) };
+  const midTone = paletteColor(primary.midTone)!;
+  const shaded = paletteColor(primary.shadedDark)!;
+  const composite = (alpha: number, backdrop: number): ThemeColor => ({ r: alpha * shaded.r + (1 - alpha) * backdrop, g: alpha * shaded.g + (1 - alpha) * backdrop, b: alpha * shaded.b + (1 - alpha) * backdrop, a: 1 });
+  return {
+    foregroundSecondary: { light: midTone, dark: midTone },
+    maxContrastColor: { light: shaded, dark: paletteColor(primary.tintedLight)! },
+    favoriteMutedColor: { light: composite(0.3, 0), dark: composite(0.15, 1) },
+  };
 }
 
 type Appearance = "light" | "dark";
@@ -62,6 +97,7 @@ function parseLook(background: unknown): ParsedLook | null {
       grain: basic ? 0 : (num(modifiers?.noiseFactor) ?? 0),
       texture: THEME_TEXTURES.includes(modifiers?.overlay as ThemeTexture) ? (modifiers!.overlay as ThemeTexture) : "grain",
       translucency: basic ? 0 : 1,
+      ...(isArcStyle(config.translucencyStyle) ? { arcStyle: config.translucencyStyle } : {}),
     },
     style: config.translucencyStyle,
   };
@@ -92,10 +128,12 @@ export function parseArcTheme(input: unknown): ProfileTheme | null {
   const style = main.style;
   const mode: ThemeMode = forced ?? (light && dark ? "auto" : isAppearance(style) ? style : "auto");
   const base = mode === "dark" && dark ? dark : main;
+  const supplied = suppliedPalette(theme);
 
   return sanitizeTheme({
     ...base.look,
     mode,
     ...(light && dark && mode === "auto" ? { dark: dark.look } : {}),
+    ...(supplied ?? {}),
   });
 }

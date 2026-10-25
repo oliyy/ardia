@@ -1,10 +1,11 @@
 import { WebView } from "@ardia/ardiacore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Image, PanResponder, StyleSheet, Text, View } from "react-native";
-import { layout, useTheme } from "../../lib/theme";
+import { useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { useWindowId } from "../../store/hooks";
 import { openFromPage, pageProfileId } from "../layout/openFromPage";
+import { useCardGeometry } from "../layout/windowLayout";
 import { IconButton } from "../primitives";
 import { closeSidePanel, findExtension, showExtensionMenu, useExtensions, type SidePanel } from "./state";
 
@@ -22,6 +23,7 @@ const clamp = (w: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w));
 
 export function ExtensionSidePanel() {
   const windowId = useWindowId();
+  const cardInset = useCardGeometry().inset;
   const panel = useExtensions((e) => e.sidePanels[windowId]);
   const savedWidth = useBrowser((s) => s.settings.extensionSidePanelWidth ?? 360);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -71,7 +73,7 @@ export function ExtensionSidePanel() {
   );
 
   if (!shown) return null;
-  const room = width + layout.cardInset - 1;
+  const room = width + cardInset - 1;
   return (
     <Animated.View style={{ width: appear.interpolate({ inputRange: [0, 1], outputRange: [0, room] }), overflow: "hidden" }}>
       <Animated.View style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: width, opacity: appear }}>
@@ -89,11 +91,12 @@ export function ExtensionSidePanel() {
 function PanelCard({ windowId, panel }: { windowId: string; panel: SidePanel }) {
   const { extensionId, profile, pageProfile, url } = panel;
   const theme = useTheme();
+  const cardRadius = useCardGeometry().radius;
   const ext = useExtensions((e) => e.lists[profile]?.find((x) => x.id === extensionId));
   const title = ext?.actionTitle || ext?.name || "Extension";
   const icon = ext?.actionIcon || ext?.icon;
   return (
-    <View style={{ flex: 1, borderRadius: layout.cardRadius, overflow: "hidden", backgroundColor: theme.card }}>
+    <View style={{ flex: 1, borderRadius: cardRadius, overflow: "hidden", backgroundColor: theme.card }}>
       <View style={{ height: HEADER, flexDirection: "row", alignItems: "center", paddingLeft: 12, paddingRight: 5, gap: 8 }}>
         {icon ? <Image source={{ uri: icon }} style={{ width: 16, height: 16 }} /> : null}
         <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontWeight: "500", color: theme.textPrimary }}>

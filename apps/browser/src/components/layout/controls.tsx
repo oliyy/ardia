@@ -28,6 +28,7 @@ export function ToolbarButton({
   color,
   style,
   hit,
+  inactiveOpacity,
 }: {
   icon: string;
   onPress?: (modifiers: ClickModifiers) => void;
@@ -44,8 +45,11 @@ export function ToolbarButton({
   color?: string;
   style?: ViewStyle;
   hit?: ButtonHit;
+  inactiveOpacity?: number;
 }) {
   const { hovered, hoverProps } = useHover();
+  const glyphBox = hit?.box ?? box;
+  const glyph = <Symbol name={icon} size={size} weight={weight} color={color ?? (disabled ? palette.iconDisabled : palette.icon)} style={{ width: glyphBox, height: glyphBox }} />;
   const plate = (pressed: boolean) => (
     <View
       style={{
@@ -60,7 +64,13 @@ export function ToolbarButton({
         backgroundColor: disabled ? undefined : pressed || active ? palette.pressed : hovered ? palette.hover : undefined,
       }}
     >
-      <Symbol name={icon} size={size} weight={weight} color={color ?? (disabled ? palette.iconDisabled : palette.icon)} style={{ width: hit?.box ?? box, height: hit?.box ?? box }} />
+      {inactiveOpacity === undefined ? (
+        glyph
+      ) : (
+        <Surface inactiveOpacity={disabled ? undefined : inactiveOpacity} style={{ width: glyphBox, height: glyphBox }}>
+          {glyph}
+        </Surface>
+      )}
     </View>
   );
   const button = (

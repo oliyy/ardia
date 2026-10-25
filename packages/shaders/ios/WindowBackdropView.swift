@@ -170,6 +170,7 @@ struct ThemeGradient: Equatable {
   var texture = "grain"
   var appearance = "auto"
   var angle: CGFloat = ArcGradientLayer.defaultAngle
+  var backdrop = "default"
 
   var isEmpty: Bool { colors.isEmpty }
 
@@ -464,10 +465,11 @@ final class WindowTreatmentView: NSView {
 
   private func updateAppearance() {
     let dark = isDark
-    blur.material = NSVisualEffectView.Material(rawValue: dark ? 29 : 13) ?? .hudWindow
+    let arcAuto = custom?.backdrop == "arcAuto"
+    blur.material = NSVisualEffectView.Material(rawValue: arcAuto ? 1 : dark ? 29 : 13) ?? .hudWindow
     gradient.opacity = dark ? 0.5 : 0.75
     let base = dark ? NSColor(white: 0, alpha: 0.4) : NSColor(white: 1, alpha: 0.8)
-    baseTint.backgroundColor = (custom.map { (dark ? NSColor.black : NSColor.white).withAlphaComponent($0.baseAlpha) } ?? base).cgColor
+    baseTint.backgroundColor = (custom.map { (arcAuto || dark ? NSColor.black : NSColor.white).withAlphaComponent($0.baseAlpha) } ?? base).cgColor
   }
 
   private func updateGrain() {

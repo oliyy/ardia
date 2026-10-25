@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { useTheme } from "../../../lib/theme";
-import { deleteLiveFolder, manualRefresh, statusText } from "../../../live/engine";
+import { manualRefresh, statusText } from "../../../live/engine";
 import { connectGoogleDrive } from "../../../live/googleAuth";
 import { isMocked } from "../../../live/net";
 import { connectBitbucket, connectConfluence, connectGithub, connectNotion, disconnect, SOURCES, startGithubDeviceFlow, type DeviceFlow } from "../../../live/sources";
@@ -13,6 +13,7 @@ import { useBrowser } from "../../../store/browser";
 import { Favicon } from "../../primitives";
 import { Button, Group, Row, SectionHeader, Sheet, TextField, Toggle } from "../controls";
 import { setting } from "../settingsIndex";
+import { removeLiveFolder } from "../../sidebar/liveMenus";
 import { closeSettingsSheet, showSettingsSheet } from "../sheet";
 
 const DESCRIPTIONS: Record<LiveSourceId, string> = {
@@ -72,7 +73,7 @@ function FolderGroup({ folder, profileName, searchable }: { folder: LiveFolder; 
       <Row title={folder.name} description={`${profileName} · ${folder.sources.map((s) => SOURCES[s].name).join(", ")} · ${statusText(folder.id)}`}>
         <View style={{ flexDirection: "row", gap: 6 }}>
           <Button title="Refresh" onPress={() => void manualRefresh(folder.id)} />
-          <Button title="Delete" kind="destructive" onPress={() => deleteLiveFolder(folder.id)} />
+          <Button title="Delete" kind="destructive" onPress={() => removeLiveFolder(folder.id)} />
         </View>
       </Row>
       {folder.kind === "pullRequests"

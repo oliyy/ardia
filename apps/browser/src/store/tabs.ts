@@ -4,6 +4,7 @@ import { fromLegacyUrl } from "../legacy";
 import { startNavigation } from "../lib/earlyNavigate";
 import type { BrowserState } from "./browser";
 import { ancestorIds, closedGroupInfo, innermostGroupOf, leaveGroups, syncGroupOrder } from "./groups";
+import { FAVORITES, pinKeyOf, placeNodes, splitNodes, tabNode } from "./pinTree";
 import {
   activeTabId,
   closesWindow,
@@ -483,12 +484,21 @@ export const createTabsSlice: StateCreator<BrowserState, [], [], TabsSlice> = (s
       if (!tab || !w) return {};
       const inSection = (t: string) => s.tabs[t]?.profileId === tab.profileId && pinSection(s.tabs[t]) === pinSection(tab);
       const section = w.tabIds.filter(inSection);
-      const moved = section.filter((t) => t !== id);
-      moved.splice(Math.min(Math.max(toIndex, 0), moved.length), 0, id);
+      const nodes = splitNodes(s, tab.profileId, [tabNode(pinKeyOf(tab))]);
+      const moving = new Set(section.filter((tid) => nodes.includes(tabNode(pinKeyOf(s.tabs[tid]!)))));
+      const block = section.filter((tid) => moving.has(tid));
+      const moved = section.filter((tid) => !moving.has(tid));
+      moved.splice(Math.min(Math.max(toIndex, 0), moved.length), 0, ...block);
       let k = 0;
       const tabIds = w.tabIds.map((t) => (inSection(t) ? moved[k++]! : t));
       const window = { ...w, tabIds };
-      return { windows: { ...s.windows, [w.id]: window }, groups: syncGroupOrder(s.groups, window) };
+      const node = tabNode(pinKeyOf(tab));
+      const after = moved[Math.max(...block.map((tid) => moved.indexOf(tid))) + 1];
+      const pinPlace =
+        tab.pinned && s.pinPlace[tab.profileId]?.[node]
+          ? placeNodes(s.pinPlace, tab.profileId, nodes, tab.pinnedAsRow ? null : FAVORITES, after ? tabNode(pinKeyOf(s.tabs[after]!)) : null)
+          : s.pinPlace;
+      return { pinPlace, windows: { ...s.windows, [w.id]: window }, groups: syncGroupOrder(s.groups, window) };
     });
   },
 });

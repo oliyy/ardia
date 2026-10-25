@@ -48,6 +48,7 @@ public class WindowBackdropModule: Module {
       Prop("themeTexture") { (view: WindowBackdropView, v: String) in view.setCustom { $0.texture = v } }
       Prop("themeAppearance") { (view: WindowBackdropView, v: String) in view.setCustom { $0.appearance = v } }
       Prop("themeAngle") { (view: WindowBackdropView, v: Double) in view.setCustom { $0.angle = v } }
+      Prop("themeBackdrop") { (view: WindowBackdropView, v: String) in view.setCustom { $0.backdrop = v } }
     }
   }
 }

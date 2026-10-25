@@ -1,10 +1,13 @@
-import { DockSelection, Surface } from "@ardia/shell";
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { ArcFavoriteBackground, DockSelection, Surface } from "@ardia/shell";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, StyleSheet, View } from "react-native";
+import type { ResolvedFavicon } from "../../lib/favicons";
+import { colorHexAlpha } from "../../lib/profileTheme";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { useTileTheme, type TileTheme } from "../../lib/tileTheme";
 import { useSettings, useTab } from "../../store/hooks";
 import { GlassFill, liquidGlass } from "../glass";
+import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { SLIDE } from "../layout/stripReorder";
 import { TabBadges } from "../media/TabBadges";
 import { TabIcon } from "./TabIcon";
@@ -21,8 +24,10 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
   const tab = useTab(tabId);
   const tileTheme = useTileTheme(tab?.url ?? "", tab?.favicon, tab?.customIcon, tab?.profileId ?? "");
   const iconRing = useSettings((s) => s.pinnedTabIconRing);
+  const arcLayout = useAddressBarInSidebar();
   if (!tab) return null;
   const { width, active } = state;
+  if (arcLayout && !liquidGlass) return <ArcTileFace tabId={tabId} badge={badge} {...state} />;
   const icon = (
     <View>
       <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} />
@@ -191,4 +196,31 @@ export function useSlotPosition(x: number, y: number, width: number, sliding: bo
   }, [x, y, width, sliding, dragging, position]);
   useEffect(() => () => position.stopAnimation(), [position]);
   return position;
+}
+
+function ArcTileFace({ tabId, badge, width, active, selected, hovered, pressed }: FaceState & { tabId: string; badge?: ReactNode }) {
+  const theme = useTheme();
+  const tokens = useSidebarTokens();
+  const tab = useTab(tabId);
+  const [shown, setShown] = useState<ResolvedFavicon | null>(null);
+  if (!tab) return null;
+  const muted = theme.custom?.favoriteMutedColor;
+  const mutedColor = muted ? colorHexAlpha(theme.dark ? muted.dark : muted.light) : theme.dark ? undefined : hex(theme.icon);
+  return (
+    <Surface
+      fill={active ? undefined : hex(pressed ? theme.tabPressed : hovered || selected ? theme.tabHover : tokens.fieldFill)}
+      cornerRadius={layout.rowRadius}
+      borderWidth={!active && selected ? 1 : 0}
+      borderColor={selected && !active ? hex(tokens.dragBorder) : undefined}
+      logicalWidth={!active ? width : undefined}
+      style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}
+    >
+      {active ? <ArcFavoriteBackground source={tab.customIcon ? null : shown} cornerRadius={layout.rowRadius} hovered={hovered} logicalWidth={width} dark={theme.dark} mutedColor={mutedColor} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
+      <View>
+        <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} onSource={setShown} />
+        <TabBadges tabId={tabId} />
+      </View>
+      {badge}
+    </Surface>
+  );
 }
