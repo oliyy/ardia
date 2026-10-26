@@ -61,6 +61,7 @@ export type BookmarkNode = {
   children?: BookmarkNode[];
   role?: BookmarkRole;
   pageTitle?: string;
+  icon?: string;
 };
 
 export type ImportedHistoryEntry = { url: string; title: string; visits: number; lastVisit: number; typedCount?: number };

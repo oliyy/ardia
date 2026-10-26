@@ -21,6 +21,7 @@ import {
 import { isCalendarUrl } from "../../live/meetings";
 import { bookmarkTab } from "../bookmarks/actions";
 import { hideKeyedToast, openNewTabInSplit, showToast, useToasts } from "../layout/splitActions";
+import { addressBarInSidebar } from "../layout/windowLayout";
 import { iconMenuItems } from "../profiles/icons";
 import { openSettings } from "../settings/windows";
 import { canShare, shareTab } from "../site/share";
@@ -241,7 +242,7 @@ export async function openGroupMenu(windowId: string, groupId: string) {
   const matched = siteColor ? nearestGroupColor(siteColor) : null;
   const choice = await showMenu([
     { id: "rename", title: "Rename…", symbol: "character.cursor.ibeam" },
-    { id: "icon", title: hasOwnGroupIcon(g.icon) ? "Change Icon…" : "Add Icon…", symbol: "face.smiling" },
+    { id: "icon", title: hasOwnGroupIcon(g.icon) || addressBarInSidebar(s, windowId) ? "Change Icon…" : "Add Icon…", symbol: "face.smiling" },
     {
       id: "color",
       title: "Color",

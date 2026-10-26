@@ -9,6 +9,7 @@ import { hideItems, live, markRead, setLive, updateCalendarSettings, updateFolde
 import type { LiveItem, LiveSourceId } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { liveNode } from "../../store/pinTree";
+import { addressBarInSidebar } from "../layout/windowLayout";
 import { openSettings } from "../settings/windows";
 import { openIconPicker } from "./actions";
 import { windowHierarchy } from "./entries";
@@ -100,7 +101,7 @@ export async function openLiveFolderMenu(windowId: string, folderId: string) {
     },
     sep,
     { id: "rename", title: "Rename…", symbol: "character.cursor.ibeam" },
-    { id: "icon", title: folder.icon ? "Change Icon…" : "Add Icon…", symbol: "face.smiling" },
+    { id: "icon", title: folder.icon || addressBarInSidebar(useBrowser.getState(), windowId) ? "Change Icon…" : "Add Icon…", symbol: "face.smiling" },
     { id: "read", title: "Mark All as Read", symbol: "circle", enabled: (s.unread[folderId]?.length ?? 0) > 0 },
     { id: "collapse", title: folder.collapsed ? "Expand" : "Collapse", symbol: folder.collapsed ? "chevron.down" : "chevron.up" },
     { id: "up", title: "Move Up", enabled: index > 0 },

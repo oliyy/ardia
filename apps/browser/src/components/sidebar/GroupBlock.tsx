@@ -15,7 +15,7 @@ import { useShift, type EntryMotion } from "./entryMotion";
 import { Fold, useFold, useFoldHidden } from "./Fold";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS, entryHeight, groupFrame, keptEntry } from "./geometry";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
-import { FolderGlyph, folderSymbol, useFolderColors } from "./FolderGlyph";
+import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { folderPath } from "./entries";
 import { dismissHover, useRowHover } from "./hover";
 import { capture, GhostSlot, ListMotionContext, newCapture, useGroupMotion } from "./listMotion";
@@ -149,7 +149,6 @@ function GroupHeader({ groupId, windowId, collapsed, peek, open, flat }: { group
   const closeControl = useGroupCloseControl(groupId);
   if (!group) return null;
   const target = { kind: "group" as const, id: groupId };
-  const symbol = folderSymbol(group.icon);
   const arcPaint = flat && !dropInto;
 
   return (
@@ -178,8 +177,8 @@ function GroupHeader({ groupId, windowId, collapsed, peek, open, flat }: { group
               style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: flat ? layout.rowPadding : 9 + PAD, paddingRight: 6 }}
             >
               {arcPaint ? <ArcTabRowBackground dark={theme.dark} hovered={hovered && !dragging} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
-              {flat && (!group.icon || symbol) ? (
-                <FolderGlyph colors={folderColors} open={!collapsed} symbol={symbol} />
+              {flat ? (
+                <FolderGlyph colors={folderColors} open={!collapsed} icon={group.icon} />
               ) : group.icon || firstTab ? (
                 <TabIcon url={firstTab?.url ?? ""} favicon={firstTab?.favicon} icon={group.icon ?? firstTab?.customIcon} profileId={firstTab?.profileId} />
               ) : (

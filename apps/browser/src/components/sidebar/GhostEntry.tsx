@@ -18,7 +18,7 @@ import { splitRowPanes } from "../../store/splits";
 import { tabTitle } from "./actions";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_PAD, GROUP_RADIUS, groupFrame, keptEntry } from "./geometry";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
-import { FolderGlyph, folderSymbol, useFolderColors } from "./FolderGlyph";
+import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { pointerOnRow } from "./hover";
 import { ItemIcon, PositionChip, Trailing } from "./LiveFolderBlock";
 import { folderChildrenWith } from "./pinnedTree";
@@ -259,18 +259,13 @@ function GroupGhost({ shot, label }: { shot: GroupShot; label: string }) {
   const flat = useAddressBarInSidebar();
   const folderColors = useFolderColors((shot.color as GroupColor | null) ?? null);
   const arcTitle = useArcTitle();
-  const symbol = folderSymbol(shot.custom);
   const spec = shot.color ? GROUP_COLORS[shot.color as keyof typeof GROUP_COLORS] : null;
   const members = shot.members.map((m) => memberGhost(m, theme, label));
   if (flat) {
     return (
       <View>
         <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding, paddingRight: 6 }}>
-          {shot.custom && !symbol ? (
-            <TabIcon url={shot.icon?.url ?? ""} favicon={shot.icon?.favicon} icon={shot.custom} profileId={shot.icon?.profileId} />
-          ) : (
-            <FolderGlyph colors={folderColors} open={!shot.collapsed} symbol={symbol} />
-          )}
+          <FolderGlyph colors={folderColors} open={!shot.collapsed} icon={shot.custom} />
           <View style={{ flexShrink: 1, height: 18, marginLeft: layout.rowLabelGap, paddingRight: 8, justifyContent: "center" }}>
             <Text numberOfLines={1} style={{ opacity: 0, fontSize: layout.rowFontSize, fontWeight: "600" }}>
               {shot.label}
@@ -312,12 +307,11 @@ function LiveGhost({ shot, label }: { shot: LiveShot; label: string }) {
   const folderColors = useFolderColors(null);
   const arcTitle = useArcTitle();
   const frame = groupFrame(flat);
-  const symbol = folderSymbol(shot.custom);
   const sourceMark = shot.githubMark ? bundledSiteIcon(SOURCES.github.site, theme.dark) : undefined;
   const header = (
     <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: flat ? layout.rowPadding : 9 + GROUP_PAD, paddingRight: 6, marginHorizontal: flat ? 0 : -GROUP_PAD }}>
-      {flat && (!shot.custom || symbol) ? (
-        <FolderGlyph colors={folderColors} open={!shot.collapsed} symbol={symbol} image={symbol ? undefined : sourceMark} dots={!symbol && sourceMark === undefined} />
+      {flat ? (
+        <FolderGlyph colors={folderColors} open={!shot.collapsed} icon={shot.custom} image={sourceMark} dots={sourceMark === undefined} />
       ) : (
         <TabIcon url={shot.site} icon={shot.icon} />
       )}

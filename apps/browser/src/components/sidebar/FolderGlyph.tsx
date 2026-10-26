@@ -4,7 +4,8 @@ import { Image, type ImageRequireSource } from "react-native";
 import { colorHex, colorHexAlpha, fromOklab, hexColor, oklab, resolveTheme } from "../../lib/profileTheme";
 import { useTheme } from "../../lib/theme";
 import type { GroupColor } from "../../store/types";
-import { SYMBOL_PREFIX } from "./TabIcon";
+import { arcIconSource, isArcIcon } from "./arcFolderIcons";
+import { NO_GROUP_ICON, SYMBOL_PREFIX } from "./TabIcon";
 import { GROUP_COLORS } from "./tokens";
 
 const SLOT = 16;
@@ -19,7 +20,15 @@ export function folderBack(front: string): string {
   return colorHex({ r: red, g: green, b: blue, a: 1 });
 }
 
-export const folderSymbol = (icon: string | null | undefined) => (icon?.startsWith(SYMBOL_PREFIX) ? icon.slice(SYMBOL_PREFIX.length) : null);
+function customMark(icon: string | null | undefined): FolderShapeProps["mark"] {
+  if (!icon || icon === NO_GROUP_ICON) return null;
+  if (isArcIcon(icon)) {
+    const source = arcIconSource(icon);
+    return source === undefined ? null : { kind: "image", uri: Image.resolveAssetSource(source).uri };
+  }
+  if (icon.startsWith(SYMBOL_PREFIX)) return { kind: "symbol", name: icon.slice(SYMBOL_PREFIX.length) };
+  return { kind: "emoji", text: icon };
+}
 
 export function useFolderColors(color: GroupColor | null): FolderColors {
   const theme = useTheme();
@@ -39,19 +48,20 @@ export function FolderGlyph({
   colors,
   open = false,
   dots = false,
-  symbol = null,
+  icon = null,
   image,
 }: {
   colors: FolderColors;
   open?: boolean;
   dots?: boolean;
-  symbol?: string | null;
+  icon?: string | null;
   image?: ImageRequireSource;
 }) {
   const { front, frontExtendedSRGB, back, stroke } = colors;
   const mark = useMemo(
-    (): FolderShapeProps["mark"] => (dots ? { kind: "dots" } : image !== undefined ? { kind: "image", uri: Image.resolveAssetSource(image).uri } : symbol ? { kind: "symbol", name: symbol } : null),
-    [dots, image, symbol],
+    (): FolderShapeProps["mark"] =>
+      customMark(icon) ?? (dots ? { kind: "dots" } : image !== undefined ? { kind: "image", uri: Image.resolveAssetSource(image).uri } : null),
+    [dots, image, icon],
   );
   return <FolderShape front={front} frontExtendedSRGB={frontExtendedSRGB} back={back} stroke={stroke} open={open} mark={mark} pointerEvents="none" style={{ width: SLOT, height: SLOT }} />;
 }

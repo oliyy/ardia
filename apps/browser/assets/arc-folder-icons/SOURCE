@@ -1,0 +1,22 @@
+Ionicons artwork, MIT License, Copyright (c) 2015-present Ionic (http://ionic.io/). Full license text: LICENSE in this folder.
+
+Raster source: the ionicons font in Arc 1.170.0's ARCClients_Icons resource bundle (Contents/Resources/ionicons.ttf, SHA256 97087b7a242d8a246ee02c556da9ee0a904e04004b203ff91c4013294604709a, 1181 glyphs, 512 units per em). The font file is not distributed here.
+Generation: each glyph at 16pt in a black attributed string, centred by its string size in a 16x16 unflipped template NSImage, drawn at (0,0,16,16) into a transparent 16x16 allocation at 1x and 2x. Its exact alpha is preserved while RGB is set to white for tinting. No crop-to-ink, stretch, fitted offset or contrast adjustment.
+
+Arc folder icon enum -> asset -> glyph name -> codepoint
+airplane -> airplane.png -> airplane -> U+F109
+book -> book.png -> book -> U+F190
+bulb -> bulb.png -> bulb -> U+F1A8
+chatBubbleEllipses -> chatbubble-ellipses.png -> chatbubble-ellipses -> U+F1F3
+code -> code.png -> code -> U+F24D
+construction -> construct.png -> construct -> U+F262
+fileTrayFull -> file-tray-full.png -> file-tray-full -> U+F2C5
+flash -> flash.png -> flash -> U+F2E3
+github -> logo-github.png -> logo-github -> U+F3AB
+map -> map.png -> map -> U+F3F1
+musicalNote -> musical-notes.png -> musical-notes -> U+F418
+planet -> planet.png -> planet -> U+F472
+shapes -> shapes.png -> shapes -> U+F517
+skull -> skull.png -> skull -> U+F52C
+star -> star.png -> star -> U+F53B
+triangle -> triangle.png -> triangle -> U+F598

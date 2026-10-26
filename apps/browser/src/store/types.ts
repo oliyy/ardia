@@ -27,6 +27,7 @@ export type ThemeLook = {
 export type ProfileTheme = ThemeLook & {
   mode: ThemeMode;
   dark?: ThemeLook;
+  contentAppearance?: { light: "light" | "dark"; dark: "light" | "dark" };
   foregroundSecondary?: { light: ThemeColor; dark: ThemeColor };
   maxContrastColor?: { light: ThemeColor; dark: ThemeColor };
   favoriteMutedColor?: { light: ThemeColor; dark: ThemeColor };

@@ -18,13 +18,14 @@ public struct BookmarkNode: Codable, Equatable, Sendable {
   public var children: [BookmarkNode]?
   public var role: String?
   public var pageTitle: String?
+  public var icon: String?
 
-  public static func folder(_ title: String, _ children: [BookmarkNode], role: String? = nil, dateAdded: Double? = nil) -> BookmarkNode {
-    BookmarkNode(type: .folder, title: title, url: nil, dateAdded: dateAdded, children: children, role: role, pageTitle: nil)
+  public static func folder(_ title: String, _ children: [BookmarkNode], role: String? = nil, dateAdded: Double? = nil, icon: String? = nil) -> BookmarkNode {
+    BookmarkNode(type: .folder, title: title, url: nil, dateAdded: dateAdded, children: children, role: role, pageTitle: nil, icon: icon)
   }
 
   public static func link(_ title: String, _ url: String, dateAdded: Double? = nil) -> BookmarkNode {
-    BookmarkNode(type: .url, title: title, url: url, dateAdded: dateAdded, children: nil, role: nil, pageTitle: nil)
+    BookmarkNode(type: .url, title: title, url: url, dateAdded: dateAdded, children: nil, role: nil, pageTitle: nil, icon: nil)
   }
 
   public var linkCount: Int {

@@ -292,7 +292,7 @@ export const UrlField = memo(function UrlField({
   inSplit: boolean;
   onFocus: () => void;
   style?: ViewStyle;
-  sidebar?: { height: number; progress: number | null; accessory?: ReactNode };
+  sidebar?: { height: number; accessory?: ReactNode };
 }) {
   const theme = useTheme();
   const showFullUrl = useSettings((s) => s.showFullUrl);
@@ -417,7 +417,6 @@ export const UrlField = memo(function UrlField({
         )}
         {sidebar?.accessory}
       </View>
-      {sidebar && sidebar.progress !== null ? <ProgressBar progress={sidebar.progress} color={theme.accent} /> : null}
     </View>
   );
 });

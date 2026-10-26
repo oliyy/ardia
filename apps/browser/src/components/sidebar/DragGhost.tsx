@@ -10,7 +10,7 @@ import { useTabDrag } from "../layout/tabDrag";
 import type { Ghost } from "./dnd";
 import { FolderMosaic } from "./FolderTile";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
-import { FolderGlyph, folderSymbol, useFolderColors } from "./FolderGlyph";
+import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { TabIcon } from "./TabIcon";
 import { useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 
@@ -23,7 +23,6 @@ export function DragGhost({ ghost }: { ghost: Ghost }) {
   const group = useBrowser((s) => (item.groupId ? s.groups[item.groupId] : undefined));
   const liveFolder = useLive((s) => (item.liveId ? s.folders[item.liveId] : undefined));
   const folderColors = useFolderColors(group?.color ?? null);
-  const symbol = folderSymbol(liveFolder ? liveFolder.icon : group?.icon);
   const flat = useAddressBarInSidebar();
   const arcLabel = useArcLabel();
   const arcTitle = useArcTitle();
@@ -57,11 +56,7 @@ export function DragGhost({ ghost }: { ghost: Ghost }) {
         {folderTile ? <FolderMosaic tabIds={item.tabIds} /> : liveIcon && !flat ? (
           <TabIcon url={liveIcon.site} icon={liveIcon.icon} />
         ) : flat && groupRow ? (
-          !liveFolder && group?.icon && !symbol ? (
-            <TabIcon url={tab?.url ?? ""} favicon={tab?.favicon} icon={group.icon} profileId={tab?.profileId} />
-          ) : (
-            <FolderGlyph colors={folderColors} open={!item.collapsed} symbol={symbol} />
-          )
+          <FolderGlyph colors={folderColors} open={!item.collapsed} icon={liveFolder ? liveFolder.icon : group?.icon} />
         ) : group?.icon || tab ? (
           <TabIcon url={tab?.url ?? ""} favicon={tab?.favicon} icon={group?.icon ?? tab?.customIcon} profileId={tab?.profileId} />
         ) : null}

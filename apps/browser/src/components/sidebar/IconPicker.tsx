@@ -1,10 +1,12 @@
 import { Surface, Symbol } from "@ardia/shell";
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { hex, useTheme } from "../../lib/theme";
 import { useLive } from "../../live/store";
 import { useBrowser } from "../../store/browser";
+import { addressBarInSidebar } from "../layout/windowLayout";
 import { setIcon } from "./actions";
+import { ARC_FOLDER_ICONS, ARC_ICON_PREFIX, arcIconSource, arcIconWords, isArcIcon } from "./arcFolderIcons";
 import { setSidebarUi, useSidebarUi } from "./state";
 import { NO_GROUP_ICON, NO_GROUP_ICON_INK, SYMBOL_PREFIX } from "./TabIcon";
 import { useSidebarTokens } from "./tokens";
@@ -56,14 +58,16 @@ function PickerPanel({ picker, sidebarWidth }: { picker: Picker; sidebarWidth: n
   const tokens = useSidebarTokens();
   const liveIcon = useLive((s) => (picker.kind === "live" ? s.folders[picker.id.split("|")[1] ?? ""]?.icon : null));
   const current = useBrowser((s) => (picker.kind === "tab" ? s.tabs[picker.id]?.customIcon : picker.kind === "live" ? liveIcon : s.groups[picker.id]?.icon) ?? null);
-  const [tab, setTab] = useState<"emoji" | "symbols">(current?.startsWith(SYMBOL_PREFIX) ? "symbols" : "emoji");
+  const arcFolder = useBrowser((s) => picker.kind !== "tab" && picker.kind !== "folder" && addressBarInSidebar(s, picker.windowId));
+  const emojiCurrent = !!current && !current.startsWith(SYMBOL_PREFIX) && !isArcIcon(current);
+  const [tab, setTab] = useState<"emoji" | "symbols">(emojiCurrent || (!arcFolder && !current) ? "emoji" : "symbols");
   const [query, setQuery] = useState("");
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return tab === "emoji"
-      ? EMOJI.filter(([, words]) => !q || words.includes(q)).map(([e]) => e)
-      : SYMBOLS.filter((name) => !q || name.includes(q)).map((name) => SYMBOL_PREFIX + name);
-  }, [tab, query]);
+    if (tab === "emoji") return EMOJI.filter(([, words]) => !q || words.includes(q)).map(([e]) => e);
+    if (arcFolder) return ARC_FOLDER_ICONS.filter(({ id }) => !q || arcIconWords(id).includes(q)).map(({ id }) => ARC_ICON_PREFIX + id);
+    return SYMBOLS.filter((name) => !q || name.includes(q)).map((name) => SYMBOL_PREFIX + name);
+  }, [tab, query, arcFolder]);
   const close = () => setSidebarUi({ iconPicker: null });
   const choose = (icon: string | null) => {
     setIcon(picker, icon);
@@ -118,9 +122,9 @@ function PickerPanel({ picker, sidebarWidth }: { picker: Picker; sidebarWidth: n
             {items.length === 0 ? <Text style={{ padding: 8, fontSize: 12, color: theme.textTertiary }}>No matches</Text> : null}
           </View>
         </ScrollView>
-        {picker.kind === "group" || current ? (
+        {(picker.kind === "group" && !arcFolder) || current ? (
           <View style={{ flexDirection: "row", gap: 6 }}>
-            {picker.kind === "group" ? (
+            {picker.kind === "group" && !arcFolder ? (
               <FooterButton label="No Icon" selected={current === NO_GROUP_ICON} onPress={() => choose(NO_GROUP_ICON)}>
                 <Symbol name="square.stack.fill" size={11} weight="medium" color={theme.dark ? NO_GROUP_ICON_INK.dark : NO_GROUP_ICON_INK.light} style={{ width: 14, height: 14 }} />
               </FooterButton>
@@ -162,6 +166,7 @@ function Cell({ icon, selected, onPress }: { icon: string; selected: boolean; on
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const [hovered, setHovered] = useState(false);
+  const arcSource = arcIconSource(icon);
   return (
     <Pressable onPress={onPress}>
       <View
@@ -178,6 +183,8 @@ function Cell({ icon, selected, onPress }: { icon: string; selected: boolean; on
       >
         {icon.startsWith(SYMBOL_PREFIX) ? (
           <Symbol name={icon.slice(SYMBOL_PREFIX.length)} size={15} color={theme.icon} style={{ width: 20, height: 20 }} />
+        ) : arcSource !== undefined ? (
+          <Image key={theme.icon} source={arcSource} accessible={false} style={{ width: 15, height: 15, tintColor: theme.icon }} />
         ) : (
           <Text style={{ fontSize: 18 }}>{icon}</Text>
         )}

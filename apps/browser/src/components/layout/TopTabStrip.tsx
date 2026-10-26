@@ -1,6 +1,6 @@
 import { ContextMenuArea, FadeLabel, raiseView, setTrafficLightsCenter, Surface, Symbol, WindowDragRegion } from "@ardia/shell";
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, findNodeHandle, PanResponder, Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from "react-native";
+import { Animated, Easing, findNodeHandle, Image, PanResponder, Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { create } from "zustand";
 import { toggleMute } from "../../lib/actions";
 import { hex, layout, ThemeScope, useTheme } from "../../lib/theme";
@@ -15,6 +15,7 @@ import { pressGroupClose, pressTabClose, useGroupCloseControl, useTabCloseContro
 import { openGroupMenu, openTabMenu } from "../sidebar/menus";
 import { groupLabel } from "../../store/organize";
 import { hasOwnGroupIcon, SYMBOL_PREFIX, TabIcon } from "../sidebar/TabIcon";
+import { arcIconSource, isArcIcon } from "../sidebar/arcFolderIcons";
 import { TabBadges } from "../media/TabBadges";
 import { GROUP_COLORS, NEUTRAL_GROUP_SWATCH, useSidebarTokens, withAlpha } from "../sidebar/tokens";
 import { modifiersOf } from "./controls";
@@ -1447,6 +1448,16 @@ function StripGroupIcon({ icon, tint }: { icon: string | null; tint: string | nu
   const theme = useTheme();
   if (!hasOwnGroupIcon(icon)) return <GroupGlyph color={tint ?? (theme.dark ? NEUTRAL_GROUP_SWATCH.dark : NEUTRAL_GROUP_SWATCH.light)} />;
   if (icon.startsWith(SYMBOL_PREFIX)) return <Symbol name={icon.slice(SYMBOL_PREFIX.length)} size={11} weight="medium" color={tint ?? theme.icon} style={{ width: 13, height: 13 }} />;
+  const arcSource = arcIconSource(icon);
+  if (arcSource !== undefined) {
+    const color = tint ?? theme.icon;
+    return (
+      <View style={{ width: 13, height: 13, alignItems: "center", justifyContent: "center" }}>
+        <Image key={color} source={arcSource} accessible={false} style={{ width: 11, height: 11, tintColor: color }} />
+      </View>
+    );
+  }
+  if (isArcIcon(icon)) return <GroupGlyph color={tint ?? (theme.dark ? NEUTRAL_GROUP_SWATCH.dark : NEUTRAL_GROUP_SWATCH.light)} />;
   return <Text style={{ width: 13, fontSize: 12, textAlign: "center" }}>{icon}</Text>;
 }
 

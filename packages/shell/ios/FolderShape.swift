@@ -6,6 +6,9 @@ enum FolderMark: Equatable {
   case dots
   case symbol(String)
   case image(String)
+  case emoji(String)
+
+  private static let maxEmojiLength = 32
 
   init?(_ value: [String: Any]) {
     switch value["kind"] as? String {
@@ -17,6 +20,11 @@ enum FolderMark: Equatable {
     case "image":
       guard let uri = value["uri"] as? String, !uri.isEmpty else { return nil }
       self = .image(uri)
+    case "emoji":
+      guard let text = value["text"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        text.utf16.count <= Self.maxEmojiLength
+      else { return nil }
+      self = .emoji(text)
     default:
       return nil
     }
@@ -215,8 +223,20 @@ final class FolderShape: ExpoView {
       showMark(NSImage(systemSymbolName: name, accessibilityDescription: nil))
     case .image:
       loadMarkImage()
+    case .emoji(let text):
+      showMark(Self.emojiImage(text))
     case nil:
       break
+    }
+  }
+
+  private static func emojiImage(_ text: String) -> NSImage {
+    let side: CGFloat = 16
+    let string = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: side)])
+    return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+      let size = string.size()
+      string.draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2))
+      return true
     }
   }
 

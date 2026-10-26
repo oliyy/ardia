@@ -170,6 +170,12 @@ public struct ArcSidebar: Equatable {
     (item["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
   }
 
+  static func folderIcon(_ list: Any?) -> String? {
+    let icon = ((list as? [String: Any])?["customInfo"] as? [String: Any])?["iconType"] as? [String: Any]
+    if let name = icon?["icon"] as? String, !name.isEmpty { return "arc:" + name }
+    return emoji(icon)
+  }
+
   static func tab(_ item: [String: Any], pinned: Bool) -> ImportedTab? {
     guard let tab = (item["data"] as? [String: Any])?["tab"] as? [String: Any],
           let url = tab["savedURL"] as? String, !url.isEmpty else { return nil }
@@ -191,10 +197,10 @@ public struct ArcSidebar: Equatable {
         out.append(link)
       } else if let role = liveFolderRole(data["list"]) {
         guard seen.insert(id).inserted else { continue }
-        out.append(.folder(customTitle(item) ?? "Pull Requests", [], role: role))
+        out.append(.folder(customTitle(item) ?? "Pull Requests", [], role: role, icon: folderIcon(data["list"])))
       } else if data["list"] != nil {
         let kids = tree(of: id, items: items, seen: &seen, depth: depth + 1)
-        out.append(.folder(customTitle(item) ?? "Folder", kids))
+        out.append(.folder(customTitle(item) ?? "Folder", kids, icon: folderIcon(data["list"])))
       } else if data["splitView"] != nil {
         out += tree(of: id, items: items, seen: &seen, depth: depth + 1)
       }

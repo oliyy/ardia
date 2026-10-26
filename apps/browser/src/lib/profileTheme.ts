@@ -239,6 +239,8 @@ export function themeLuminance(theme: ProfileTheme, dark: boolean): number {
 }
 
 export function readableDark(theme: ProfileTheme, dark: boolean): boolean {
+  const content = theme.contentAppearance?.[dark ? "dark" : "light"];
+  if (content) return content === "dark";
   const y = themeLuminance(theme, dark);
   const blackText = (y + 0.05) / 0.05, whiteText = 1.05 / (y + 0.05);
   if (dark) return !(whiteText < MIN_WHITE_TEXT_CONTRAST && blackText > whiteText);
@@ -249,7 +251,7 @@ export function stopLightness(stop: ThemeStop): number {
   return rgbToHsl(clamp01(stop.color.r), clamp01(stop.color.g), clamp01(stop.color.b))[2];
 }
 
-const withoutPalette = ({ foregroundSecondary: _, maxContrastColor: __, favoriteMutedColor: ___, minContrastColor: ____, subtitle: _____, ...rest }: ProfileTheme): ProfileTheme => rest;
+const withoutPalette = ({ foregroundSecondary: _, maxContrastColor: __, favoriteMutedColor: ___, minContrastColor: ____, subtitle: _____, contentAppearance: ______, ...rest }: ProfileTheme): ProfileTheme => rest;
 
 export function withStopAt(theme: ProfileTheme, index: number, x: number, y: number): ProfileTheme {
   const rest = withoutPalette(theme);
@@ -265,6 +267,11 @@ export function withStopLightness(theme: ProfileTheme, index: number, lightness:
 
 export function withAngle(theme: ProfileTheme, degrees: number): ProfileTheme {
   return { ...theme, angle: ((Math.round(degrees) % 360) + 360) % 360 };
+}
+
+export function withMode(theme: ProfileTheme, mode: ThemeMode): ProfileTheme {
+  const { contentAppearance: _, ...rest } = theme;
+  return { ...rest, mode };
 }
 
 export function withAddedStop(theme: ProfileTheme): ProfileTheme {
@@ -353,6 +360,14 @@ function finiteColorPair(v: unknown): ProfileTheme["minContrastColor"] | null {
   return light && dark ? { light, dark } : null;
 }
 
+const isContentAppearance = (v: unknown): v is "light" | "dark" => v === "light" || v === "dark";
+
+function sanitizeContentAppearance(v: unknown): ProfileTheme["contentAppearance"] | null {
+  if (!v || typeof v !== "object") return null;
+  const { light, dark } = v as Record<string, unknown>;
+  return isContentAppearance(light) && isContentAppearance(dark) ? { light, dark } : null;
+}
+
 export function sanitizeTheme(v: unknown): ProfileTheme | null {
   const look = sanitizeLook(v);
   if (!look) return null;
@@ -363,5 +378,6 @@ export function sanitizeTheme(v: unknown): ProfileTheme | null {
   const favoriteMutedColor = sanitizeColorPair(t.favoriteMutedColor);
   const minContrastColor = finiteColorPair(t.minContrastColor);
   const subtitle = finiteColorPair(t.subtitle);
-  return { ...look, mode: t.mode === "light" || t.mode === "dark" ? t.mode : "auto", ...(dark ? { dark } : {}), ...(foregroundSecondary ? { foregroundSecondary } : {}), ...(maxContrastColor ? { maxContrastColor } : {}), ...(favoriteMutedColor ? { favoriteMutedColor } : {}), ...(minContrastColor ? { minContrastColor } : {}), ...(subtitle ? { subtitle } : {}) };
+  const contentAppearance = sanitizeContentAppearance(t.contentAppearance);
+  return { ...look, mode: t.mode === "light" || t.mode === "dark" ? t.mode : "auto", ...(dark ? { dark } : {}), ...(contentAppearance ? { contentAppearance } : {}), ...(foregroundSecondary ? { foregroundSecondary } : {}), ...(maxContrastColor ? { maxContrastColor } : {}), ...(favoriteMutedColor ? { favoriteMutedColor } : {}), ...(minContrastColor ? { minContrastColor } : {}), ...(subtitle ? { subtitle } : {}) };
 }

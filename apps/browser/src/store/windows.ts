@@ -21,6 +21,7 @@ import {
 import { nextPinChoice, placeChoiceKey, restoringGroup } from "./organize";
 import { adoptParkedPins, parkWindowPins } from "./parkedPins";
 import { settleMovedPins } from "./pinMirror";
+import { notePlainSpaceSwitch } from "./spaceSwitch";
 import { dropNodes, FAVORITES, pinKeyOf, placeNodes, tabNode } from "./pinTree";
 import { holderOf, returnSharedPages, swapPinPage } from "./pinShare";
 import { sharedElsewhere, sharesTabs } from "./tabShare";
@@ -246,6 +247,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     if (!target) [s, target] = withNewTab(s, windowId, { profileId, background: true });
     s = apply(s, activated(s, target));
     if (s.ui.focusedWindowId === windowId) s = { ...s, ui: { ...s.ui, lastProfileId: profileId } };
+    notePlainSpaceSwitch(s.windows[windowId]);
     set(s);
   },
 

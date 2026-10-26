@@ -4,7 +4,6 @@ import { Image, Pressable, StyleSheet, View, type ViewStyle } from "react-native
 import { layout, useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { useActiveTabId, useTabLive, useWindowId } from "../../store/hooks";
-import { usePageProgress } from "../../store/pageProgress";
 import { splitOf } from "../../store/splits";
 import { extensionsFitting, ToolbarExtensions, useToolbarExtensionsWidth } from "../extensions/ToolbarExtensions";
 import { useHistoryAvailability } from "../layout/history";
@@ -151,9 +150,6 @@ const SEARCH_ICON_LAYERS = [
 
 function PageField({ tab, windowId, width }: { tab: NonNullable<ReturnType<typeof useToolbarTab>>; windowId: string; width: number }) {
   const palette = toolbarPalette(useTheme(), null);
-  const loading = useTabLive(tab.id, (l) => l.isLoading);
-  const loaded = usePageProgress(tab.id);
-  const progress = loading ? loaded : null;
   const inSplit = useBrowser((s) => !!splitOf(s, tab.id));
   const limit = extensionsFitting(width - 10 - 3 - HOST_ROOM);
   const extensionsWidth = useToolbarExtensionsWidth(windowId, limit);
@@ -166,7 +162,6 @@ function PageField({ tab, windowId, width }: { tab: NonNullable<ReturnType<typeo
       onFocus={alreadyFocused}
       sidebar={{
         height: SIDEBAR_FIELD.height,
-        progress,
         accessory: extensionsWidth ? (
           <View style={{ width: extensionsWidth - 6, height: 28 }}>
             <ToolbarExtensions tabId={tab.id} windowId={windowId} palette={palette} top={0} right={0} limit={limit} />

@@ -40,6 +40,7 @@ import { pagerFor } from "./layout/profilePager";
 import { openFromPage } from "./layout/openFromPage";
 import { dockMoving, useDockMotion, usePeekEdge } from "./layout/dockMotion";
 import { FrozenPage } from "./layout/frozenPage";
+import { CardLoadingLine } from "./layout/CardLoadingLine";
 import { holderOf } from "../store/pinShare";
 import { closeFolderPanelIn } from "./sidebar/tileFolderUi";
 import { setCardAnchor, setUrlAnchor, useAddressBarInSidebar, useCardGeometry, useTabLayout, useToolbarExtensionsWidths } from "./layout/windowLayout";
@@ -426,6 +427,7 @@ const TabPane = memo(function TabPane({
             {(mounted || prewarmed) && <TabWebView tabId={tabId} visible={visible && !newTabShown && !isNewTab} warm={!!warm && !newTabShown && !isNewTab} />}
             {visible && isNewTab && !small && (inSplit ? <SplitEmptyState tabId={tabId} focused={focused} /> : emptyCard ? <EmptyCard windowId={windowId} tabId={tabId} /> : <NewTabPage key={tabId} tabId={tabId} toolbar={toolbar} />)}
             {visible && <InternalPage tabId={tabId} />}
+            {visible && focused && !fullscreen && !small && <CardLoadingLine tabId={tabId} />}
             {visible && (
               <PageOverlays
                 tabId={tabId}

@@ -66,10 +66,11 @@ function windowMode(v: unknown): ThemeMode | null {
   return based.light === based.dark ? based.light : "auto";
 }
 
-type ParsedLook = { look: ThemeLook; style: unknown };
+type ParsedLook = { look: ThemeLook; style: unknown; content: Appearance | null };
 
 function parseLook(background: unknown): ParsedLook | null {
-  const kind = obj(payload(obj(obj(background)?.style)?.color));
+  const surface = obj(background);
+  const kind = obj(payload(obj(surface?.style)?.color));
   if (!kind) return null;
   const gradient = obj(payload(kind.blendedGradient));
   const single = obj(payload(kind.blendedSingleColor));
@@ -90,6 +91,7 @@ function parseLook(background: unknown): ParsedLook | null {
   if (!colors.length) return null;
 
   const modifiers = obj(config.modifiers);
+  const content = surface?.contentOverBackgroundAppearance;
   return {
     look: {
       stops: colors.map((color) => ({ color, ...padPosition(color) })),
@@ -100,6 +102,7 @@ function parseLook(background: unknown): ParsedLook | null {
       ...(isArcStyle(config.translucencyStyle) ? { arcStyle: config.translucencyStyle } : {}),
     },
     style: config.translucencyStyle,
+    content: isAppearance(content) ? content : null,
   };
 }
 
@@ -128,12 +131,14 @@ export function parseArcTheme(input: unknown): ProfileTheme | null {
   const style = main.style;
   const mode: ThemeMode = forced ?? (light && dark ? "auto" : isAppearance(style) ? style : "auto");
   const base = mode === "dark" && dark ? dark : main;
+  const shownDark = light && dark && mode === "auto" ? dark : base;
   const supplied = suppliedPalette(theme);
 
   return sanitizeTheme({
     ...base.look,
     mode,
     ...(light && dark && mode === "auto" ? { dark: dark.look } : {}),
+    ...(base.content && shownDark.content ? { contentAppearance: { light: base.content, dark: shownDark.content } } : {}),
     ...(supplied ?? {}),
   });
 }

@@ -385,7 +385,7 @@ export type FolderShapeProps = ViewProps & {
   back: string;
   stroke: string;
   open?: boolean;
-  mark?: { kind: "dots" } | { kind: "symbol"; name: string } | { kind: "image"; uri: string } | null;
+  mark?: { kind: "dots" } | { kind: "symbol"; name: string } | { kind: "image"; uri: string } | { kind: "emoji"; text: string } | null;
 };
 
 export const FolderShape = requireNativeViewManager<FolderShapeProps>("ArdiaFolderShape");

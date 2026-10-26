@@ -11,6 +11,7 @@ import { activeTabId } from "../store/model";
 import { downloadsIn } from "../store/ui";
 import { ancestorIds } from "../store/groups";
 import { cleanedTabsFor, cleanUpCandidates, groupOf } from "../store/organize";
+import { isPlainSpaceSwitch } from "../store/spaceSwitch";
 import { splitOf } from "../store/splits";
 import { openNewTabInSplit } from "./layout/splitActions";
 import { listTopGap, SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, SIDEBAR_HEADER_WITH_FIELD, useAddressBarInSidebar } from "./layout/windowLayout";
@@ -589,35 +590,43 @@ function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, s
     let opened: string | null = null;
     let frame = 0;
     let reveals = 0;
-    const show = (y: number, height: number) => {
+    const show = (view: ScrollView, y: number, height: number) => {
       const top = scrollY.current ?? 0;
       const { viewport, room, pad } = geometry.current;
-      if (y - top < room) scroll.current?.scrollTo({ y: Math.max(0, y - pad), animated: true });
-      else if (y + height - top > viewport - 8) scroll.current?.scrollTo({ y: y + height - viewport + 8, animated: true });
+      if (y - top < room) view.scrollTo({ y: Math.max(0, y - pad), animated: true });
+      else if (y + height - top > viewport - 8) view.scrollTo({ y: y + height - viewport + 8, animated: true });
+    };
+    const forget = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      switched = opened = null;
+      reveals++;
     };
     const reveal = () => {
       frame = 0;
-      if (!geometry.current.viewport || !scroll.current) return;
+      const scroller = scroll.current;
+      if (!geometry.current.viewport || !scroller) return;
       const mine = ++reveals;
       const tabId = switched ?? opened;
       switched = opened = null;
       const s = useBrowser.getState();
       const profileId = s.windows[windowId]?.profileId;
       if (!tabId || !profileId) return;
+      const stillWanted = () => mine === reveals && scroll.current === scroller && useBrowser.getState().windows[windowId]?.profileId === profileId;
       const pinned = s.tabs[tabId];
       if (geometry.current.tilesFixed && pinned?.pinned && !pinned.pinnedAsRow) return;
       const { regions, newTabAtTop } = geometry.current;
       const span = rowSpan(s, windowId, profileId, tabId, newTabAtTop);
       const pinnedHasLive = span?.section === "pinned" && live().folderOrder.some((id) => live().folders[id]?.profileId === profileId);
-      if (span && !pinnedHasLive) return show(geometry.current.pad + regions[span.section] + span.top, span.height);
-      const view = scroll.current as unknown as View;
+      if (span && !pinnedHasLive) return show(scroller, geometry.current.pad + regions[span.section] + span.top, span.height);
+      const view = scroller as unknown as View;
       const split = splitOf(s, tabId);
       const inner = groupOf(s, tabId);
       const keys = [tabId, ...(split ? [`s:${split.id}`] : []), ...(inner ? [inner.id, ...ancestorIds(s.groups, inner.id)] : [])];
       const firstShown = (i: number): Promise<Awaited<ReturnType<typeof measureRow>>> =>
-        i >= keys.length ? Promise.resolve(null) : measureRow(windowId, keys[i]!).then((row) => row ?? firstShown(i + 1));
+        i >= keys.length || !stillWanted() ? Promise.resolve(null) : measureRow(windowId, keys[i]!).then((row) => row ?? firstShown(i + 1));
       void firstShown(0).then((row) =>
-        view.measureInWindow((_x, y) => row && mine === reveals && show(row.y - y + (scrollY.current ?? 0), row.height)),
+        row && stillWanted() && view.measureInWindow((_x, y) => stillWanted() && show(scroller, row.y - y + (scrollY.current ?? 0), row.height)),
       );
     };
     const schedule = () => {
@@ -626,23 +635,33 @@ function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, s
     const unrequest = useSidebarUi.subscribe((u, prev) => {
       if (u.reveal === prev.reveal || u.reveal?.windowId !== windowId) return;
       switched = u.reveal.id;
+      reveals++;
       schedule();
     });
     const unsubscribe = useBrowser.subscribe((s, prev) => {
       if (s.windows === prev.windows && s.tabs === prev.tabs) return;
-      const active = activeTabId(s, windowId);
-      if (active && active !== activeTabId(prev, windowId)) switched = active;
       const w = s.windows[windowId];
       const before = prev.windows[windowId];
+      const crossed = !!w && !!before && w.profileId !== before.profileId;
+      if (crossed) forget();
+      const active = activeTabId(s, windowId);
+      if (active && active !== activeTabId(prev, windowId) && !(crossed && isPlainSpaceSwitch(w))) {
+        switched = active;
+        reveals++;
+      }
       if (w && before && w.tabIds !== before.tabIds) {
         const had = new Set(before.tabIds);
-        for (const id of w.tabIds) if (!had.has(id) && s.tabs[id]?.openerId && id !== active) opened = id;
+        for (const id of w.tabIds)
+          if (!had.has(id) && s.tabs[id]?.openerId && id !== active) {
+            opened = id;
+            reveals++;
+          }
       }
       schedule();
     });
     geometry.current.laidOut = schedule;
     return () => {
-      cancelAnimationFrame(frame);
+      forget();
       unsubscribe();
       unrequest();
       geometry.current.laidOut = undefined;

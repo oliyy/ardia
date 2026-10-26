@@ -24,7 +24,7 @@ import { useShift, type EntryMotion } from "./entryMotion";
 import { Fold, useFold, useFoldHidden, type FoldEntry } from "./Fold";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS, groupFrame } from "./geometry";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
-import { FolderGlyph, folderSymbol, useFolderColors } from "./FolderGlyph";
+import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { bundledSiteIcon } from "../../lib/siteIcons";
 import { dismissHover, useRowHover } from "./hover";
 import { openLiveFolderMenu, openLiveItemMenu, openLiveStackMenu } from "./liveMenus";
@@ -147,7 +147,6 @@ function FolderHeader({ folderId, windowId, collapsed, peek, flat }: { folderId:
   const { site: sourceSite, icon } = liveFolderIcon(folder);
   const initialLoading = !status || status.state === "initializing" || (status.state === "updating" && !status.lastFetch);
   const sourceMark = folder.sources[0] === "github" && !initialLoading ? bundledSiteIcon(SOURCES.github.site, theme.dark) : undefined;
-  const customSymbol = folderSymbol(folder.icon);
 
   return (
     <View ref={(v) => registerRow(windowId, `livefolder|${folderId}`, hidden ? null : v)} {...hoverProps} style={{ marginHorizontal: flat ? 0 : -PAD }}>
@@ -174,8 +173,8 @@ function FolderHeader({ folderId, windowId, collapsed, peek, flat }: { folderId:
               style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: flat ? layout.rowPadding : 9 + PAD, paddingRight: 6 }}
             >
               {flat ? <ArcTabRowBackground dark={theme.dark} hovered={hovered && !dragging} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
-              {flat && (!folder.icon || customSymbol) ? (
-                <FolderGlyph colors={folderColors} open={!collapsed} symbol={customSymbol} image={customSymbol ? undefined : sourceMark} dots={!customSymbol && sourceMark === undefined} />
+              {flat ? (
+                <FolderGlyph colors={folderColors} open={!collapsed} icon={folder.icon} image={sourceMark} dots={sourceMark === undefined} />
               ) : (
                 <TabIcon url={sourceSite} icon={icon} />
               )}

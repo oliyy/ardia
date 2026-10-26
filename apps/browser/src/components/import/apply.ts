@@ -15,7 +15,7 @@ import { importModule } from "./module";
 import { adoptProfileTheme } from "../../sync/engine";
 import { parseArcTheme } from "./arcTheme";
 import { newProfileLiveFolder } from "../../live/engine";
-import { live } from "../../live/store";
+import { live, updateFolder } from "../../live/store";
 import type { LiveSourceId } from "../../live/types";
 
 export type ImportCounts = { bookmarks: number; history: number; tabs: number; passwords: number; cookies: number; addresses: number; cards: number };
@@ -187,6 +187,7 @@ function importPinnedTree(profileId: string, nodes: ImportedNode[]): { tabs: num
         if (folder && !existingFolders.has(folder.id) && !placedLive.has(folder.id)) {
           places = placeNodes(places, profileId, [liveNode(folder.id)], parent, null);
           placedLive.add(folder.id);
+          if (n.icon) updateFolder(folder.id, { icon: n.icon });
         }
         continue;
       }
@@ -195,7 +196,7 @@ function importPinnedTree(profileId: string, nodes: ImportedNode[]): { tabs: num
         const newLive = liveSources([n]).some((source) => Object.values(live().folders).some((f) => f.profileId === profileId && f.kind === "pullRequests" && f.sources.includes(source) && !existingFolders.has(f.id) && !placedLive.has(f.id)));
         if (pages.length && pages.every((url) => seen.has(pageKey(url))) && !newLive) continue;
         const id = newId("g");
-        groups[id] = { id, windowId, profileId, name: n.title, icon: null, color: null, collapsed: false, pinned: true, tabIds: [], createdAt: Date.now(), ...(parent ? { parentId: parent.slice(2) } : {}) };
+        groups[id] = { id, windowId, profileId, name: n.title, icon: n.icon ?? null, color: null, collapsed: false, pinned: true, tabIds: [], createdAt: Date.now(), ...(parent ? { parentId: parent.slice(2) } : {}) };
         places = placeNodes(places, profileId, [groupNode(id)], parent, null);
         visit(n.children ?? [], groupNode(id), budget ?? { taken: 0 });
         continue;

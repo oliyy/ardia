@@ -22,6 +22,7 @@ import {
   themeUnderColor,
   withAddedStop,
   withAngle,
+  withMode,
   withoutStop,
   withStopAt,
   withStopLightness,
@@ -74,6 +75,12 @@ function useLiveTheme(profileId: string, theme: ProfileTheme | null | undefined)
   return { theme: draft ?? theme ?? null, change };
 }
 
+function editableLook(stored: ProfileTheme, dark: boolean): ProfileTheme {
+  const look = resolveTheme(stored, dark);
+  const content = look.contentAppearance?.[dark ? "dark" : "light"];
+  return content ? { ...look, contentAppearance: { light: content, dark: content } } : look;
+}
+
 export function ThemeSection({ profileId }: { profileId: string }) {
   const profile = useBrowser((s) => s.profiles[profileId]);
   const live = useLiveTheme(profileId, profile?.theme);
@@ -86,7 +93,7 @@ export function ThemeSection({ profileId }: { profileId: string }) {
   }, [editing]);
   if (!profile) return null;
   const stored = live.theme;
-  const custom = stored?.dark ? resolveTheme(stored, themeDark(stored, appDark)) : stored;
+  const custom = stored?.dark ? editableLook(stored, themeDark(stored, appDark)) : stored;
   const choosePreset = (color: ProfileColor) => choosePresetColor(profileId, color);
   const chooseCustom = () => {
     if (!custom) live.change(startingTheme(PROFILE_COLORS[profile.color]?.swatch ?? PROFILE_COLORS.plum.swatch), true);
@@ -222,7 +229,7 @@ function ThemeEditor({ theme, onChange }: { theme: ProfileTheme; onChange: (next
           <Text style={{ width: LABEL + 10, fontSize: 12, color: ui.textPrimary }}>Appearance</Text>
           <View style={{ flexDirection: "row", borderRadius: 6, backgroundColor: colors.control, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.controlBorder, padding: 1 }}>
             {MODES.map((m) => (
-              <Pressable key={m.value} tooltip={m.title} onPress={() => onChange({ ...theme, mode: m.value }, true)}>
+              <Pressable key={m.value} tooltip={m.title} onPress={() => onChange(withMode(theme, m.value), true)}>
                 <View
                   style={{
                     width: 30,

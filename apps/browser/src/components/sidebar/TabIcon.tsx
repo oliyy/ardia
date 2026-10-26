@@ -1,12 +1,13 @@
 import { Symbol } from "@ardia/shell";
 import { memo } from "react";
-import { Text, View } from "react-native";
+import { Image, Text, View } from "react-native";
 import { useIsSleeping } from "../../lib/tabLifecycle";
 import { useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { engineMark, ENGINE_NAMES, ENGINE_SYMBOLS } from "../../store/engines";
 import { isPageUnloaded } from "../../store/pinShare";
 import { Favicon, type FaviconSourceListener } from "../primitives";
+import { arcIconSource, isArcIcon } from "./arcFolderIcons";
 
 export const SYMBOL_PREFIX = "symbol:";
 export const NO_GROUP_ICON = `${SYMBOL_PREFIX}square.stack.fill`;
@@ -102,7 +103,16 @@ function Icon({
     const ink = icon === NO_GROUP_ICON ? (theme.dark ? NO_GROUP_ICON_INK.dark : NO_GROUP_ICON_INK.light) : theme.icon;
     return <Symbol name={icon.slice(SYMBOL_PREFIX.length)} size={size - 3} weight="medium" color={color ?? ink} style={{ width: size, height: size }} />;
   }
-  if (icon) {
+  const arcSource = arcIconSource(icon);
+  if (arcSource !== undefined) {
+    const tint = color ?? theme.icon;
+    return (
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+        <Image key={tint} source={arcSource} accessible={false} style={{ width: size - 3, height: size - 3, tintColor: tint }} />
+      </View>
+    );
+  }
+  if (icon && !isArcIcon(icon)) {
     return (
       <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
         <Text style={{ fontSize: size - 3, lineHeight: size }}>{icon}</Text>

@@ -27,7 +27,7 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
   const arcLayout = useAddressBarInSidebar();
   if (!tab) return null;
   const { width, active } = state;
-  if (arcLayout && !liquidGlass) return <ArcTileFace tabId={tabId} badge={badge} {...state} />;
+  if (arcLayout) return <ArcTileFace tabId={tabId} badge={badge} {...state} />;
   const icon = (
     <View>
       <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} />
