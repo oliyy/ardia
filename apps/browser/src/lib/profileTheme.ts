@@ -20,7 +20,7 @@ export type ThemeBackdropProps = {
   themeTexture: ThemeTexture;
   themeAppearance: ThemeMode;
   themeAngle: number;
-  themeBackdrop: "default" | "arcAuto";
+  themeBackdrop: "default" | "arcAuto" | "arcLight";
 };
 
 export const PRESET_BACKDROP: ThemeBackdropProps = {
@@ -189,7 +189,7 @@ export function themeBackdrop(theme: ProfileTheme, dark: boolean): ThemeBackdrop
     themeTexture: theme.texture,
     themeAppearance: theme.mode,
     themeAngle: lookAngle(theme),
-    themeBackdrop: theme.arcStyle === "auto" ? "arcAuto" : "default",
+    themeBackdrop: theme.arcStyle === "auto" ? "arcAuto" : theme.arcStyle === "light" ? "arcLight" : "default",
   };
 }
 
@@ -204,7 +204,7 @@ export function themePalette(theme: ProfileTheme): string[] {
 function underGrey(theme: ProfileTheme, dark: boolean): number {
   const u = themeUnderlayAlpha(theme, dark);
   const arcAuto = theme.arcStyle === "auto";
-  const blur = arcAuto ? 1 : dark ? 0.16 : 0.92;
+  const blur = arcAuto || theme.arcStyle === "light" ? 1 : dark ? 0.16 : 0.92;
   return (arcAuto || dark ? 0 : 1) * u + blur * (1 - u);
 }
 

@@ -23,7 +23,7 @@ export type WindowBackdropProps = ViewProps & {
   themeTexture?: "grain" | "sand" | "denim" | "tweed";
   themeAppearance?: "auto" | "light" | "dark";
   themeAngle?: number;
-  themeBackdrop?: "default" | "arcAuto";
+  themeBackdrop?: "default" | "arcAuto" | "arcLight";
 };
 
 const NativeBackdrop = requireNativeViewManager<WindowBackdropProps>("ArdiaWindowBackdrop");

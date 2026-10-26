@@ -466,7 +466,8 @@ final class WindowTreatmentView: NSView {
   private func updateAppearance() {
     let dark = isDark
     let arcAuto = custom?.backdrop == "arcAuto"
-    blur.material = NSVisualEffectView.Material(rawValue: arcAuto ? 1 : dark ? 29 : 13) ?? .hudWindow
+    let lightMaterial = arcAuto || custom?.backdrop == "arcLight"
+    blur.material = NSVisualEffectView.Material(rawValue: lightMaterial ? 1 : dark ? 29 : 13) ?? .hudWindow
     gradient.opacity = dark ? 0.5 : 0.75
     let base = dark ? NSColor(white: 0, alpha: 0.4) : NSColor(white: 1, alpha: 0.8)
     baseTint.backgroundColor = (custom.map { (arcAuto || dark ? NSColor.black : NSColor.white).withAlphaComponent($0.baseAlpha) } ?? base).cgColor
