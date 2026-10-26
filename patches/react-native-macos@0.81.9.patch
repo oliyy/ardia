@@ -1024,7 +1024,7 @@ index 3edcc9670a8ccb5eef44524e78445117d2416ed8..1f7951f616996941706f11b380c12051
    if (sendIdleEvents) {
      [self startTimers];
 diff --git a/React/Modules/RCTUIManager.mm b/React/Modules/RCTUIManager.mm
-index 7f1aeff436b8a51514254b72d1fb1fd1ee3b1553..dd2851fec59498902a78204041d994eda3fd7c3c 100644
+index 7f1aeff436b8a51514254b72d1fb1fd1ee3b1553..022badae367e49d3a5a1d381e9c6986692d4af3b 100644
 --- a/React/Modules/RCTUIManager.mm
 +++ b/React/Modules/RCTUIManager.mm
 @@ -7,6 +7,9 @@
@@ -1052,7 +1052,16 @@ index 7f1aeff436b8a51514254b72d1fb1fd1ee3b1553..dd2851fec59498902a78204041d994ed
  }
  
  @synthesize bridge = _bridge;
-@@ -1321,7 +1332,8 @@ - (void)flushUIBlocksWithCompletion:(void (^)(void))completion
+@@ -1312,6 +1323,8 @@ - (void)flushUIBlocksWithCompletion:(void (^)(void))completion
+     } @catch (NSException *exception) {
+       RCTLogError(@"Exception thrown while executing UI block: %@", exception);
+     }
++
++    [[NSNotificationCenter defaultCenter] postNotificationName:@"ArdiaUIManagerDidMount" object:strongSelf];
+   };
+ 
+   if ([self.observerCoordinator uiManager:self performMountingWithBlock:mountingBlock]) {
+@@ -1321,7 +1334,8 @@ - (void)flushUIBlocksWithCompletion:(void (^)(void))completion
  
    // Execute the previously queued UI blocks
    RCTProfileBeginFlowEvent();
@@ -1062,7 +1071,7 @@ index 7f1aeff436b8a51514254b72d1fb1fd1ee3b1553..dd2851fec59498902a78204041d994ed
      RCTProfileEndFlowEvent();
      RCT_PROFILE_BEGIN_EVENT(RCTProfileTagAlways, @"-[UIManager flushUIBlocks]", (@{
                                @"count" : [@(previousPendingUIBlocks.count) stringValue],
-@@ -1332,7 +1344,48 @@ - (void)flushUIBlocksWithCompletion:(void (^)(void))completion
+@@ -1332,7 +1346,48 @@ - (void)flushUIBlocksWithCompletion:(void (^)(void))completion
      RCT_PROFILE_END_EVENT(RCTProfileTagAlways, @"");
  
      RCTExecuteOnUIManagerQueue(completion);

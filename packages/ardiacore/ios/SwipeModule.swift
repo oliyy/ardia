@@ -1,9 +1,23 @@
 import ExpoModulesCore
 import QuartzCore
+import React
 
 public class SwipeModule: Module {
+  private var mountObserver: NSObjectProtocol?
+
   public func definition() -> ModuleDefinition {
     Name("ArdiaSwipe")
+
+    OnCreate {
+      mountObserver = NotificationCenter.default.addObserver(forName: uiManagerDidMount, object: nil, queue: nil) { [weak self] note in
+        guard Thread.isMainThread, let bridge = self?.appContext?.reactBridge, note.object as? RCTUIManager === bridge.uiManager else { return }
+        ACPager.reemitPositions(in: bridge)
+      }
+    }
+
+    OnDestroy { [weak self] in
+      if let observer = self?.mountObserver { NotificationCenter.default.removeObserver(observer) }
+    }
 
     Function("haptic") { (pattern: String) in
       DispatchQueue.main.async { ACSwipe.performHaptic(pattern) }
@@ -118,11 +132,11 @@ final class SwipeArea: ExpoView, ACSwipeTarget {
       ack: Int(number(value["ack"]) ?? 0),
       order: value["order"] as? String
     )
-    pager!.reemitPositionAfterMount()
   }
 }
 
 private let pagerActivity = Notification.Name("ArdiaPagerActivity")
+private let uiManagerDidMount = Notification.Name("ArdiaUIManagerDidMount")
 
 private func number(_ value: Any?) -> Double? {
   switch value {
@@ -217,7 +231,6 @@ final class ACPager {
   private var lastLinkFrame: CFTimeInterval = 0
   private var timer: Timer?
   private var generation = 0
-  private var positionReemitScheduled = false
   #if DEBUG
   private var lastInput: [String: Any] = [:]
   #endif
@@ -524,14 +537,14 @@ final class ACPager {
     (area ?? all.first { $0.window != nil } ?? all.first)?.onPagerPosition(["position": position])
   }
 
-  func reemitPositionAfterMount() {
-    guard !positionReemitScheduled else { return }
-    positionReemitScheduled = true
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
-      self.positionReemitScheduled = false
-      self.emitPosition()
-    }
+  static func reemitPositions(in bridge: RCTBridge) {
+    for pager in Array(pagers.values) { pager.reemitPosition(in: bridge) }
+  }
+
+  private func reemitPosition(in bridge: RCTBridge) {
+    let all = areas.allObjects.filter { $0.appContext?.reactBridge === bridge }
+    let area = phase == .tracking ? all.first(where: { $0 === drag.area }) : nil
+    (area ?? all.first { $0.window != nil } ?? all.first)?.onPagerPosition(["position": position])
   }
 
   private func emitState(_ name: String) {
