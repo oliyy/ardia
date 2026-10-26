@@ -118,6 +118,7 @@ final class SwipeArea: ExpoView, ACSwipeTarget {
       ack: Int(number(value["ack"]) ?? 0),
       order: value["order"] as? String
     )
+    pager!.reemitPositionAfterMount()
   }
 }
 
@@ -216,6 +217,7 @@ final class ACPager {
   private var lastLinkFrame: CFTimeInterval = 0
   private var timer: Timer?
   private var generation = 0
+  private var positionReemitScheduled = false
   #if DEBUG
   private var lastInput: [String: Any] = [:]
   #endif
@@ -520,6 +522,16 @@ final class ACPager {
     let area = phase == .tracking ? drag.area : nil
     let all = areas.allObjects
     (area ?? all.first { $0.window != nil } ?? all.first)?.onPagerPosition(["position": position])
+  }
+
+  func reemitPositionAfterMount() {
+    guard !positionReemitScheduled else { return }
+    positionReemitScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.positionReemitScheduled = false
+      self.emitPosition()
+    }
   }
 
   private func emitState(_ name: String) {
