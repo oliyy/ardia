@@ -18,6 +18,7 @@ import { listTopGap, SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT
 import { SIDEBAR_PLAYER_HEIGHT, SidebarPlayer, useSidebarPlayerTab } from "./media/SidebarPlayer";
 import { HoverSlot } from "./HoverSlot";
 import { LibraryPanel } from "./library/LibraryPanel";
+import { useLibraryMotion } from "./library/motion";
 import { blockLibraryWhile, toggleLibrary } from "./library/state";
 import { libraryVisible, useLibraryVisible } from "./library/store";
 import { IconButton, useHover } from "./primitives";
@@ -97,9 +98,12 @@ export function Sidebar({ width }: { width: number }) {
     closeFolderPanel();
   });
   const geometry = useRef<SidebarGeometry>({ viewport: 0, regions: { pinned: 0, list: 0 }, newTabAtTop: false, room: 0, pad: 0, tilesFixed: true });
+  const [wakeReveal] = useState(() => () => geometry.current.laidOut?.());
+  const motion = useLibraryMotion(windowId, library, width, wakeReveal);
+  const faceRest = motion.rest;
   const [pageReady] = useState(() => () => {
     const ready = geometry.current.ready;
-    return !!ready && ready.view === scroll.current && ready.profileId === useBrowser.getState().windows[windowId]?.profileId && !libraryVisible(windowId);
+    return !!ready && ready.view === scroll.current && ready.profileId === useBrowser.getState().windows[windowId]?.profileId && !libraryVisible(windowId) && faceRest.current;
   });
   const addressBar = useAddressBarInSidebar();
   const header = addressBar ? SIDEBAR_HEADER_WITH_FIELD : layout.sidebarHeader;
@@ -122,9 +126,6 @@ export function Sidebar({ width }: { width: number }) {
   }, [windowId, current, pageCurrent]);
   useLayoutEffect(() => dismissHoverIn(windowId), [windowId, current, paging]);
   useEffect(() => blockLibraryWhile(windowId, () => !!dragController.current?.active), [windowId]);
-  useEffect(() => {
-    if (!library) geometry.current.laidOut?.();
-  }, [library]);
 
   return (
     <DragProvider>
@@ -140,8 +141,8 @@ export function Sidebar({ width }: { width: number }) {
             }}
             style={{ width, height: "100%" }}
           >
-            <View pointerEvents={library ? "none" : "box-none"} style={[StyleSheet.absoluteFill, { opacity: library ? 0 : 1 }]}>
-              <Surface hidesAccessibility={library} style={StyleSheet.absoluteFill}>
+            <Animated.View pointerEvents={motion.rested ? "box-none" : "none"} style={[StyleSheet.absoluteFill, motion.faceStyle]}>
+              <Surface hidesAccessibility={!motion.rested} style={StyleSheet.absoluteFill}>
                 <View
                   {...sidebarHover}
                   pointerEvents={shown === current ? "auto" : "none"}
@@ -216,8 +217,17 @@ export function Sidebar({ width }: { width: number }) {
                   )}
                 </View>
               </Surface>
-            </View>
-            {library ? <LibraryPanel windowId={windowId} width={width} /> : null}
+            </Animated.View>
+            {motion.present && motion.view ? (
+              <View pointerEvents={motion.entered ? "box-none" : "none"} style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}>
+                <Animated.View style={[StyleSheet.absoluteFill, motion.slideStyle]}>
+                  <Surface hidesAccessibility={!library} style={StyleSheet.absoluteFill}>
+                    <LibraryPanel windowId={windowId} width={width} view={motion.view} active={library} />
+                  </Surface>
+                </Animated.View>
+              </View>
+            ) : null}
+            {motion.moving ? <MotionCatcher /> : null}
 
             <ResizeHandle windowId={windowId} />
             {ghost && !ghost.landing && nothingPinned ? (
@@ -234,6 +244,16 @@ export function Sidebar({ width }: { width: number }) {
         );
       }}
     </DragProvider>
+  );
+}
+
+const IGNORE = () => {};
+
+function MotionCatcher() {
+  return (
+    <ContextMenuArea captureDescendants onContextMenu={IGNORE} style={StyleSheet.absoluteFill}>
+      <Pressable focusable={false} style={StyleSheet.absoluteFill} />
+    </ContextMenuArea>
   );
 }
 

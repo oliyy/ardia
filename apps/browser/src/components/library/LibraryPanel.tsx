@@ -9,7 +9,7 @@ import { useSidebarTokens } from "../sidebar/tokens";
 import { ArchivedSection } from "./ArchivedSection";
 import { DownloadsSection } from "./DownloadsSection";
 import { ARCHIVE_FILTERS, DOWNLOAD_FILTERS } from "./groups";
-import { closeLibrary, updateLibrary, useLibraryView, type LibrarySection } from "./store";
+import { closeLibrary, libraryOpenings, libraryVisible, updateLibrary, type LibrarySection, type LibraryView } from "./store";
 
 const TILE_HEIGHT = 76;
 const TILE_GAP = 24;
@@ -22,16 +22,15 @@ const SECTIONS: { id: LibrarySection; title: string; icon: string; placeholder: 
 
 const railWidth = (width: number) => Math.round(Math.min(120, Math.max(86, width * 0.3)));
 
-export function LibraryPanel({ windowId, width }: { windowId: string; width: number }) {
+export function LibraryPanel({ windowId, width, view, active }: { windowId: string; width: number; view: LibraryView; active: boolean }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
-  const view = useLibraryView(windowId);
   const field = useRef<TextInput>(null);
-  const section = view?.section;
+  const opening = libraryOpenings(windowId);
   useEffect(() => {
-    if (section) field.current?.focus();
-  }, [section]);
-  if (!view) return null;
+    if (active) field.current?.focus();
+    else field.current?.blur();
+  }, [active, opening, view.section]);
   const rail = railWidth(width);
   const current = SECTIONS.find((s) => s.id === view.section)!;
   const filtered = view.section === "downloads" ? view.downloadFilter !== "all" : view.archiveFilter !== "all";
@@ -42,6 +41,7 @@ export function LibraryPanel({ windowId, width }: { windowId: string; width: num
         : ARCHIVE_FILTERS.map((f) => ({ id: f.id, title: f.title, checked: view.archiveFilter === f.id }));
     const asked = view.section;
     const choice = await showMenu(items);
+    if (!libraryVisible(windowId) || libraryOpenings(windowId) !== opening) return;
     const downloads = DOWNLOAD_FILTERS.find((f) => f.id === choice);
     const archived = ARCHIVE_FILTERS.find((f) => f.id === choice);
     updateLibrary(windowId, (v) => {
@@ -64,7 +64,7 @@ export function LibraryPanel({ windowId, width }: { windowId: string; width: num
               selected={view.section === s.id}
               fill={tokens.fieldFill}
               onPress={() => updateLibrary(windowId, () => ({ section: s.id }))}
-              onContextMenu={s.id === "archived" ? () => void archiveMenu(windowId) : undefined}
+              onContextMenu={s.id === "archived" ? () => void archiveMenu(windowId, opening) : undefined}
             />
           ))}
         </View>
@@ -78,6 +78,7 @@ export function LibraryPanel({ windowId, width }: { windowId: string; width: num
             <Symbol name="magnifyingglass" size={13} weight="medium" color={theme.textSecondary} style={{ width: 16, height: 16 }} />
             <TextInput
               ref={field}
+              editable={active}
               value={view.query[view.section]}
               onChangeText={(text) => updateLibrary(windowId, (v) => ({ query: { ...v.query, [v.section]: text } }))}
               placeholder={current.placeholder}
@@ -85,7 +86,7 @@ export function LibraryPanel({ windowId, width }: { windowId: string; width: num
               selectionColor={theme.selection}
               enableFocusRing={false}
               keyDownEvents={[{ key: "Escape" }]}
-              onKeyDown={(e) => e.nativeEvent.key === "Escape" && closeLibrary(windowId)}
+              onKeyDown={(e) => active && e.nativeEvent.key === "Escape" && closeLibrary(windowId)}
               style={{ flex: 1, fontSize: 14, color: theme.textPrimary, paddingVertical: 0 }}
             />
           </View>
@@ -98,7 +99,7 @@ export function LibraryPanel({ windowId, width }: { windowId: string; width: num
           </Pressable>
         </View>
         <View style={{ flex: 1, display: view.section === "downloads" ? "flex" : "none" }}>
-          <DownloadsSection windowId={windowId} query={view.query.downloads} filter={view.downloadFilter} visible={view.section === "downloads"} />
+          <DownloadsSection windowId={windowId} query={view.query.downloads} filter={view.downloadFilter} visible={active && view.section === "downloads"} />
         </View>
         <View style={{ flex: 1, display: view.section === "archived" ? "flex" : "none" }}>
           <ArchivedSection windowId={windowId} query={view.query.archived} filter={view.archiveFilter} />
@@ -108,9 +109,9 @@ export function LibraryPanel({ windowId, width }: { windowId: string; width: num
   );
 }
 
-async function archiveMenu(windowId: string) {
+async function archiveMenu(windowId: string, opening: number) {
   const choice = await showMenu([{ id: "clear", title: "Clear Archive" }]);
-  if (choice === "clear") useBrowser.getState().clearArchive(windowId);
+  if (choice === "clear" && libraryVisible(windowId) && libraryOpenings(windowId) === opening) useBrowser.getState().clearArchive(windowId);
 }
 
 function RailTile({ title, icon, selected, fill, onPress, onContextMenu }: { title: string; icon: string; selected: boolean; fill: string; onPress: () => void; onContextMenu?: () => void }) {
