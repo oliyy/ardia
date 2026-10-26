@@ -482,6 +482,7 @@ export type SurfaceProps = ViewProps & {
   inactiveBorderColors?: string[];
   hidesAccessibility?: boolean;
   logicalWidth?: number;
+  refreshRasterOnRest?: boolean;
 };
 
 type NativeSurfaceProps = Omit<SurfaceProps, "shadowColor" | "shadowOpacity" | "shadowRadius" | "shadowOffset"> & {

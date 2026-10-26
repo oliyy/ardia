@@ -61,6 +61,7 @@ const ROWS_PER_FRAME = 32;
 const DOCK_SHARE = 0.4;
 const FOOTER_INACTIVE_OPACITY = 0.55;
 const NONE: string[] = [];
+const AnimatedSurface = Animated.createAnimatedComponent(Surface);
 
 export function Sidebar({ width }: { width: number }) {
   const theme = useTheme();
@@ -141,7 +142,7 @@ export function Sidebar({ width }: { width: number }) {
             }}
             style={{ width, height: "100%" }}
           >
-            <Animated.View pointerEvents={motion.rested ? "box-none" : "none"} style={[StyleSheet.absoluteFill, motion.faceStyle]}>
+            <AnimatedSurface refreshRasterOnRest={motion.rested} pointerEvents={motion.rested ? "box-none" : "none"} style={[StyleSheet.absoluteFill, motion.faceStyle]}>
               <Surface hidesAccessibility={!motion.rested} style={StyleSheet.absoluteFill}>
                 <View
                   {...sidebarHover}
@@ -217,7 +218,7 @@ export function Sidebar({ width }: { width: number }) {
                   )}
                 </View>
               </Surface>
-            </Animated.View>
+            </AnimatedSurface>
             {motion.present && motion.view ? (
               <View pointerEvents={motion.entered ? "box-none" : "none"} style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}>
                 <Animated.View style={[StyleSheet.absoluteFill, motion.slideStyle]}>

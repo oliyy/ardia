@@ -1819,6 +1819,7 @@ public class SurfaceModule: Module {
         view.surfaceInactiveBorderColors = colors.count >= 2 && colors.count == hexes?.count ? colors : nil
       }
       Prop("hidesAccessibility") { (view: Surface, v: Bool?) in view.surfaceHidesAccessibility = v ?? false }
+      Prop("refreshRasterOnRest") { (view: Surface, v: Bool?) in view.surfaceRefreshRasterOnRest = v ?? false }
       Prop("logicalWidth") { (view: Surface, v: Double?) in
         view.surfaceLogicalWidth = v.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil }
       }
@@ -1862,6 +1863,12 @@ final class Surface: ExpoView {
     didSet {
       guard surfaceHidesAccessibility != oldValue, window != nil else { return }
       NSAccessibility.post(element: self, notification: .layoutChanged)
+    }
+  }
+  var surfaceRefreshRasterOnRest = false {
+    didSet {
+      guard surfaceRefreshRasterOnRest, !oldValue, let scale = window?.backingScaleFactor else { return }
+      markStaleRasters(scale)
     }
   }
 
@@ -1908,6 +1915,14 @@ final class Surface: ExpoView {
   override func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
     if surfaceLogicalWidth != nil { apply() }
+  }
+
+  private func markStaleRasters(_ scale: CGFloat) {
+    var pending: [NSView] = [self]
+    while let view = pending.popLast() {
+      if let layer = view.layer, layer.contents != nil, abs(layer.contentsScale - scale) > 0.001 { view.needsDisplay = true }
+      pending.append(contentsOf: view.subviews)
+    }
   }
 
   private var drawRect: CGRect {

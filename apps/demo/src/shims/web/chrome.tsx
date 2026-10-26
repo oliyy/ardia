@@ -39,6 +39,7 @@ export type SurfaceProps = ViewProps & {
   inactiveOpacity?: number;
   inactiveFillOpacity?: number;
   hidesAccessibility?: boolean;
+  refreshRasterOnRest?: boolean;
   logicalWidth?: number;
 };
 
@@ -58,6 +59,7 @@ export function Surface({
   inactiveOpacity: _inactiveOpacity,
   inactiveFillOpacity: _inactiveFillOpacity,
   hidesAccessibility: _hidesAccessibility,
+  refreshRasterOnRest: _refreshRasterOnRest,
   logicalWidth: _logicalWidth,
   style,
   children,
