@@ -243,6 +243,7 @@ public class CefModule: Module {
       Prop("pageColor") { (view: CefWebView, color: String?) in view.browser.pageColor = color }
       Prop("contentsBackgroundColor") { (view: CefWebView, color: NSColor?) in view.browser.contentsBackgroundColor = color }
       Prop("shownUrl") { (view: CefWebView, url: String?) in view.browser.shownURL = url }
+      Prop("viewportLeadingX") { (view: CefWebView, leadingX: Double?) in view.browser.viewportLeadingX = leadingX.map { NSNumber(value: $0) } }
       Prop("autoPictureInPicture") { (view: CefWebView, enabled: Bool?) in
         view.browser.autoPictureInPicture = enabled ?? false
       }

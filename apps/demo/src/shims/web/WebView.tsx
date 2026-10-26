@@ -91,6 +91,7 @@ export const WebView = forwardRef<WebViewHandle, WebViewProps>(function WebView(
   useImperativeHandle(ref, () => {
     const done = Promise.resolve();
     const handle: Partial<WebViewHandle> = {
+      setViewportLeadingX: () => {},
       loadUrl: async (url) => visit(url),
       goBack: async () => {
         if (inner.current.depth <= 0) return step(-1);

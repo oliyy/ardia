@@ -1174,6 +1174,7 @@ static NSDictionary *ExternalLinkDecision(NSString *url) {
   _sightObserver = nil;
   if (!self.window) return;
   if (_visible) [ArdiaCoreEarlyWindow noteLayoutChangeIn:self.window];
+  if (_viewportLeadingX) [self layoutPage];
   __weak ArdiaCoreWebView *weakSelf = self;
   _sightObserver = [NSNotificationCenter.defaultCenter addObserverForName:ArdiaCoreWindowSeenDidChange object:self.window queue:nil
                                                                usingBlock:^(NSNotification *) { [weakSelf userSightChanged]; }];
@@ -1714,17 +1715,33 @@ static NSDictionary *ExternalLinkDecision(NSString *url) {
   if (_visible) [ArdiaCoreEarlyWindow noteLayoutChangeIn:self.window];
 }
 
+- (void)setViewportLeadingX:(NSNumber *)viewportLeadingX {
+  if (_viewportLeadingX == viewportLeadingX || [_viewportLeadingX isEqual:viewportLeadingX]) return;
+  _viewportLeadingX = [viewportLeadingX copy];
+  [self layoutPage];
+}
+
+- (NSRect)pageArea {
+  const NSRect bounds = self.bounds;
+  NSView *content = self.window.contentView;
+  if (!_viewportLeadingX || !content) return bounds;
+  const CGFloat width = NSMaxX([self convertRect:bounds toView:content]) - _viewportLeadingX.doubleValue;
+  if (!std::isfinite(width) || width <= 0) return bounds;
+  return NSMakeRect(NSMinX(bounds), NSMinY(bounds), width, NSHeight(bounds));
+}
+
 - (void)layoutPage {
-  if (NSView *fronted = _frontedPage; fronted.superview == self) fronted.frame = self.bounds;
+  const NSRect area = [self pageArea];
+  if (NSView *fronted = _frontedPage; fronted.superview == self) fronted.frame = area;
   NSView *page = _tab.view;
   if (!page || page.superview != self) return;
   if (_devtoolsView) {
-    NSRect devtools = NSZeroRect, pageFrame = self.bounds;
-    [_tab devToolsLayoutForSize:self.bounds.size devTools:&devtools page:&pageFrame];
+    NSRect devtools = NSZeroRect, pageFrame = area;
+    [_tab devToolsLayoutForSize:area.size devTools:&devtools page:&pageFrame];
     _devtoolsView.frame = devtools;
     page.frame = pageFrame;
   } else {
-    page.frame = self.bounds;
+    page.frame = area;
   }
 }
 
@@ -2117,7 +2134,7 @@ static NSView *SharedAncestor(NSView *a, NSView *b) {
 
 - (void)frontPage:(NSView *)page profile:(ArdiaCoreProfile *)profile {
   NSView *mine = _tab.view;
-  if (_frontedPage || _devtoolsView || !mine || mine.superview != self || mine.hidden || _tab.profile != profile || ![self onlyShownInWindow]) return;
+  if (_frontedPage || _devtoolsView || _viewportLeadingX || !mine || mine.superview != self || mine.hidden || _tab.profile != profile || ![self onlyShownInWindow]) return;
   page.frame = self.bounds;
   page.hidden = NO;
   [self addSubview:page positioned:NSWindowAbove relativeTo:mine];
@@ -2150,7 +2167,7 @@ static NSView *SharedAncestor(NSView *a, NSView *b) {
     if (shown) return;
     shown = other;
   }
-  if (!shown || shown.alphaValue < 1 || shown->_frontedPage) return;
+  if (!shown || shown.alphaValue < 1 || shown->_frontedPage || shown.viewportLeadingX) return;
   const NSRect mine = [self convertRect:self.bounds toView:nil];
   if (NSIsEmptyRect(mine) || !NSEqualRects(mine, [shown convertRect:shown.bounds toView:nil])) return;
   NSView *shared = SharedAncestor(self, shown);

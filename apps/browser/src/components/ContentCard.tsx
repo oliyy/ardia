@@ -1,6 +1,6 @@
-import { WebView, type OpenWindowRequest, type PageEngine } from "@ardia/ardiacore";
+import { WebView, type OpenWindowRequest, type PageEngine, type WebViewHandle } from "@ardia/ardiacore";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Animated, StyleSheet, unstable_batchedUpdates, View, type ViewStyle } from "react-native";
+import { Animated, Platform, StyleSheet, unstable_batchedUpdates, View, type ViewStyle } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { focus, switchToTab } from "../lib/actions";
 import { noteFavicon } from "../lib/favicons";
@@ -40,6 +40,7 @@ import { pagerFor } from "./layout/profilePager";
 import { openFromPage } from "./layout/openFromPage";
 import { dockMoving, useDockMotion, usePeekEdge } from "./layout/dockMotion";
 import { FrozenPage } from "./layout/frozenPage";
+import { useFrozenPages } from "./layout/pinHandoff";
 import { CardLoadingLine } from "./layout/CardLoadingLine";
 import { holderOf } from "../store/pinShare";
 import { closeFolderPanelIn } from "./sidebar/tileFolderUi";
@@ -47,6 +48,7 @@ import { setCardAnchor, setUrlAnchor, useAddressBarInSidebar, useCardGeometry, u
 import { NewTabPage } from "./NewTabPage";
 import { EmptyCard } from "./EmptyCard";
 import { InternalPage } from "./pages";
+import { internalPageOf } from "./pages/urls";
 import { AutofillPrompt, BLOCKED_POPUPS_WIDTH, BlockedPopupsPrompt, ExternalAppPrompt, PasswordPrompt, PermissionPrompt, answerExternalApp, shouldPromptForPopups, showAutofillPrompt, showPasswordPrompt } from "./site/Prompts";
 import { SiteControls } from "./site/SiteControls";
 import { SITE_PANEL } from "./site/SiteControlsParts";
@@ -72,8 +74,16 @@ import { PeekOverlay } from "./peek/PeekOverlay";
 import { closePeekOnEscape, dismissPeek, startPeeks } from "./peek/actions";
 
 type EndpointRequest = { valid: () => boolean; done: () => void };
+type ViewportLeading = { read: () => number; follow: (send: (value: number) => void) => () => void };
+type DockLink = {
+  registerEndpoint: (flush: (valid: () => boolean, done: () => void) => void) => () => void;
+  leading: ViewportLeading | null;
+  shift: Animated.AnimatedInterpolation<number> | Animated.Value;
+  interrupt: () => void;
+};
 
-export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (valid: () => boolean, done: () => void) => void) => () => void }) {
+export function ContentCard({ dock }: { dock?: DockLink }) {
+  const registerEndpoint = dock?.registerEndpoint;
   const windowId = useWindowId();
   const activeId = useActiveTabId();
   const split = useBrowser((s) => splitOf(s, activeId));
@@ -90,6 +100,14 @@ export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (
   const epoch = useRef(0);
   const endpoint = useRef<EndpointRequest | null>(null);
   const [published, setPublished] = useState<{ epoch: number; request: EndpointRequest } | null>(null);
+  const retiring = useRef<(() => void) | null>(null);
+  const handedOff = useRef(false);
+  const activeUrl = useBrowser((s) => (activeId ? (s.tabs[activeId]?.url ?? "") : ""));
+  const activeEngine = useBrowser((s) => (activeId ? tabEngine(s, activeId) : null));
+  const activeFronted = useBrowser((s) => !!activeId && !!s.tabs[activeId]?.pageIn);
+  const windowProfile = useBrowser((s) => s.windows[windowId]?.profileId ?? "");
+  const bridged = useFrozenPages((f) => !!f.bridges[windowId]);
+  const activeNewTabShown = usePages((s) => !!activeId && !!s.pages[activeId]?.newTabShown);
   useEffect(startPermissionPrompts, []);
   useEffect(startChromeTabs, []);
   useEffect(startMedia, []);
@@ -284,6 +302,7 @@ export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (
     return registerEndpoint((valid, done) => {
       endpoint.current = { valid, done };
       settled.current = null;
+      if (handedOff.current && valid()) retiring.current?.();
       sampleEndpoint();
     });
   }, [registerEndpoint]);
@@ -301,12 +320,48 @@ export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (
   const windowToolbar = !split && !fullscreenTab && !addressInSidebar && !small;
   const peekEdge = usePeekEdge(windowId);
   const activeRect = activeId ? panes[activeId] : undefined;
+  const nativeLeading =
+    !!dock?.leading &&
+    Platform.OS !== "web" &&
+    !!activeId &&
+    !split &&
+    !fullscreenTab &&
+    !small &&
+    !peekId &&
+    !activeFronted &&
+    !bridged &&
+    !activeNewTabShown &&
+    !!activeUrl &&
+    !internalPageOf(activeUrl) &&
+    mountedIds.has(activeId) &&
+    !!activeRect &&
+    activeRect.x === 0 &&
+    activeRect.y === 0 &&
+    activeRect.width === size.width &&
+    activeRect.height === size.height;
+  const handoff = [activeId ?? "", activeEngine ?? "", windowProfile, split?.id ?? "", nativeLeading ? "native" : "flow"].join("\n");
+  const dockMoves = useDockMotion((m) => !!m.moving[windowId]);
+  const resting = { pane: nativeLeading ? activeId : null, leading: dock?.leading ?? null, key: handoff };
+  const latched = useRef(resting);
+  const interrupted = useRef<string | null>(null);
+  const owner = dockMoves ? latched.current : resting;
+  const flowing = !owner.leading || !owner.pane;
+  handedOff.current = dockMoves && handoff !== latched.current.key;
+  useLayoutEffect(() => {
+    if (!dockMoves) {
+      latched.current = resting;
+      interrupted.current = null;
+    } else if (handoff !== latched.current.key && interrupted.current !== handoff) {
+      interrupted.current = handoff;
+      dock?.interrupt();
+    }
+  });
   const popoversOverCard = peekEdge !== undefined && addressInSidebar && !small && !fullscreenTab && origin && activeRect ? activeId : undefined;
 
   return (
-    <View
+    <Animated.View
       ref={container}
-      style={{ flex: 1 }}
+      style={{ flex: 1, marginRight: flowing && dock ? dock.shift : 0 }}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
         if (sampleEndpoint()) return;
@@ -341,6 +396,8 @@ export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (
               windowToolbar={windowToolbar}
               popovers={tabId !== popoversOverCard}
               peekShown={!!peekId}
+              leading={tabId === owner.pane ? owner.leading : null}
+              retiring={retiring}
             />
           );
         })}
@@ -371,7 +428,7 @@ export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (
         />
       )}
       <SplitToast windowId={windowId} />
-    </View>
+    </Animated.View>
   );
 }
 
@@ -396,6 +453,8 @@ const TabPane = memo(function TabPane({
   windowToolbar,
   popovers,
   peekShown,
+  leading,
+  retiring,
 }: {
   tabId: string;
   windowId: string;
@@ -417,6 +476,8 @@ const TabPane = memo(function TabPane({
   windowToolbar: boolean;
   popovers: boolean;
   peekShown: boolean;
+  leading: ViewportLeading | null;
+  retiring: { current: (() => void) | null };
 }) {
   const theme = useTheme();
   const cardRadius = useCardGeometry().radius;
@@ -475,7 +536,7 @@ const TabPane = memo(function TabPane({
         <View style={autoLayout ? { height: motion.pageHeight } : { flex: 1 }}>
           {visible && !fullscreen && <ShareBar tabId={tabId} />}
           <View style={{ flex: 1 }}>
-            {(mounted || prewarmed) && <TabWebView tabId={tabId} visible={visible && !newTabShown && !isNewTab} warm={!!warm && !newTabShown && !isNewTab} />}
+            {(mounted || prewarmed) && <TabWebView tabId={tabId} visible={visible && !newTabShown && !isNewTab} warm={!!warm && !newTabShown && !isNewTab} leading={leading} retiring={retiring} />}
             {visible && isNewTab && !small && (inSplit ? <SplitEmptyState tabId={tabId} focused={focused} /> : emptyCard ? <EmptyCard windowId={windowId} tabId={tabId} /> : <NewTabPage key={tabId} tabId={tabId} toolbar={toolbar} />)}
             {visible && <InternalPage tabId={tabId} />}
             {visible && focused && !fullscreen && !small && <CardLoadingLine tabId={tabId} />}
@@ -591,19 +652,75 @@ const isBlank = (url: string) => !url || url === "about:blank";
 const pageKey = (url: string) => url.replace(/#.*$/, "");
 const hostOf = (url: string) => url.match(/^[a-z][\w+.-]*:\/\/([^/?#]*)/i)?.[1]?.toLowerCase() ?? "";
 
-type TabWebViewProps = { tabId: string; visible: boolean; warm: boolean; peekOf?: string };
+type TabWebViewProps = {
+  tabId: string;
+  visible: boolean;
+  warm: boolean;
+  peekOf?: string;
+  leading?: ViewportLeading | null;
+  retiring?: { current: (() => void) | null };
+};
 
 const TabWebView = memo(function TabWebView(props: TabWebViewProps) {
   const engine = useBrowser((s) => tabEngine(s, props.tabId));
   return <EngineWebView key={engine} engine={engine} {...props} />;
 });
 
-function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps & { engine: PageEngine }) {
+function EngineWebView({ tabId, visible, warm, peekOf, engine, leading = null, retiring }: TabWebViewProps & { engine: PageEngine }) {
+  const windowId = useWindowId();
   const { navigation, adoptId, requiresAdoption, profileId, shownUrl } = useTabValue(tabId, webViewTab, shallowEqual);
   const neighbour = useStoreWhile(useBrowser, warm, (s) => warm && s.windows[s.tabs[tabId]?.windowId ?? ""]?.profileId !== profileId);
   const tab = () => useBrowser.getState().tabs[tabId];
   const store = () => useBrowser.getState();
   const ref = useMemo(() => webviewRef(tabId), [tabId]);
+  const handle = useRef<WebViewHandle | null>(null);
+  const attach = useMemo(
+    () => (view: WebViewHandle | null) => {
+      handle.current = view;
+      ref(view);
+    },
+    [ref],
+  );
+  useLayoutEffect(() => {
+    if (!leading) return;
+    let armed: number | null = null;
+    let retired = false;
+    let stop: (() => void) | null = null;
+    const host = () => {
+      const view = handle.current;
+      return view && armed !== null && view.nativeTag() === armed ? view : null;
+    };
+    const send = (value: number) => host()?.setViewportLeadingX(value);
+    const clear = () => {
+      stop?.();
+      stop = null;
+      host()?.setViewportLeadingX(null);
+      armed = null;
+      if (retiring?.current === retire) retiring.current = null;
+    };
+    const retire = () => {
+      retired = true;
+      clear();
+    };
+    const follow = (moving: boolean) => {
+      if (!moving) {
+        retired = false;
+        return clear();
+      }
+      if (armed !== null || retired) return;
+      armed = handle.current?.nativeTag() ?? null;
+      if (armed === null) return;
+      if (retiring) retiring.current = retire;
+      send(leading.read());
+      stop = leading.follow(send);
+    };
+    follow(dockMoving(windowId));
+    const unsubscribe = useDockMotion.subscribe((m) => follow(!!m.moving[windowId]));
+    return () => {
+      unsubscribe();
+      clear();
+    };
+  }, [leading, retiring, windowId]);
   const autoPictureInPicture = useAutoPictureInPicture(tabId, visible);
   const pageColor = useProfilesValue(profileId, (profiles) => (isIncognitoProfile(profileId) ? "incognito" : (profiles[profileId]?.color ?? "plum")));
   const theme = useTheme();
@@ -662,7 +779,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
 
   return (
     <WebView
-      ref={ref}
+      ref={attach}
       engine={engine}
       style={StyleSheet.absoluteFill}
       url={navigation?.url ?? (adoptId ? tab()?.url : undefined)}

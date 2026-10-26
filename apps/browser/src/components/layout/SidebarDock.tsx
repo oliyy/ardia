@@ -47,10 +47,13 @@ const IGNORE = () => {};
 
 type EndpointFlush = (valid: () => boolean, done: () => void) => void;
 type RegisterEndpoint = (flush: EndpointFlush) => () => void;
-type CardShift = { shift: Animated.AnimatedInterpolation<number> | Animated.Value; placed: boolean; attach: (view: View | null) => void; registerEndpoint: RegisterEndpoint };
-const CardShiftContext = createContext<CardShift>({ shift: new Animated.Value(0), placed: false, attach: IGNORE, registerEndpoint: () => IGNORE });
+type CardLeading = { read: () => number; follow: (send: (value: number) => void) => () => void };
+type DockLink = { registerEndpoint: RegisterEndpoint; leading: CardLeading | null; shift: Animated.AnimatedInterpolation<number> | Animated.Value; interrupt: () => void };
+type CardShift = { placed: boolean; attach: (view: View | null) => void; link: DockLink };
+const UNDOCKED: DockLink = { registerEndpoint: () => IGNORE, leading: null, shift: new Animated.Value(0), interrupt: IGNORE };
+const CardShiftContext = createContext<CardShift>({ placed: false, attach: IGNORE, link: UNDOCKED });
 
-function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: boolean, span: number, tabDragging: boolean) {
+function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: boolean, edge: number, span: number, tabDragging: boolean) {
   const windowId = useWindowId();
   const dock = useRef(new Animated.Value(open ? 1 : 0)).current;
   const base = useRef(new Animated.Value(open && placed ? -1 : 0)).current;
@@ -63,8 +66,8 @@ function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: b
   const clip = useRef<View | null>(null);
   const consumer = useRef<EndpointFlush | null>(null);
   const waiting = useRef<(() => void) | null>(null);
-  const geometry = useRef({ placed, span });
-  geometry.current = { placed, span };
+  const geometry = useRef({ placed, edge, span });
+  geometry.current = { placed, edge, span };
   const [steps] = useState(() => {
     const acknowledge = (write: number) =>
       requestAnimationFrame(() => {
@@ -120,7 +123,18 @@ function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: b
         if (consumer.current === flush) consumer.current = null;
       };
     };
-    return { land, release, settle, attach, registerEndpoint };
+    const read = () => geometry.current.edge + geometry.current.span * (dock as unknown as { __getValue(): number }).__getValue();
+    const leading: CardLeading = {
+      read,
+      follow: (send) => {
+        const id = dock.addListener(() => send(read()));
+        return () => dock.removeListener(id);
+      },
+    };
+    const interrupt = () => {
+      if (dockMoving(windowId)) settle(true);
+    };
+    return { land, release, settle, attach, registerEndpoint, leading, interrupt };
   });
   useLayoutEffect(() => {
     if (was.current === open) return;
@@ -168,7 +182,14 @@ function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: b
     [],
   );
   const shift = useMemo(() => Animated.multiply(Animated.add(dock, base), placed ? span : 0), [dock, base, placed, span]);
-  const card = useMemo(() => ({ shift, placed, attach: steps.attach, registerEndpoint: steps.registerEndpoint }), [shift, placed, steps]);
+  const card = useMemo(
+    () => ({
+      placed,
+      attach: steps.attach,
+      link: { registerEndpoint: steps.registerEndpoint, leading: placed ? steps.leading : null, shift, interrupt: steps.interrupt },
+    }),
+    [shift, placed, steps],
+  );
   return { dock, wide, card };
 }
 
@@ -201,7 +222,7 @@ export function DockedLayout({
   const lights = addressBar && !topTabs ? ARC_LIGHTS_CENTER : LIGHTS_CENTER;
   const tabDragging = useTabDrag((d) => d.windowId === windowId && d.tabIds.length > 0);
   const placed = !topTabs && !fullscreen;
-  const { dock, wide, card } = useSidebarDock(open, placed && !tabDragging, arc, placed, width - inset.left, tabDragging);
+  const { dock, wide, card } = useSidebarDock(open, placed && !tabDragging, arc, placed, inset.left, width - inset.left, tabDragging);
   return (
     <CardShiftContext.Provider value={card}>
       <View
@@ -226,9 +247,10 @@ export function DockedLayout({
   );
 }
 
-export function DockShift({ children }: { children: (registerEndpoint: RegisterEndpoint) => ReactNode }) {
+export function DockShift({ children }: { children: (link: DockLink) => ReactNode }) {
   const windowId = useWindowId();
-  const { shift, placed, attach, registerEndpoint } = useContext(CardShiftContext);
+  const { placed, attach, link } = useContext(CardShiftContext);
+  const { shift } = link;
   const moving = useDockMotion((m) => !!m.moving[windowId]);
   const radius = useCardGeometry().radius;
   const refuse = useMemo<TabDropTarget>(() => ({ windowId, accepts: () => false, enter: IGNORE, move: IGNORE, leave: IGNORE, drop: () => null }), [windowId]);
@@ -236,7 +258,7 @@ export function DockShift({ children }: { children: (registerEndpoint: RegisterE
   return (
     <View ref={attach} pointerEvents="box-none" style={{ flex: 1, overflow: clipped ? "hidden" : "visible", borderRadius: clipped ? radius : 0 }}>
       <Animated.View pointerEvents="box-none" style={{ flex: 1, transform: [{ translateX: shift }] }}>
-        {children(registerEndpoint)}
+        {children(link)}
       </Animated.View>
       <View pointerEvents={moving ? "auto" : "none"} style={StyleSheet.absoluteFill}>
         <TabDropArea target={refuse} style={StyleSheet.absoluteFill}>

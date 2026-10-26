@@ -202,6 +202,7 @@ export type WebViewProps = ViewProps & {
 
 export type WebViewHandle = {
   nativeTag(): number | null;
+  setViewportLeadingX(value: number | null): void;
   loadUrl(url: string, options?: { userInitiated?: boolean }): Promise<void>;
   goBack(): Promise<void>;
   goForward(): Promise<void>;
@@ -327,8 +328,17 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
 
 type NativeHandle = Omit<
   WebViewHandle,
-  "evaluate" | "loadUrl" | "downloadFavicon" | "resolvePasswordPrompt" | "discard" | "nativeTag" | "requestPictureInPicture" | "takeControlPress"
+  | "evaluate"
+  | "loadUrl"
+  | "downloadFavicon"
+  | "resolvePasswordPrompt"
+  | "discard"
+  | "nativeTag"
+  | "requestPictureInPicture"
+  | "takeControlPress"
+  | "setViewportLeadingX"
 > & {
+  nativeRef: { current: { setNativeProps(props: { viewportLeadingX: number | null }): void } | null };
   requestPictureInPicture(clickAt: number, control: number): Promise<boolean>;
   takeControlPress(clickAt: number, control: number): Promise<boolean>;
   evaluate(code: string): Promise<string | null>;
@@ -365,6 +375,7 @@ export const WebView = forwardRef<WebViewHandle, WebViewProps>(function WebView(
     };
     return {
       nativeTag: () => findNodeHandle(native.current as Parameters<typeof findNodeHandle>[0]),
+      setViewportLeadingX: (value) => native.current?.nativeRef.current?.setNativeProps({ viewportLeadingX: Number.isFinite(value) ? value : null }),
       loadUrl: (url, options) =>
         call(undefined, (n) => n.loadUrl(toEngineUrl(url), options?.userInitiated ?? false)),
       goBack: () => call(undefined, (n) => n.goBack()),

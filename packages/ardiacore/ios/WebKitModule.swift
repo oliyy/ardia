@@ -59,6 +59,7 @@ public class WebKitModule: Module {
       Prop("visible") { (view: WebKitTabView, visible: Bool?) in view.tab.visible = visible ?? true }
       Prop("warm") { (view: WebKitTabView, warm: Bool?) in view.tab.warm = warm ?? false }
       Prop("pageBackgroundColor") { (view: WebKitTabView, color: NSColor?) in view.tab.pageBackgroundColor = color }
+      Prop("viewportLeadingX") { (view: WebKitTabView, leadingX: Double?) in view.viewportLeadingX = leadingX }
 
       AsyncFunction("loadUrl") { (view: WebKitTabView, url: String, userInitiated: Bool?) in
         view.tab.loadURL(url, userInitiated: userInitiated ?? false)
@@ -165,6 +166,9 @@ final class WebKitTabView: ExpoView, WebKitTabDelegate {
   let onPreferredSize = EventDispatcher()
 
   private var propsReady = false
+  var viewportLeadingX: Double? {
+    didSet { if viewportLeadingX != oldValue { layoutTab() } }
+  }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -174,15 +178,31 @@ final class WebKitTabView: ExpoView, WebKitTabDelegate {
 
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
-    tab.frame = bounds
+    layoutTab()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if viewportLeadingX != nil { layoutTab() }
   }
 
   func propsDidUpdate() {
     guard !propsReady else { return }
     propsReady = true
-    tab.frame = bounds
+    layoutTab()
     addSubview(tab)
     tab.start()
+  }
+
+  private func layoutTab() {
+    tab.frame = pageArea()
+  }
+
+  private func pageArea() -> NSRect {
+    guard let leadingX = viewportLeadingX, let content = window?.contentView else { return bounds }
+    let width = convert(bounds, to: content).maxX - leadingX
+    guard width.isFinite, width > 0 else { return bounds }
+    return NSRect(x: bounds.minX, y: bounds.minY, width: width, height: bounds.height)
   }
 
   deinit {

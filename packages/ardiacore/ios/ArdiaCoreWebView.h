@@ -31,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic) BOOL autoPictureInPicture;
 @property (nonatomic, readonly) BOOL discarded;
 @property (nonatomic) BOOL frozen;
+@property (nonatomic, copy, nullable) NSNumber *viewportLeadingX;
 @property (nonatomic, readonly) int browserId;
 
 + (void)prepareTransfer:(NSString *)transferKey;

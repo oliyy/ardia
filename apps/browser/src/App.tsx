@@ -56,7 +56,7 @@ function BrowserWindow() {
   const [width, setWidth] = useState(0);
   const card = (
     <>
-      <DockShift>{(registerEndpoint) => <ContentCard registerEndpoint={registerEndpoint} />}</DockShift>
+      <DockShift>{(link) => <ContentCard dock={link} />}</DockShift>
       {!fullscreen && <ExtensionSidePanel />}
     </>
   );
