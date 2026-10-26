@@ -62,20 +62,40 @@ export function Sidebar({ width }: { width: number }) {
   const footerTint = theme.dark ? "#FFFFFF99" : theme.textTertiary;
   const windowId = useWindowId();
   const current = useWindowProfileId();
+  const [pageCurrent, setPageCurrent] = useState(current);
   const { pages, paging } = usePagerPages(windowId);
   const [available, setAvailable] = useState(0);
   const listHeights = useRef(new Map<string, number>());
   const [, setDockChanges] = useState(0);
   const newTabAtTop = useSettings((s) => s.newTabPosition === "top");
   const dockedPage = (profileId: string) => !addressBar && !newTabAtTop && available > 0 && (listHeights.current.get(profileId) ?? 0) + ROW_PITCH + 12 > available;
-  const onListHeight = (profileId: string, height: number) => {
-    const before = dockedPage(profileId);
+  const docking = useRef(dockedPage);
+  docking.current = dockedPage;
+  const [onListHeight] = useState(() => (profileId: string, height: number) => {
+    const before = docking.current(profileId);
     listHeights.current.set(profileId, height);
-    if (dockedPage(profileId) !== before) setDockChanges((n) => n + 1);
-  };
+    if (docking.current(profileId) !== before) setDockChanges((n) => n + 1);
+  });
   const scroll = useRef<ScrollView>(null);
   const scrollY = useRef(0);
+  const dragController = useRef<ReturnType<typeof useDragController>>(undefined);
+  const [onScrollView] = useState(() => (v: ScrollView | null) => {
+    scroll.current = v;
+    const controller = dragController.current;
+    if (controller) controller.scroll = v;
+  });
+  const [onScrollY] = useState(() => (y: number) => {
+    scrollY.current = y;
+    const controller = dragController.current;
+    if (controller) controller.scrollY = y;
+    dismissHover();
+    closeFolderPanel();
+  });
   const geometry = useRef<SidebarGeometry>({ viewport: 0, regions: { pinned: 0, list: 0 }, newTabAtTop: false, room: 0, pad: 0, tilesFixed: true });
+  const [pageReady] = useState(() => () => {
+    const ready = geometry.current.ready;
+    return !!ready && ready.view === scroll.current && ready.profileId === useBrowser.getState().windows[windowId]?.profileId;
+  });
   const addressBar = useAddressBarInSidebar();
   const header = addressBar ? SIDEBAR_HEADER_WITH_FIELD : layout.sidebarHeader;
   const glowRoom = addressBar ? 0 : GLOW_ROOM;
@@ -87,110 +107,115 @@ export function Sidebar({ width }: { width: number }) {
   const nothingPinned = useBrowser((s) => sidebarEntries(s, windowId, current).tiles.length === 0);
 
   const sidebarHover = useSidebarHoverProps(windowId);
-  useRevealTabs(windowId, scroll, scrollY, geometry);
+  useRevealTabs(windowId, scroll, scrollY, geometry, pageReady);
+  useEffect(() => {
+    if (pageCurrent === current) return void geometry.current.laidOut?.();
+    const frame = requestAnimationFrame(() => {
+      if (useBrowser.getState().windows[windowId]?.profileId === current) setPageCurrent(current);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [windowId, current, pageCurrent]);
   useLayoutEffect(() => dismissHoverIn(windowId), [windowId, current, paging]);
 
   return (
     <DragProvider>
-      {(ghost: Ghost | null, controller) => (
-        <SidebarDropArea
-          ref={(v) => {
-            controller.root = v;
-            controller.windowId = windowId;
-          }}
-          style={{ width, height: "100%" }}
-        >
-          <View
-            {...sidebarHover}
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: header - glowRoom,
-              bottom: footer,
-              overflow: paging ? "hidden" : "visible",
+      {(ghost: Ghost | null, controller) => {
+        dragController.current = controller;
+        const shown = !paging || controller.active ? current : pageCurrent;
+        return (
+          <SidebarDropArea
+            accepts={pageReady}
+            ref={(v) => {
+              controller.root = v;
+              controller.windowId = windowId;
             }}
-            onLayout={(e) => setAvailable(e.nativeEvent.layout.height)}
+            style={{ width, height: "100%" }}
           >
-            {pages.map((page) => (
-              <SidebarPage
-                key={page.id}
-                profileId={page.id}
-                slot={page.slot}
-                width={width}
-                current={page.id === current}
-                resting={!!page.resting}
-                docked={dockedPage(page.id)}
-                glowRoom={glowRoom}
-                height={available}
-                rows={page.id === current ? undefined : Math.ceil(available / ROW_PITCH) + 1}
-                geometry={page.id === current ? geometry : undefined}
-                bottomLine={addressBar && footer > 0}
-                onListHeight={onListHeight}
-                onScrollView={(v) => {
-                  scroll.current = v;
-                  controller.scroll = v;
-                }}
-                onScrollY={(y) => {
-                  scrollY.current = y;
-                  controller.scrollY = y;
-                  dismissHover();
-                  closeFolderPanel();
-                }}
-              />
-            ))}
-          </View>
-
-          {footer ? (
-            <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: footer }}>
-              <Surface inactiveOpacity={addressBar && theme.dark ? FOOTER_INACTIVE_OPACITY : undefined} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]}>
-                {dots ? <ProfileDots windowId={windowId} width={width} reserve={footerButtons || footerDownloads ? layout.sidebarInset + SIDEBAR_FOOTER_BUTTON.size : 0} /> : null}
-                {footerButtons ? (
-                  <>
-                    <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-                      <IconButton glyph={(tint) => <LibraryGlyph color={tint} />} color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Library" onPress={() => void openLibraryMenu(windowId)} />
-                    </View>
-                    <View style={{ position: "absolute", right: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-                      <IconButton icon="plus" size={18} weight="medium" color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="New" onPress={() => void openNewMenu(windowId)} />
-                    </View>
-                  </>
-                ) : footerDownloads ? (
-                  <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-                    <DownloadsButton windowId={windowId} />
-                  </View>
-                ) : null}
-              </Surface>
+            <View
+              {...sidebarHover}
+              pointerEvents={shown === current ? "auto" : "none"}
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: header - glowRoom,
+                bottom: footer,
+                overflow: paging ? "hidden" : "visible",
+              }}
+              onLayout={(e) => setAvailable(e.nativeEvent.layout.height)}
+            >
+              {pages.map((page) => (
+                <SidebarPage
+                  key={page.id}
+                  profileId={page.id}
+                  slot={page.slot}
+                  width={width}
+                  current={page.id === shown}
+                  resting={!!page.resting}
+                  docked={dockedPage(page.id)}
+                  glowRoom={glowRoom}
+                  height={available}
+                  rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
+                  geometry={page.id === shown ? geometry : undefined}
+                  bottomLine={addressBar && footer > 0}
+                  onListHeight={onListHeight}
+                  onScrollView={onScrollView}
+                  onScrollY={onScrollY}
+                />
+              ))}
             </View>
-          ) : null}
 
-          <View style={{ height: header }}>
-            <WindowDragRegion style={StyleSheet.absoluteFill} />
-            {addressBar ? (
-              <>
-                <SidebarHeaderTools width={width} />
-                <SidebarAddressRow width={width} />
-              </>
-            ) : (
-              <View pointerEvents="box-none" style={{ height: layout.sidebarHeader, flexDirection: "row", alignItems: "flex-start", paddingLeft: PROFILE_INDICATOR_X, paddingRight: 7, paddingTop: 27 - 17 }}>
-                <ProfileIndicator room={width - PROFILE_INDICATOR_X - 7 - (hasDownloads ? 34 + 2 : 0)} />
-                <View pointerEvents="none" style={{ flex: 1 }} />
-                {hasDownloads ? <DownloadsButton windowId={windowId} /> : null}
+            {footer ? (
+              <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: footer }}>
+                <Surface inactiveOpacity={addressBar && theme.dark ? FOOTER_INACTIVE_OPACITY : undefined} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]}>
+                  {dots ? <ProfileDots windowId={windowId} width={width} reserve={footerButtons || footerDownloads ? layout.sidebarInset + SIDEBAR_FOOTER_BUTTON.size : 0} /> : null}
+                  {footerButtons ? (
+                    <>
+                      <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                        <IconButton glyph={(tint) => <LibraryGlyph color={tint} />} color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Library" onPress={() => void openLibraryMenu(windowId)} />
+                      </View>
+                      <View style={{ position: "absolute", right: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                        <IconButton icon="plus" size={18} weight="medium" color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="New" onPress={() => void openNewMenu(windowId)} />
+                      </View>
+                    </>
+                  ) : footerDownloads ? (
+                    <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                      <DownloadsButton windowId={windowId} />
+                    </View>
+                  ) : null}
+                </Surface>
               </View>
-            )}
-          </View>
+            ) : null}
 
-          <ResizeHandle windowId={windowId} />
-          {ghost && !ghost.landing && nothingPinned ? (
-            addressBar ? (
-              <PinFieldZone top={SIDEBAR_FIELD.top} height={SIDEBAR_FIELD.height} />
-            ) : (
-              <PinSlotZone />
-            )
-          ) : null}
-          <FolderPanel windowId={windowId} />
-          {ghost ? <DragGhost ghost={ghost} /> : null}
-        </SidebarDropArea>
-      )}
+            <View style={{ height: header }}>
+              <WindowDragRegion style={StyleSheet.absoluteFill} />
+              {addressBar ? (
+                <>
+                  <SidebarHeaderTools width={width} />
+                  <SidebarAddressRow width={width} />
+                </>
+              ) : (
+                <View pointerEvents="box-none" style={{ height: layout.sidebarHeader, flexDirection: "row", alignItems: "flex-start", paddingLeft: PROFILE_INDICATOR_X, paddingRight: 7, paddingTop: 27 - 17 }}>
+                  <ProfileIndicator room={width - PROFILE_INDICATOR_X - 7 - (hasDownloads ? 34 + 2 : 0)} />
+                  <View pointerEvents="none" style={{ flex: 1 }} />
+                  {hasDownloads ? <DownloadsButton windowId={windowId} /> : null}
+                </View>
+              )}
+            </View>
+
+            <ResizeHandle windowId={windowId} />
+            {ghost && !ghost.landing && nothingPinned ? (
+              addressBar ? (
+                <PinFieldZone top={SIDEBAR_FIELD.top} height={SIDEBAR_FIELD.height} />
+              ) : (
+                <PinSlotZone />
+              )
+            ) : null}
+            <FolderPanel windowId={windowId} />
+            {ghost ? <DragGhost ghost={ghost} /> : null}
+          </SidebarDropArea>
+        );
+      }}
     </DragProvider>
   );
 }
@@ -212,7 +237,7 @@ type PageProps = {
   onScrollY: (y: number) => void;
 };
 
-function SidebarPage({ profileId, slot, width, current, resting, docked, glowRoom, height, rows, geometry, bottomLine, onListHeight, onScrollView, onScrollY }: PageProps) {
+const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current, resting, docked, glowRoom, height, rows, geometry, bottomLine, onListHeight, onScrollView, onScrollY }: PageProps) {
   const windowId = useWindowId();
   const addressBar = useAddressBarInSidebar();
   const incognito = useIsIncognito();
@@ -258,13 +283,27 @@ function SidebarPage({ profileId, slot, width, current, resting, docked, glowRoo
   const [contentBelow, setContentBelow] = useState(false);
   const extent = useRef({ offset: 0, viewport: 0, content: 0, below: false });
   const origins = useRef<Record<Section, number>>({ pinned: 0, list: 0 }).current;
+  const scrollView = useRef<ScrollView | null>(null);
+  const restored = useRef(false);
+  const [attachRest] = useState(() => (v: ScrollView | null) => void (scrollView.current = v));
+  const [attachCurrent] = useState(() => (v: ScrollView | null) => {
+    scrollView.current = v;
+    onScrollView(v);
+  });
+  const publishReady = () => {
+    const view = scrollView.current;
+    if (geometry && view && restored.current && extent.current.viewport) geometry.current.ready = { profileId, view };
+  };
   useEffect(() => {
+    restored.current = false;
     if (!current || !geometry) return;
     const e = extent.current;
     onScrollY(e.offset);
+    restored.current = true;
     if (!e.viewport) return;
     geometry.current.viewport = e.viewport;
     Object.assign(geometry.current.regions, origins);
+    publishReady();
     geometry.current.laidOut?.();
   }, [current]);
   const [followExtent] = useState(() => () => {
@@ -337,12 +376,14 @@ function SidebarPage({ profileId, slot, width, current, resting, docked, glowRoo
                     <Animated.View style={{ flex: 1, marginTop: -room, overflow: "hidden", transform: [{ translateY: edge }] }}>
                       <Animated.View style={{ flex: 1, transform: [{ translateY: Animated.multiply(edge, -1) }] }}>
                         <Animated.ScrollView
-                          ref={current ? onScrollView : undefined}
+                          ref={current ? attachCurrent : attachRest}
                           onLayout={(e) => {
                             extent.current.viewport = e.nativeEvent.layout.height;
                             followExtent();
                             if (!geometry) return;
                             geometry.current.viewport = e.nativeEvent.layout.height;
+                            Object.assign(geometry.current.regions, origins);
+                            publishReady();
                             geometry.current.laidOut?.();
                           }}
                           onContentSizeChange={(_width, contentHeight) => {
@@ -402,7 +443,7 @@ function SidebarPage({ profileId, slot, width, current, resting, docked, glowRoo
       </Surface>
     </Animated.View>
   );
-}
+});
 
 type PageRowsProps = {
   windowId: string;
@@ -582,9 +623,9 @@ const Tail = memo(function Tail({ id, section }: { id: string; section: Section 
   return <Animated.View ref={wrapper.ref} style={wrapper.style} />;
 });
 
-type SidebarGeometry = { viewport: number; regions: Record<Section, number>; newTabAtTop: boolean; room: number; pad: number; tilesFixed: boolean; laidOut?: () => void };
+type SidebarGeometry = { viewport: number; regions: Record<Section, number>; newTabAtTop: boolean; room: number; pad: number; tilesFixed: boolean; ready?: { profileId: string; view: ScrollView }; laidOut?: () => void };
 
-function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, scrollY: RefObject<number>, geometry: RefObject<SidebarGeometry>) {
+function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, scrollY: RefObject<number>, geometry: RefObject<SidebarGeometry>, ready: () => boolean) {
   useEffect(() => {
     let switched: string | null = null;
     let opened: string | null = null;
@@ -605,14 +646,14 @@ function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, s
     const reveal = () => {
       frame = 0;
       const scroller = scroll.current;
-      if (!geometry.current.viewport || !scroller) return;
+      if (!geometry.current.viewport || !scroller || !ready()) return;
       const mine = ++reveals;
       const tabId = switched ?? opened;
       switched = opened = null;
       const s = useBrowser.getState();
       const profileId = s.windows[windowId]?.profileId;
       if (!tabId || !profileId) return;
-      const stillWanted = () => mine === reveals && scroll.current === scroller && useBrowser.getState().windows[windowId]?.profileId === profileId;
+      const stillWanted = () => mine === reveals && scroll.current === scroller && useBrowser.getState().windows[windowId]?.profileId === profileId && ready();
       const pinned = s.tabs[tabId];
       if (geometry.current.tilesFixed && pinned?.pinned && !pinned.pinnedAsRow) return;
       const { regions, newTabAtTop } = geometry.current;

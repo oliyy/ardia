@@ -25,8 +25,7 @@ export const PageProfileContext = createContext<string | null>(null);
 
 export function usePageProfileId(): string {
   const page = useContext(PageProfileContext);
-  const own = useWindowProfileId();
-  return page ?? own;
+  return useWindowField((w) => page ?? w.profileId, page ?? "");
 }
 
 export const useIsIncognito = () => useWindowField((w) => w.incognito, false);

@@ -4,11 +4,12 @@ import { useWindowId } from "../../store/hooks";
 import { TabDropArea, type TabDropTarget } from "../layout/fileDrop";
 import { useDragController } from "./dnd";
 
-export const SidebarDropArea = forwardRef<View, { style?: StyleProp<ViewStyle>; children?: ReactNode }>(function SidebarDropArea({ style, children }, ref) {
+export const SidebarDropArea = forwardRef<View, { accepts?: () => boolean; style?: StyleProp<ViewStyle>; children?: ReactNode }>(function SidebarDropArea({ accepts, style, children }, ref) {
   const controller = useDragController();
   const windowId = useWindowId();
   const target: TabDropTarget = {
     windowId,
+    accepts,
     enter: (count, [x, y]) => controller?.beginExternal(count, x, y),
     move: ([x, y]) => controller?.move(x, y),
     leave: () => void controller?.finishExternal(false),

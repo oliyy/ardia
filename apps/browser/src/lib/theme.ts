@@ -1,5 +1,5 @@
 import type { AreaLightPalette } from "@ardia/shaders";
-import { createContext, createElement, useContext, type ReactNode } from "react";
+import { createContext, createElement, useContext, useMemo, type ReactNode } from "react";
 import { useBrowser, type BrowserState } from "../store/browser";
 import { PageProfileContext, WindowContext } from "../store/hooks";
 import type { Profile, ProfileColor, ProfileTheme } from "../store/types";
@@ -256,20 +256,32 @@ function themeOf(s: BrowserState, windowId: string | null, page: string | null):
   return profileTheme(s.profiles[page ?? w?.profileId ?? s.settings.defaultProfileId], s.ui.appDark, !windowId);
 }
 
-const ThemeContext = createContext<Theme | null>(null);
+type ThemeSelector = (s: BrowserState) => Theme;
+
+function themeSelector(windowId: string | null, page: string | null): ThemeSelector {
+  let last: { state: BrowserState; theme: Theme } | null = null;
+  return (s) => {
+    if (last?.state === s) return last.theme;
+    const theme = themeOf(s, windowId, page);
+    last = { state: s, theme };
+    return theme;
+  };
+}
+
+const ThemeContext = createContext<ThemeSelector | null>(null);
+const unscopedTheme = themeSelector(null, null);
 
 export function ThemeScope({ children }: { children: ReactNode }) {
   const windowId = useContext(WindowContext);
   const page = useContext(PageProfileContext);
-  const theme = useBrowser((s) => themeOf(s, windowId, page));
-  return createElement(ThemeContext.Provider, { value: theme }, children);
+  const select = useMemo(() => themeSelector(windowId, page), [windowId, page]);
+  return createElement(ThemeContext.Provider, { value: select }, children);
 }
 
 export function useTheme(): Theme {
   const scoped = useContext(ThemeContext);
-  if (scoped) return scoped;
-  if (__DEV__) console.warn("useTheme outside a ThemeScope");
-  return themeOf(useBrowser.getState(), null, null);
+  if (!scoped && __DEV__) console.warn("useTheme outside a ThemeScope");
+  return useBrowser(scoped ?? unscopedTheme);
 }
 
 export const layout = {
