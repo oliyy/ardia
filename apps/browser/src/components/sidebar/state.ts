@@ -13,6 +13,7 @@ type SidebarUi = {
   switcher: { windowId: string; ids: string[]; index: number; visible: boolean } | null;
   dragWidth: Record<string, number>;
   reveal: { windowId: string; id: string } | null;
+  plusMenu: { windowId: string; anchor: Anchor; id: number } | null;
 };
 
 export const useSidebarUi = create<SidebarUi>()(() => ({
@@ -23,6 +24,7 @@ export const useSidebarUi = create<SidebarUi>()(() => ({
   switcher: null,
   dragWidth: {},
   reveal: null,
+  plusMenu: null,
 }));
 
 export const sidebarUi = () => useSidebarUi.getState();

@@ -1,5 +1,5 @@
 import { showMenu, type MenuItem } from "@ardia/shell";
-import { closeGroup, closeTab, createProfile, moveTabToProfile, moveTabToWindow, switchProfile, switchToTab, toggleMute } from "../../lib/actions";
+import { closeGroup, closeTab, moveTabToProfile, moveTabToWindow, switchToTab, toggleMute } from "../../lib/actions";
 import { folderChildren } from "../../store/bookmarks";
 import { useBrowser } from "../../store/browser";
 import { bookmarkProfileId, isIncognitoProfile, isPinnedRow, pinnedSectionTitle, pinSection, plural, tabLabel, togglePinTitle, viewTabIds, windowTitle } from "../../store/model";
@@ -20,7 +20,7 @@ import {
 } from "./actions";
 import { isCalendarUrl } from "../../live/meetings";
 import { bookmarkTab } from "../bookmarks/actions";
-import { hideKeyedToast, openNewTabInSplit, showToast, useToasts } from "../layout/splitActions";
+import { hideKeyedToast, showToast, useToasts } from "../layout/splitActions";
 import { addressBarInSidebar } from "../layout/windowLayout";
 import { iconMenuItems } from "../profiles/icons";
 import { openSettings } from "../settings/windows";
@@ -447,21 +447,6 @@ export async function openSpaceMenu(windowId: string, profileId: string) {
   else if (!showsProfile()) return;
   else if (choice === "space:folder") newPinnedFolder(windowId, profileId);
   else runNewLiveFolder(windowId, choice);
-}
-
-export async function openNewMenu(windowId: string) {
-  const choice = await showMenu([
-    { id: "profile", title: "New Profile", symbol: "person.crop.circle.badge.plus" },
-    ...(store().windows[windowId]?.incognito ? [] : [newFolderItem("folder")]),
-    { id: "split", title: "New Split Pane", symbol: "rectangle.split.2x1", ...hint("=", "control", "shift") },
-    { id: "tab", title: "New Tab", symbol: "plus", ...hint("t", "command") },
-  ]);
-  if (choice === "folder") newPinnedFolder(windowId);
-  else if (choice === "profile") {
-    const id = await createProfile(windowId);
-    if (id) switchProfile(windowId, id);
-  } else if (choice === "split") openNewTabInSplit(windowId);
-  else if (choice === "tab" && !toggleNewTabBar(windowId)) store().newTab(windowId);
 }
 
 export async function openOverflowMenu(windowId: string) {

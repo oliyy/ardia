@@ -1,9 +1,12 @@
+import type { CommandAction } from "@ardia/core";
 import type { BrowserCommand, MenuEntry } from "@ardia/shell";
+import { archivedEntries } from "../../store/archive";
 import { useBrowser, type BrowserState } from "../../store/browser";
 import { activeTabId, pinSection, plural } from "../../store/model";
 import { awayFromPin, groupOf, selectedTabIds } from "../../store/organize";
 import { newGroupWithSelection, openIconPicker, startRename } from "./actions";
 import { closeAllTabs } from "./menus";
+import { libraryAvailable, openLibrary } from "../library/state";
 import { toggleNewTabBar } from "../omnibox/newTabBar";
 import { movePinnedTitle, togglePinnedRows } from "./movePinned";
 import { setSidebarUi } from "./state";
@@ -77,4 +80,24 @@ export function sidebarMenuState(s: BrowserState, windowId: string | undefined) 
     .slice(0, 10)
     .map((c) => ({ id: c.id, title: `${c.group.name} (${plural(c.tabs.length, "Tab")})` }));
   return { disabled, titles, recentlyClosedGroups };
+}
+
+const LIBRARY_ACTIONS: (CommandAction & { section?: "downloads" | "archived" })[] = [
+  { id: "library:downloads", title: "Library: Downloads", icon: "arrow.down.circle", keywords: ["downloads", "library", "files"], section: "downloads" },
+  { id: "library:archived", title: "Library: Archived Tabs", icon: "archivebox", keywords: ["archive", "archived tabs", "closed tabs", "library"], section: "archived" },
+  { id: "library:clearArchive", title: "Clear Archive", icon: "trash", keywords: ["archive", "archived tabs", "clear closed tabs"] },
+];
+
+export function libraryActions(s: BrowserState, windowId: string): CommandAction[] {
+  if (!libraryAvailable(windowId)) return [];
+  const archived = archivedEntries(s, windowId).length > 0;
+  return LIBRARY_ACTIONS.filter((a) => a.section || archived).map(({ section: _, ...action }) => action);
+}
+
+export function runLibraryAction(id: string, windowId: string): boolean {
+  const action = LIBRARY_ACTIONS.find((a) => a.id === id);
+  if (!action) return false;
+  if (action.section) openLibrary(windowId, action.section);
+  else useBrowser.getState().clearArchive(windowId);
+  return true;
 }

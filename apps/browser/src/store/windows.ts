@@ -1,4 +1,5 @@
 import type { StateCreator } from "zustand";
+import { archivedEntries } from "./archive";
 import type { BrowserState } from "./browser";
 import { rejoinGroups } from "./groups";
 import {
@@ -61,6 +62,8 @@ export type WindowsSlice = {
   reopenClosedTab(windowId?: string | null): void;
   reopenClosedWindow(): void;
   restoreClosed(entryId: string, windowId?: string | null): void;
+  restoreArchived(windowId: string, key: string): void;
+  clearArchive(windowId: string): void;
 };
 
 const MAX_CLOSED_WINDOWS = 10;
@@ -353,6 +356,35 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     if (closedWindow) return set(restoreWindow(s, closedWindow));
     const closedGroup = s.closedGroups.find((c) => c.id === entryId) ?? s.deletedGroups.find((c) => c.id === entryId);
     if (closedGroup) set(restoringGroup(s, closedGroup, windowId));
+  },
+
+  restoreArchived(windowId, key) {
+    const row = archivedEntries(get(), windowId).find((r) => r.key === key);
+    if (!row) return;
+    if (row.source === "cleaned") get().restoreCleaned(row.id, windowId);
+    else get().restoreClosed(row.id, windowId);
+    const s = get();
+    if (row.source !== "closedTab" || s.closedTabs.some((c) => c.id === row.id)) return;
+    const aliases = new Set(row.ids);
+    if (s.closedTabs.some((c) => aliases.has(c.id))) set({ closedTabs: s.closedTabs.filter((c) => !aliases.has(c.id)) });
+  },
+
+  clearArchive(windowId) {
+    const s = get();
+    const w = s.windows[windowId];
+    const rows = archivedEntries(s, windowId);
+    if (!w || !rows.length) return;
+    const ids = (source: string) => new Set(rows.filter((r) => r.source === source).flatMap((r) => r.ids));
+    const closed = ids("closedTab");
+    const groups = ids("closedGroup");
+    const cleaned = ids("cleaned");
+    const privateCleaned = s.privateCleanedTabs[windowId];
+    set({
+      ...(closed.size ? { closedTabs: s.closedTabs.filter((c) => !closed.has(c.id)) } : {}),
+      ...(groups.size ? { closedGroups: s.closedGroups.filter((c) => !groups.has(c.id)) } : {}),
+      ...(cleaned.size && w.incognito && privateCleaned ? { privateCleanedTabs: { ...s.privateCleanedTabs, [windowId]: privateCleaned.filter((c) => !cleaned.has(c.id)) } } : {}),
+      ...(cleaned.size && !w.incognito ? { cleanedTabs: s.cleanedTabs.filter((c) => !cleaned.has(c.id)) } : {}),
+    });
   },
 });
 

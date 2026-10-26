@@ -17,6 +17,9 @@ import { openNewTabInSplit } from "./layout/splitActions";
 import { listTopGap, SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, SIDEBAR_HEADER_WITH_FIELD, useAddressBarInSidebar } from "./layout/windowLayout";
 import { SIDEBAR_PLAYER_HEIGHT, SidebarPlayer, useSidebarPlayerTab } from "./media/SidebarPlayer";
 import { HoverSlot } from "./HoverSlot";
+import { LibraryPanel } from "./library/LibraryPanel";
+import { blockLibraryWhile, toggleLibrary } from "./library/state";
+import { libraryVisible, useLibraryVisible } from "./library/store";
 import { IconButton, useHover } from "./primitives";
 import { DownloadsButton } from "./Downloads";
 import { PROFILE_INDICATOR_X, ProfileIndicator } from "./ProfileIndicator";
@@ -34,9 +37,10 @@ import { FolderPanel } from "./sidebar/FolderPanel";
 import { GroupBlock, HierarchyEntry } from "./sidebar/GroupBlock";
 import { dismissHover, dismissHoverIn } from "./sidebar/hover";
 import { capture, GhostSlot, ListMotionContext, newCapture, useListMotion, usePinnedMotion } from "./sidebar/listMotion";
-import { openLibraryMenu, openNewMenu, openOverflowMenu, openSidebarMenu } from "./sidebar/menus";
+import { openLibraryMenu, openOverflowMenu, openSidebarMenu } from "./sidebar/menus";
 import { PinFieldZone, PinnedGrid, PinSlotZone } from "./sidebar/PinnedGrid";
 import { pinColumnCap, pinGridHeight } from "./sidebar/pinZone";
+import { PlusButton } from "./sidebar/PlusMenu";
 import { ResizeHandle } from "./sidebar/ResizeHandle";
 import { SCROLL_EDGE, ScrollEdgeLine, useScrollEdge } from "./sidebar/ScrollEdge";
 import { entriesHeight, firstPaintEntries, rootLift, rootTrail, rowSpan, startsOffScreen, type Section } from "./sidebar/geometry";
@@ -62,6 +66,7 @@ export function Sidebar({ width }: { width: number }) {
   const footerTint = theme.dark ? "#FFFFFF99" : theme.textTertiary;
   const windowId = useWindowId();
   const current = useWindowProfileId();
+  const library = useLibraryVisible(windowId);
   const [pageCurrent, setPageCurrent] = useState(current);
   const { pages, paging } = usePagerPages(windowId);
   const [available, setAvailable] = useState(0);
@@ -94,7 +99,7 @@ export function Sidebar({ width }: { width: number }) {
   const geometry = useRef<SidebarGeometry>({ viewport: 0, regions: { pinned: 0, list: 0 }, newTabAtTop: false, room: 0, pad: 0, tilesFixed: true });
   const [pageReady] = useState(() => () => {
     const ready = geometry.current.ready;
-    return !!ready && ready.view === scroll.current && ready.profileId === useBrowser.getState().windows[windowId]?.profileId;
+    return !!ready && ready.view === scroll.current && ready.profileId === useBrowser.getState().windows[windowId]?.profileId && !libraryVisible(windowId);
   });
   const addressBar = useAddressBarInSidebar();
   const header = addressBar ? SIDEBAR_HEADER_WITH_FIELD : layout.sidebarHeader;
@@ -116,6 +121,10 @@ export function Sidebar({ width }: { width: number }) {
     return () => cancelAnimationFrame(frame);
   }, [windowId, current, pageCurrent]);
   useLayoutEffect(() => dismissHoverIn(windowId), [windowId, current, paging]);
+  useEffect(() => blockLibraryWhile(windowId, () => !!dragController.current?.active), [windowId]);
+  useEffect(() => {
+    if (!library) geometry.current.laidOut?.();
+  }, [library]);
 
   return (
     <DragProvider>
@@ -131,77 +140,84 @@ export function Sidebar({ width }: { width: number }) {
             }}
             style={{ width, height: "100%" }}
           >
-            <View
-              {...sidebarHover}
-              pointerEvents={shown === current ? "auto" : "none"}
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                top: header - glowRoom,
-                bottom: footer,
-                overflow: paging ? "hidden" : "visible",
-              }}
-              onLayout={(e) => setAvailable(e.nativeEvent.layout.height)}
-            >
-              {pages.map((page) => (
-                <SidebarPage
-                  key={page.id}
-                  profileId={page.id}
-                  slot={page.slot}
-                  width={width}
-                  current={page.id === shown}
-                  resting={!!page.resting}
-                  docked={dockedPage(page.id)}
-                  glowRoom={glowRoom}
-                  height={available}
-                  rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
-                  geometry={page.id === shown ? geometry : undefined}
-                  bottomLine={addressBar && footer > 0}
-                  onListHeight={onListHeight}
-                  onScrollView={onScrollView}
-                  onScrollY={onScrollY}
-                />
-              ))}
-            </View>
-
-            {footer ? (
-              <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: footer }}>
-                <Surface inactiveOpacity={addressBar && theme.dark ? FOOTER_INACTIVE_OPACITY : undefined} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]}>
-                  {dots ? <ProfileDots windowId={windowId} width={width} reserve={footerButtons || footerDownloads ? layout.sidebarInset + SIDEBAR_FOOTER_BUTTON.size : 0} /> : null}
-                  {footerButtons ? (
-                    <>
-                      <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-                        <IconButton glyph={(tint) => <LibraryGlyph color={tint} />} color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Library" onPress={() => void openLibraryMenu(windowId)} />
-                      </View>
-                      <View style={{ position: "absolute", right: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-                        <IconButton icon="plus" size={18} weight="medium" color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="New" onPress={() => void openNewMenu(windowId)} />
-                      </View>
-                    </>
-                  ) : footerDownloads ? (
-                    <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-                      <DownloadsButton windowId={windowId} />
-                    </View>
-                  ) : null}
-                </Surface>
-              </View>
-            ) : null}
-
-            <View style={{ height: header }}>
-              <WindowDragRegion style={StyleSheet.absoluteFill} />
-              {addressBar ? (
-                <>
-                  <SidebarHeaderTools width={width} />
-                  <SidebarAddressRow width={width} />
-                </>
-              ) : (
-                <View pointerEvents="box-none" style={{ height: layout.sidebarHeader, flexDirection: "row", alignItems: "flex-start", paddingLeft: PROFILE_INDICATOR_X, paddingRight: 7, paddingTop: 27 - 17 }}>
-                  <ProfileIndicator room={width - PROFILE_INDICATOR_X - 7 - (hasDownloads ? 34 + 2 : 0)} />
-                  <View pointerEvents="none" style={{ flex: 1 }} />
-                  {hasDownloads ? <DownloadsButton windowId={windowId} /> : null}
+            <View pointerEvents={library ? "none" : "box-none"} style={[StyleSheet.absoluteFill, { opacity: library ? 0 : 1 }]}>
+              <Surface hidesAccessibility={library} style={StyleSheet.absoluteFill}>
+                <View
+                  {...sidebarHover}
+                  pointerEvents={shown === current ? "auto" : "none"}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: header - glowRoom,
+                    bottom: footer,
+                    overflow: paging ? "hidden" : "visible",
+                  }}
+                  onLayout={(e) => setAvailable(e.nativeEvent.layout.height)}
+                >
+                  {pages.map((page) => (
+                    <SidebarPage
+                      key={page.id}
+                      profileId={page.id}
+                      slot={page.slot}
+                      width={width}
+                      current={page.id === shown}
+                      resting={!!page.resting}
+                      docked={dockedPage(page.id)}
+                      glowRoom={glowRoom}
+                      height={available}
+                      rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
+                      geometry={page.id === shown ? geometry : undefined}
+                      bottomLine={addressBar && footer > 0}
+                      onListHeight={onListHeight}
+                      onScrollView={onScrollView}
+                      onScrollY={onScrollY}
+                    />
+                  ))}
                 </View>
-              )}
+
+                {footer ? (
+                  <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: footer }}>
+                    <Surface inactiveOpacity={addressBar && theme.dark ? FOOTER_INACTIVE_OPACITY : undefined} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]}>
+                      {dots ? <ProfileDots windowId={windowId} width={width} reserve={footerButtons || footerDownloads ? layout.sidebarInset + SIDEBAR_FOOTER_BUTTON.size : 0} /> : null}
+                      {footerButtons ? (
+                        <>
+                          <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                            <ContextMenuArea onContextMenu={() => void openLibraryMenu(windowId)}>
+                              <IconButton glyph={(tint) => <LibraryGlyph color={tint} />} color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Library" onPress={() => toggleLibrary(windowId)} />
+                            </ContextMenuArea>
+                          </View>
+                          <View style={{ position: "absolute", right: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                            <PlusButton windowId={windowId} color={footerTint} />
+                          </View>
+                        </>
+                      ) : footerDownloads ? (
+                        <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                          <DownloadsButton windowId={windowId} />
+                        </View>
+                      ) : null}
+                    </Surface>
+                  </View>
+                ) : null}
+
+                <View style={{ height: header }}>
+                  <WindowDragRegion style={StyleSheet.absoluteFill} />
+                  {addressBar ? (
+                    <>
+                      <SidebarHeaderTools width={width} />
+                      <SidebarAddressRow width={width} />
+                    </>
+                  ) : (
+                    <View pointerEvents="box-none" style={{ height: layout.sidebarHeader, flexDirection: "row", alignItems: "flex-start", paddingLeft: PROFILE_INDICATOR_X, paddingRight: 7, paddingTop: 27 - 17 }}>
+                      <ProfileIndicator room={width - PROFILE_INDICATOR_X - 7 - (hasDownloads ? 34 + 2 : 0)} />
+                      <View pointerEvents="none" style={{ flex: 1 }} />
+                      {hasDownloads ? <DownloadsButton windowId={windowId} /> : null}
+                    </View>
+                  )}
+                </View>
+              </Surface>
             </View>
+            {library ? <LibraryPanel windowId={windowId} width={width} /> : null}
 
             <ResizeHandle windowId={windowId} />
             {ghost && !ghost.landing && nothingPinned ? (

@@ -6,6 +6,8 @@ import { linkProfileOf } from "./small";
 import type { FindState, NewTabTarget, WindowUi } from "./types";
 import { commandBarFocus, expectFocus } from "../lib/focusClaims";
 
+export type StoredDownload = Download & { seenAt?: number };
+
 export type UiSlice = {
   ui: {
     focusedWindowId: string | null;
@@ -15,7 +17,7 @@ export type UiSlice = {
   };
   windowUi: Record<string, WindowUi>;
   find: Record<string, FindState>;
-  downloads: Download[];
+  downloads: StoredDownload[];
 
   setFocusedWindow(id: string): void;
   setAppDark(dark: boolean): void;
@@ -101,7 +103,7 @@ export const createUiSlice: StateCreator<BrowserState, [], [], UiSlice> = (set, 
         endedPrivateDownloads.add(d.id);
         return {};
       }
-      const downloads = exists ? s.downloads.map((x) => (x.id === d.id ? d : x)) : [d, ...s.downloads].slice(0, MAX_DOWNLOADS);
+      const downloads = exists ? s.downloads.map((x) => (x.id === d.id ? { ...d, seenAt: x.seenAt } : x)) : [{ ...d, seenAt: Date.now() }, ...s.downloads].slice(0, MAX_DOWNLOADS);
       const focused = s.ui.focusedWindowId;
       const open = !exists && focused && downloadVisibleIn(d, s.windows[focused]);
       return { downloads, ...(open ? patchWindowUi(s, focused, { downloadsOpen: true }) : {}) };

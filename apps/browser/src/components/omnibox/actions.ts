@@ -5,6 +5,7 @@ import { isBookmarked } from "../../store/bookmarks";
 import { useBrowser, type BrowserState } from "../../store/browser";
 import { activeTab, bookmarkProfileId, isPinnedRow, pinnedSectionTitle } from "../../store/model";
 import { canTidyPins } from "../../store/tidyPins";
+import { libraryActions, runLibraryAction } from "../sidebar/commands";
 import type { Tab } from "../../store/types";
 import { organizeActions, runOrganizeAction } from "./organizeActions";
 
@@ -117,11 +118,13 @@ export function barActions(s: BrowserState, windowId: string): CommandAction[] {
     });
   }
   out.push(...organizeActions(s, windowId));
+  out.push(...libraryActions(s, windowId));
   return out;
 }
 
 export function runBarAction(id: string, windowId: string) {
   if (runOrganizeAction(id, windowId)) return;
+  if (runLibraryAction(id, windowId)) return;
   const i = id.indexOf(":");
   const command = (i < 0 ? id : id.slice(0, i)) as BrowserCommand;
   const arg = i < 0 ? null : id.slice(i + 1);

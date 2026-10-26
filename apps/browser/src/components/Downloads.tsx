@@ -8,6 +8,7 @@ import { useBrowser } from "../store/browser";
 import { useSidebarOpen, useWindowId, useWindowUi } from "../store/hooks";
 import { downloadsIn, downloadVisibleIn } from "../store/ui";
 import { SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, useAddressBarInSidebar, useTabLayout } from "./layout/windowLayout";
+import { libraryAvailable, openLibrary } from "./library/state";
 import { openInternalPage } from "./pages/urls";
 import { useSidebarWidth } from "./sidebar/tokens";
 import { HoverSlot } from "./HoverSlot";
@@ -87,9 +88,14 @@ export async function downloadMenu(d: Download, windowId: string) {
   if (choice === "open") void openFile(d.path);
   if (choice === "reveal") void revealFile(d.path);
   if (choice === "copy") copyText(d.url);
-  if (choice === "page") openInternalPage("downloads", windowId);
+  if (choice === "page") showAllDownloads(windowId);
   if (choice === "trash") void trashDownload(d);
   if (choice === "remove") useBrowser.getState().removeDownload(d.id);
+}
+
+function showAllDownloads(windowId: string) {
+  if (libraryAvailable(windowId)) openLibrary(windowId, "downloads");
+  else openInternalPage("downloads", windowId);
 }
 
 async function trashDownload(d: Download) {
@@ -275,7 +281,7 @@ function DownloadsPanel({ windowId, closing, onClosed }: { windowId: string; clo
               title="View all downloads"
               onPress={() => {
                 setOpen(false);
-                openInternalPage("downloads", windowId);
+                showAllDownloads(windowId);
               }}
             />
           </View>

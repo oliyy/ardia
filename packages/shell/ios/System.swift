@@ -1,5 +1,6 @@
 import AppKit
 import ExpoModulesCore
+import QuickLookThumbnailing
 import UniformTypeIdentifiers
 import ServiceManagement
 
@@ -101,6 +102,24 @@ public class SystemModule: Module {
       guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
       return "data:image/png;base64,\(png.base64EncodedString())"
     }.runOnQueue(.main)
+
+    AsyncFunction("fileThumbnail") { (path: String, size: Double, promise: Promise) in
+      var info = stat()
+      guard size.isFinite, (path as NSString).isAbsolutePath, lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+            info.st_flags & UInt32(SF_DATALESS) == 0, FileManager.default.isReadableFile(atPath: path)
+      else { return promise.resolve(nil) }
+      let points = min(max(size, 16), 128)
+      let limit = Int((points * 2).rounded(.up))
+      let request = QLThumbnailGenerator.Request(
+        fileAt: URL(fileURLWithPath: path), size: CGSize(width: points, height: points), scale: 2, representationTypes: .thumbnail)
+      request.iconMode = false
+      QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { thumbnail, error in
+        guard error == nil, let image = thumbnail?.cgImage, image.width > 0, image.height > 0, image.width <= limit, image.height <= limit,
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+        else { return promise.resolve(nil) }
+        promise.resolve("data:image/png;base64,\(png.base64EncodedString())")
+      }
+    }
 
     AsyncFunction("appIcon") { (pid: Int, size: Double) -> String? in
       guard let icon = NSRunningApplication(processIdentifier: pid_t(pid))?.icon else { return nil }

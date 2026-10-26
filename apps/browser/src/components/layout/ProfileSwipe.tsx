@@ -6,6 +6,7 @@ import { useShallow } from "zustand/react/shallow";
 import { profileTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { useWindowId } from "../../store/hooks";
+import { useLibraryVisible } from "../library/store";
 import { pagerFor, usePagerNativeConfig, usePagerPages, usePagerSurface } from "./profilePager";
 
 
@@ -49,7 +50,9 @@ export function ProfileSwipeArea({ surface, style, pageWidth }: { surface: "side
     devAreas.set(key, area);
     return () => void (devAreas.get(key) === area && devAreas.delete(key));
   }, [windowId, surface]);
+  const library = useLibraryVisible(windowId);
 
+  if (surface === "sidebar" && library) return null;
   if (!multiple && !nativePager) return null;
   return (
     <SwipeArea

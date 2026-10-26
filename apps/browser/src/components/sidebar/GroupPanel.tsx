@@ -15,6 +15,7 @@ import { sharedTabsIn, sharesTabs } from "../../store/tabShare";
 import type { Tab } from "../../store/types";
 import { PANEL, PopoverSeparator, PopoverSurface, popoverRowFill } from "../layout/controls";
 import { focusHeroBar } from "../omnibox/barState";
+import { libraryOpenings, libraryVisible } from "../library/store";
 import { windowHierarchy } from "./entries";
 import { clickTab, tabTitle } from "./actions";
 import { byRecentUse, groupTabIds, matchingRows, type GroupPanelTab } from "./groupPanelRows";
@@ -126,7 +127,7 @@ export function GroupPanel({ groupId, windowId, anchor, windowHeight }: { groupI
     const from = saveKeyResponder(windowId);
     origin.current = from;
     void from.then(() => {
-      if (focused.current && origin.current === from) field.current?.focus();
+      if (focused.current && origin.current === from && !libraryVisible(windowId)) field.current?.focus();
     });
   };
   const handBack = (to: "origin" | "page") => {
@@ -135,13 +136,21 @@ export function GroupPanel({ groupId, windowId, anchor, windowHeight }: { groupI
     holdHover(false);
     const from = origin.current;
     origin.current = null;
+    const opened = libraryOpenings(windowId);
+    const yielded = () => libraryVisible(windowId) || libraryOpenings(windowId) !== opened;
+    if (yielded()) {
+      if (from) void from.then(discardKeyResponder);
+      return;
+    }
     if (to === "page" || !from) {
       if (from) void from.then(discardKeyResponder);
       return returnFocusToPage(windowId);
     }
-    void from.then(restoreKeyResponder).then((restored) => {
-      if (!restored) returnFocusToPage(windowId);
-    });
+    void from
+      .then((token) => (yielded() ? (void discardKeyResponder(token), true) : restoreKeyResponder(token)))
+      .then((restored) => {
+        if (!restored && !yielded()) returnFocusToPage(windowId);
+      });
   };
   const latestHandBack = useRef(handBack);
   latestHandBack.current = handBack;
