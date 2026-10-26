@@ -4,13 +4,16 @@ import { Animated, Easing, PanResponder, type ScrollView, type View } from "reac
 import { create, useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
+import { useBrowser, type BrowserState } from "../../store/browser";
 import { useWindowId } from "../../store/hooks";
 import { descendantIds } from "../../store/groups";
 import { canMoveGroup, type GroupPlacement, type TabPlacement } from "../../store/organize";
 import { SLIDE } from "../layout/stripReorder";
+import { addressBarInSidebar } from "../layout/windowLayout";
 import { beginTabDrag, cancelTabDrag, endTabDrag, setDragPicture, updateTabDrag, useTabDrag } from "../layout/tabDrag";
+import { tabTitle } from "./actions";
 import { useClipped, type ClipSource } from "./entryMotion";
+import { SLIDE_EASING, SLIDE_MS, withReorderIntent } from "./listMotion";
 import { useFoldHidden } from "./Fold";
 import { entryNode, shownNodes } from "./pinnedTree";
 import { groupNode, liveNode, pinKeyOf, tabNode } from "../../store/pinTree";
@@ -84,7 +87,10 @@ export const cellKey = (cell: string) => {
   return folderId ? `tf:${folderId}` : `t:${cell}`;
 };
 
-export type Ghost = { item: Item; count: number; width: number; height: number; position: Animated.ValueXY; landing?: boolean };
+export type GhostFace = { title: string; url: string; favicon: string | null; icon: string | null; profileId: string };
+export type Ghost = { item: Item; count: number; width: number; height: number; position: Animated.ValueXY; landing?: boolean; face?: GhostFace };
+export type DropLine = { x: number; y: number; w: number };
+type Inline = { windowId: string; profileId: string; key: string; tabId: string; tabProfileId: string };
 
 const ROW_GAP = layout.rowGap;
 const RESTING_TAIL = { marginTop: -ROW_GAP };
@@ -110,8 +116,10 @@ type Marks = {
   folded: string | null;
   folderTarget: string | null;
   folderAway: boolean;
+  lifted: string | null;
+  line: DropLine | null;
 };
-const NO_MARKS: Marks = { sources: new Set(), dropInto: null, onto: null, landing: null, pins: false, pinCount: 0, pinBefore: null, folded: null, folderTarget: null, folderAway: false };
+const NO_MARKS: Marks = { sources: new Set(), dropInto: null, onto: null, landing: null, pins: false, pinCount: 0, pinBefore: null, folded: null, folderTarget: null, folderAway: false, lifted: null, line: null };
 const noMarks = create<Marks>()(() => NO_MARKS);
 const NO_DROP: Drop = { type: "none" };
 type Pointed = { cell: Item | null; index: number; gap: number; part: "gap" | "centre" | "before" | "after" };
@@ -156,6 +164,9 @@ class DragController {
   private holdKey: string | null = null;
   private holdReady: string | null = null;
   private holdTimer: ReturnType<typeof setTimeout> | undefined;
+  private inline: Inline | null = null;
+  private unwatch: (() => void) | null = null;
+  private settle: (() => void) | null = null;
   landed: { key: string; x: number; y: number } | null = null;
 
   create(key: string): Item {
@@ -174,7 +185,16 @@ class DragController {
     this.sources = multi
       ? [...this.items.values()].filter((i) => (i.kind === "row" || i.kind === "tile") && !i.folderId && i.tabIds.some((id) => selected.includes(id)))
       : [item];
+    this.settle?.();
     const token = (this.token = {});
+    const face = this.liftedFace(item, useBrowser.getState());
+    this.inline = face ? { windowId: this.windowId, profileId: useBrowser.getState().windows[this.windowId]!.profileId, key, tabId: item.tabIds[0]!, tabProfileId: face.profileId } : null;
+    if (this.inline) {
+      const inline = this.inline;
+      this.unwatch = useBrowser.subscribe(() => {
+        if (this.inline === inline && this.sources.length && !this.inlineHolds(inline)) this.end(false);
+      });
+    }
     suppressHover(true);
     this.escapable = true;
     setDragEscapeCapture(true);
@@ -188,6 +208,7 @@ class DragController {
     this.startScrollY = this.scrollY;
     await this.measureAll();
     if (this.token !== token || !this.sources.length) return;
+    if (this.inline && !this.inlineHolds(this.inline)) return this.end(false);
     const frame = item.frame ?? { x, y, w: 176, h: 33 };
     this.grab = { x: x - frame.x, y: y - frame.y };
     const count = new Set(this.sources.flatMap((s) => s.tabIds)).size;
@@ -199,16 +220,48 @@ class DragController {
       width: frame.w,
       height,
       position: new Animated.ValueXY({ x: frame.x - this.rootFrame.x, y: frame.y - this.rootFrame.y }),
+      ...(face && this.inline ? { face } : {}),
     };
-    const closing = this.sources.filter((s) => s.kind !== "tile");
+    const closing = this.inline ? [] : this.sources.filter((s) => s.kind !== "tile");
     for (const s of closing) s.size.setValue(s.frame?.h ?? 0);
     this.setLanding(null);
-    this.setSources(new Set(this.sources.map((s) => s.key)));
+    this.marks.setState({ sources: new Set(this.sources.map((s) => s.key)), lifted: this.inline ? key : null });
     this.setGhost(this.ghost);
     if (boxed(item) && !item.collapsed) this.marks.setState({ folded: item.key });
     Animated.parallel(closing.map((s) => spring(s.size, 0))).start();
     this.measured = true;
     this.move(this.pointer.x, this.pointer.y);
+  }
+
+  private liftedFace(item: Item, s: BrowserState): GhostFace | null {
+    const tab = s.tabs[item.tabIds[0] ?? ""];
+    const w = s.windows[this.windowId];
+    if (this.sources.length !== 1 || item.kind !== "row" || item.tabIds.length !== 1 || item.folderId || (item.section !== "list" && item.section !== "pinned")) return null;
+    if (!tab || !w || tab.windowId !== this.windowId || !addressBarInSidebar(s, this.windowId)) return null;
+    return { title: tabTitle(tab), url: tab.url, favicon: tab.favicon, icon: tab.customIcon, profileId: tab.profileId };
+  }
+
+  private inlineHolds(inline: Inline): boolean {
+    const s = useBrowser.getState();
+    const w = s.windows[inline.windowId];
+    const tab = s.tabs[inline.tabId];
+    return inline.windowId === this.windowId && !!w && w.profileId === inline.profileId && addressBarInSidebar(s, inline.windowId) && tab?.windowId === inline.windowId && tab.profileId === inline.tabProfileId;
+  }
+
+  private holding(inline: Inline): boolean {
+    const source = this.sources[0];
+    return this.inlineHolds(inline) && this.items.get(inline.key) === source && source?.tabIds.length === 1 && source.tabIds[0] === inline.tabId;
+  }
+
+  scrolled(y: number) {
+    this.scrollY = y;
+    if (this.inline && this.measured && this.sources.length) this.retarget();
+  }
+
+  abandon() {
+    if (this.active) this.end(false);
+    this.settle?.();
+    this.token = null;
   }
 
   async beginExternal(count: number, x: number, y: number) {
@@ -315,22 +368,32 @@ class DragController {
   end(commit: boolean) {
     if (this.external) return void this.finishExternal(false);
     if (!this.sources.length) return;
+    const inline = this.inline;
+    this.unwatch?.();
+    this.unwatch = null;
+    const live = commit && (!inline || this.holding(inline));
+    if (live && inline && this.measured) this.retarget();
     const sources = this.sources;
     const drop = this.drop;
     const ghost = this.ghost;
-    const splitDrop = commit ? endTabDrag() : (cancelTabDrag(), false);
+    const splitDrop = live ? endTabDrag() : (cancelTabDrag(), false);
     const folded = this.marks.getState().folded;
     const leftPanel = sources[0]?.section === "folder" && this.marks.getState().folderAway;
     const unfold = () => {
       if (folded && this.marks.getState().folded === folded) this.marks.setState({ folded: null });
     };
     const spot =
-      !splitDrop && this.measured && ghost && sources.length === 1 && sources[0]!.kind !== "tile" && sources[0]!.section !== "folder" && !this.into && drop.type !== "onto" && drop.type !== "folder"
-        ? this.landingSpot(commit ? drop : { type: "none" })
+      !inline && !splitDrop && this.measured && ghost && sources.length === 1 && sources[0]!.kind !== "tile" && sources[0]!.section !== "folder" && !this.into && drop.type !== "onto" && drop.type !== "folder"
+        ? this.landingSpot(live ? drop : { type: "none" })
         : null;
-    if (commit && !splitDrop && this.measured && sources.length) this.apply(drop, sources);
+    const lands = !!inline && live && !splitDrop && this.measured && !!ghost && (drop.type === "tabs" || drop.type === "group") && !this.into && !(drop.type === "tabs" && drop.placement.pinned && !drop.placement.row);
+    if (live && !splitDrop && this.measured && sources.length) {
+      if (inline) withReorderIntent({ windowId: inline.windowId, profileId: inline.profileId, key: inline.key }, () => this.apply(drop, sources));
+      else this.apply(drop, sources);
+    }
     this.reset();
     if (leftPanel) closeFolderPanel();
+    if (lands && inline && ghost) return this.landInline(ghost, inline);
     if (!spot || !ghost) {
       this.token = null;
       this.setLanding(null);
@@ -356,7 +419,38 @@ class DragController {
     });
   }
 
+  private landInline(ghost: Ghost, inline: Inline) {
+    const token = (this.token = {});
+    const { key } = inline;
+    this.setLanding(key);
+    this.setGhost({ ...ghost, landing: true });
+    let stop = () => {};
+    const done = () => {
+      stop();
+      if (this.settle === done) this.settle = null;
+      if (this.token !== token) return;
+      this.token = null;
+      this.setLanding(null);
+      this.setGhost(null);
+    };
+    this.settle = done;
+    stop = useBrowser.subscribe(() => {
+      if (!this.inlineHolds(inline)) done();
+    });
+    requestAnimationFrame(() => {
+      if (this.token !== token || !this.inlineHolds(inline)) return done();
+      void measure(this.items.get(key)?.view ?? null).then((at) => {
+        if (this.token !== token || !this.inlineHolds(inline)) return done();
+        if (__DEV__) this.landed = at && { key, x: at.x, y: at.y };
+        if (!at) return done();
+        Animated.timing(ghost.position, { toValue: { x: at.x - this.rootFrame.x, y: at.y - this.rootFrame.y }, duration: SLIDE_MS, easing: SLIDE_EASING, useNativeDriver: false }).start(done);
+      });
+    });
+  }
+
   private reset() {
+    this.unwatch?.();
+    this.unwatch = null;
     clearInterval(this.scrollTimer);
     this.scrollTimer = undefined;
     this.clearHold();
@@ -373,6 +467,7 @@ class DragController {
     this.into = null;
     this.pinnedZone = false;
     this.ghost = null;
+    this.inline = null;
     this.measured = false;
     this.gridBase = null;
     this.gridGrowth = 0;
@@ -381,7 +476,7 @@ class DragController {
     this.escapable = false;
     suppressHover(false);
     this.setSources(new Set());
-    this.marks.setState({ dropInto: null, onto: null, pins: false, pinCount: 0, pinBefore: null, folderTarget: null, folderAway: false });
+    this.marks.setState({ dropInto: null, onto: null, pins: false, pinCount: 0, pinBefore: null, folderTarget: null, folderAway: false, lifted: null, line: null });
   }
 
   private clearHold() {
@@ -463,6 +558,7 @@ class DragController {
       const next = Math.max(0, this.scrollY + speed);
       if (next === this.scrollY) return;
       this.scroll?.scrollTo({ y: next, animated: false });
+      if (this.inline) return;
       this.scrollY = next;
       this.retarget();
     }, 16);
@@ -584,7 +680,7 @@ class DragController {
       pitch = PIN_SLOT;
     } else if (this.overPinned(y)) {
       pinnedZone = true;
-      onto = tabsDrag && !this.external ? this.ontoTarget(live, y, "pinned") : null;
+      onto = tabsDrag && !this.external && !this.inline ? this.ontoTarget(live, y, "pinned") : null;
       if (onto) {
         drop = { type: "onto", targetId: this.items.get(onto)!.tabIds[0]! };
         gapKey = this.gapKey;
@@ -631,7 +727,7 @@ class DragController {
         const before = members.find((m) => cy(m) > y);
         drop = nestAt(hit.g.groupId!, firstTab(before));
         gapKey = before?.key ?? `tail:group:${hit.g.groupId}`;
-      } else if ((onto = tabsDrag && !this.external ? this.ontoTarget(live, y, "list") : null)) {
+      } else if ((onto = tabsDrag && !this.external && !this.inline ? this.ontoTarget(live, y, "list") : null)) {
         drop = { type: "onto", targetId: this.items.get(onto)!.tabIds[0]! };
         gapKey = this.gapKey;
         pitch = this.pitch;
@@ -654,6 +750,11 @@ class DragController {
     if (drop.type !== "onto") onto = null;
 
     if (folderAway !== this.marks.getState().folderAway) this.marks.setState({ folderAway });
+    if (this.inline) {
+      const line = this.lineAt(drop, gapKey, into);
+      const was = this.marks.getState().line;
+      if (line?.x !== was?.x || line?.y !== was?.y || line?.w !== was?.w) this.marks.setState({ line });
+    }
     const key = JSON.stringify(drop);
     if (key === this.dropKey && gapKey === this.gapKey) return;
     if (this.dropKey && drop.type !== "none" && useBrowser.getState().settings.tabReorderHaptics) hapticTick();
@@ -666,9 +767,9 @@ class DragController {
     this.marks.setState({ dropInto: into, onto, folderTarget, pins: pins || held, pinCount: pins || held ? count : 0, pinBefore: pins || held ? gapKey : null });
     if (gapKey !== this.gapKey) {
       const prev = this.gapKey && this.items.get(this.gapKey);
-      if (prev && !this.inGrid(prev)) spring(prev.gap, 0).start();
+      if (prev && !this.inGrid(prev) && !this.flat(prev)) spring(prev.gap, 0).start();
       const next = gapKey && this.items.get(gapKey);
-      if (next && !this.inGrid(next)) spring(next.gap, pitch).start();
+      if (next && !this.inGrid(next) && !this.flat(next)) spring(next.gap, pitch).start();
       this.gapKey = gapKey;
       this.pitch = pitch;
     }
@@ -678,13 +779,39 @@ class DragController {
     return i.section === "tiles" && !!this.gridBase;
   }
 
+  private flat(i: Item) {
+    return !!this.inline && (i.section === "list" || i.section === "pinned");
+  }
+
+  private unmoved(target: Item): boolean {
+    const source = this.sources[0];
+    if (!source?.frame) return true;
+    const sibling = (i: Item) => i.section === source.section && (i.parentGroup ?? null) === (source.parentGroup ?? null);
+    if (!sibling(target)) return false;
+    const next = [...this.items.values()]
+      .filter((i) => i !== source && i.frame && !i.hidden && sibling(i) && i.frame.y > source.frame!.y)
+      .sort((a, b) => a.frame!.y - b.frame!.y)[0];
+    return next === target;
+  }
+
+  private lineAt(drop: Drop, gapKey: string | null, into: string | null): DropLine | null {
+    const target = gapKey ? this.items.get(gapKey) : undefined;
+    if (!target?.frame || !this.flat(target) || into || (drop.type !== "tabs" && drop.type !== "group")) return null;
+    if ((drop.type === "tabs" && drop.placement.pinned && !drop.placement.row) || this.unmoved(target)) return null;
+    const f = this.at(target.frame)!;
+    const y = target.kind === "tail" ? f.y + ROW_GAP / 2 : f.y - ROW_GAP / 2;
+    const view = this.viewport;
+    if (view && (y < view.y || y > view.y + view.h)) return null;
+    return { x: f.x - this.rootFrame.x, y: y - this.rootFrame.y, w: f.w };
+  }
+
   private get pinning() {
     return this.drop.type === "tabs" && this.drop.placement.pinned && !this.drop.placement.row;
   }
 
   private shown(i: Item): Frame {
     const f = this.at(i.frame, this.still(i))!;
-    if (!this.dropKey) return f;
+    if (this.inline || !this.dropKey) return f;
     const [top, bottom] = [i.frame!.y, i.frame!.y + i.frame!.h];
     let dy = 0;
     let dh = 0;
@@ -720,7 +847,7 @@ export function DragProvider({ children }: { children: (ghost: Ghost | null, con
   if (__DEV__) (globalThis as { sidebarDrag?: DragController }).sidebarDrag = controller;
   const [ghost, setGhost] = useState<Ghost | null>(null);
   controller.setGhost = setGhost;
-  useEffect(() => () => void (controller.active && controller.end(false)), [controller]);
+  useEffect(() => () => controller.abandon(), [controller]);
   useEffect(() => {
     const sub = onAppEvent((e) => e.type === "dragEscape" && controller.active && controller.end(false));
     return () => sub.remove();
@@ -787,6 +914,7 @@ export const useFolderTarget = (key: string) => useStore(useContext(DragContext)
 export const useFolderAway = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.folderAway);
 export const useDragFolded = (key: string) => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.folded === key);
 export const useDragging = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.sources.size > 0);
+export const useDropLine = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.line);
 
 export function useDragItem(key: string, spec: ItemSpec, selection: () => string[] = () => [], clip: ClipSource | null = null) {
   const controller = useContext(DragContext) ?? undefined;
@@ -829,6 +957,7 @@ export function useDragItem(key: string, spec: ItemSpec, selection: () => string
   );
 
   const source = useStore(marks, (m) => m.sources.has(key));
+  const lifted = useStore(marks, (m) => m.lifted === key);
   const landing = useStore(marks, (m) => m.landing === key);
   const clipped = useClipped(clip);
   const horizontal = spec.kind === "tile";
@@ -836,7 +965,7 @@ export function useDragItem(key: string, spec: ItemSpec, selection: () => string
   const style = item
     ? {
         ...(horizontal ? null : { marginTop: spec.kind === "tail" ? tailOffset! : item.gap }),
-        ...(source
+        ...(source && !lifted
           ? horizontal
             ? { opacity: 0 }
             : { height: item.size, marginBottom: -ROW_GAP, opacity: 0, overflow: "hidden" as const }

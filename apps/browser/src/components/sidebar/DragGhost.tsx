@@ -1,4 +1,4 @@
-import { FadeLabel, Surface } from "@ardia/shell";
+import { FadeLabel, Surface, Symbol } from "@ardia/shell";
 import { Animated, Text, View } from "react-native";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { liveFolderIcon } from "../../live/sources";
@@ -7,12 +7,31 @@ import { useBrowser } from "../../store/browser";
 import { groupLabel } from "../../store/organize";
 import { tabTitle } from "./actions";
 import { useTabDrag } from "../layout/tabDrag";
-import type { Ghost } from "./dnd";
+import { useDropLine, type Ghost } from "./dnd";
 import { FolderMosaic } from "./FolderTile";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { TabIcon } from "./TabIcon";
 import { useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
+
+const LIFTED_FILL = "rgba(255,255,255,0.15)";
+const LINE = 2;
+const RING = 8;
+const RING_INSET = 10;
+const LINE_OPACITY = 0.88;
+
+export function DropLine() {
+  const line = useDropLine();
+  const theme = useTheme();
+  if (!line) return null;
+  const left = line.x + RING_INSET - RING / 2;
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", left, top: line.y - RING / 2, width: line.x + line.w - 1 - left, height: RING, opacity: LINE_OPACITY }}>
+      <View style={{ position: "absolute", left: RING, right: 0, top: (RING - LINE) / 2, height: LINE, backgroundColor: theme.textPrimary }} />
+      <View style={{ position: "absolute", left: 0, top: 0, width: RING, height: RING, borderRadius: RING / 2, borderWidth: LINE, borderColor: theme.textPrimary }} />
+    </View>
+  );
+}
 
 export function DragGhost({ ghost }: { ghost: Ghost }) {
   const theme = useTheme();
@@ -31,6 +50,19 @@ export function DragGhost({ ghost }: { ghost: Ghost }) {
   const folderTile = tile && !!item.folderId;
   const liveIcon = liveFolder ? liveFolderIcon(liveFolder) : null;
   const onPage = useTabDrag((d) => d.onPage);
+  const face = ghost.face;
+  if (face)
+    return (
+      <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width, height, opacity: onPage ? 0 : 1, transform: position.getTranslateTransform() }}>
+        <View style={{ width, height, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding, paddingRight: 6, borderRadius: layout.rowRadius, backgroundColor: theme.dark ? LIFTED_FILL : tokens.selectedFill }}>
+          <TabIcon url={face.url} favicon={face.favicon} icon={face.icon} profileId={face.profileId} />
+          <FadeLabel text={face.title} fontSize={layout.rowFontSize} weight="regular" color={arcTitle ?? arcLabel ?? theme.textPrimary} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
+          <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
+            <Symbol name="xmark" size={10} weight="semibold" color={theme.textTab} style={{ width: 12, height: 12 }} />
+          </View>
+        </View>
+      </Animated.View>
+    );
   return (
     <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width, height, opacity: onPage ? 0 : 1, transform: position.getTranslateTransform() }}>
       <Surface

@@ -28,7 +28,7 @@ import { PROFILE_DOTS_HEIGHT, ProfileDots, useProfileDotsShown } from "./profile
 import { SidebarAddressRow, SidebarHeaderTools } from "./sidebar/AddressBar";
 import { canTidyPins } from "../store/tidyPins";
 import { ClearDivider, dividerHeight, useSidebarHoverProps } from "./sidebar/ClearDivider";
-import { DragGhost } from "./sidebar/DragGhost";
+import { DragGhost, DropLine } from "./sidebar/DragGhost";
 import { DragProvider, DragScope, useDragController, useDragging, useDragItem, usePinnedCount, type Ghost } from "./sidebar/dnd";
 import { SidebarDropArea } from "./sidebar/fileDrop";
 import { useClipped, useShift, type ClipSource, type EntryMotion } from "./sidebar/entryMotion";
@@ -92,7 +92,7 @@ export function Sidebar({ width }: { width: number }) {
   const [onScrollY] = useState(() => (y: number) => {
     scrollY.current = y;
     const controller = dragController.current;
-    if (controller) controller.scrollY = y;
+    if (controller) controller.scrolled(y);
     dismissHover();
     closeFolderPanel();
   });
@@ -228,6 +228,7 @@ export function Sidebar({ width }: { width: number }) {
               )
             ) : null}
             <FolderPanel windowId={windowId} />
+            <DropLine />
             {ghost ? <DragGhost ghost={ghost} /> : null}
           </SidebarDropArea>
         );

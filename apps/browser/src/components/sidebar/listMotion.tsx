@@ -23,7 +23,8 @@ const devScale = () => (__DEV__ ? ((globalThis as { sidebarMotionScale?: number 
 
 type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean };
 type Ghost = { key: string; anchor: string | null; y: number; snapshot: EntrySnapshot; opacity: Animated.Value; until: number };
-type Snapshot = { state: BrowserState; list: string[]; live: LiveData; heights: LiveHeights };
+type ReorderIntent = { windowId: string; profileId: string; key: string };
+type Snapshot = { state: BrowserState; list: string[]; live: LiveData; heights: LiveHeights; intent?: ReorderIntent };
 type Move = { key: string; from: number };
 type Plan = { moves: Move[]; ghosts: Ghost[]; clipped: string[]; below: number };
 type Offsets = { at: Map<string, number>; end: number };
@@ -39,8 +40,33 @@ export const newCapture = (): Capture => ({ state: null, list: null, live: null,
 
 const placedAnywhere = (s: BrowserState, folderId: string) => Object.values(s.pinPlace).some((table) => !!table[liveNode(folderId)]);
 
+let reorderIntent: ReorderIntent | null = null;
+
+export function withReorderIntent<T>(intent: ReorderIntent, apply: () => T): T {
+  reorderIntent = intent;
+  try {
+    return apply();
+  } finally {
+    reorderIntent = null;
+  }
+}
+
+function reordered(before: string[], after: string[], key: string): boolean {
+  if (before.length !== after.length || !after.includes(key)) return false;
+  const had = new Set(before);
+  return after.every((e) => had.has(e)) && after.some((e, i) => e !== before[i]);
+}
+
+const movedBy = (before: Snapshot, after: Snapshot, windowId: string, profileId: string): string | null => {
+  const intent = before.intent;
+  return intent && intent.windowId === windowId && intent.profileId === profileId && reordered(before.list, after.list, intent.key) ? intent.key : null;
+};
+
 export function capture<T>(into: Capture, s: BrowserState, list: string[], value: T): T {
-  if (into.list && into.state && into.live && list !== into.list && !into.pending) into.pending = { state: into.state, list: into.list, live: liveAsOf(into.live), heights: retainedLiveHeights() };
+  if (into.list && into.state && into.live && list !== into.list && !into.pending) {
+    const intent = reorderIntent && reordered(into.list, list, reorderIntent.key) ? reorderIntent : null;
+    into.pending = { state: into.state, list: into.list, live: liveAsOf(into.live), heights: retainedLiveHeights(), ...(intent ? { intent } : {}) };
+  }
   const current = live();
   const lost = into.live && list === into.list ? Object.keys(into.live.folders).filter((id) => !current.folders[id]) : [];
   const awaiting = lost.length > 0 && (s === into.state || lost.some((id) => placedAnywhere(s, id)));
@@ -119,15 +145,16 @@ type Diff = {
   snapshot: (entry: string) => EntrySnapshot | null;
   clipAfter: string[];
   start: number;
+  still: string | null;
 };
 
-function buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail, snapshot, clipAfter, start }: Diff): Plan | null {
+function buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail, snapshot, clipAfter, start, still }: Diff): Plan | null {
   const kept = new Set(after.list.slice(start));
   const had = new Set(before.list.slice(start));
   const moves: Move[] = [];
   for (let i = start; i < after.list.length; i++) {
     const e = after.list[i]!;
-    if (!had.has(e) || !next.at.has(e)) continue;
+    if (e === still || !had.has(e) || !next.at.has(e)) continue;
     const delta = old.at.get(e)! - next.at.get(e)!;
     if (delta) moves.push({ key: e, from: shiftAt(slides.get(e), t) + delta });
   }
@@ -362,16 +389,17 @@ export function useListMotion(windowId: string, profileId: string, entries: stri
     const kept = new Set(after.list.slice(start));
     const removed = before.list.slice(start).filter((e) => !kept.has(e));
     const added = after.list.slice(start).filter((e) => !had.has(e));
-    if (!removed.length && !added.length && !changes.size) return null;
+    const moved = movedBy(before, after, windowId, profileId);
+    if (!removed.length && !added.length && !changes.size && !moved) return null;
     if (!removed.every(closedIn(before, after, windowId, profileId)) || !added.every(openedIn(before, after, windowId, profileId))) return null;
     const grown = [...changes].flatMap(([e, c]) => (c === "grown" ? [e] : []));
-    if (!removed.length && !added.length && !grown.length) return null;
+    if (!removed.length && !added.length && !grown.length && !moved) return null;
     const now: Height = (s, e) => (changes.get(e) === "extended" ? was(before.state, e) : is(s, e));
     const base = prefixHeight(after.state, after.list, start, now);
     const old = offsets(before.state, before.list, was, start, base);
     const next = offsets(after.state, after.list, now, start, base);
     const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e, before.live);
-    return buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: grown, start });
+    return buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: grown, start, still: moved });
   };
   return useMotion({ devKey: `${windowId}:${profileId}:today`, entries, from, planner, height: (e) => height(useBrowser.getState(), e), enabled, native: true });
 }
@@ -393,7 +421,8 @@ export function usePinnedMotion(windowId: string, profileId: string, entries: st
     const kept = new Set(after.list);
     const removed = before.list.filter((e) => !kept.has(e));
     const added = after.list.filter((e) => !had.has(e));
-    if (!removed.length === !added.length) return null;
+    const moved = movedBy(before, after, windowId, profileId);
+    if (!moved && !removed.length === !added.length) return null;
     if (!removed.every(closedIn(before, after, windowId, profileId)) || !added.every(openedIn(before, after, windowId, profileId))) return null;
     const was = boundary(before.list);
     const is = boundary(after.list);
@@ -401,7 +430,7 @@ export function usePinnedMotion(windowId: string, profileId: string, entries: st
     old.end += was.below - is.below;
     const next = rootOffsets(after, 0);
     const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e, before.live);
-    return buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: [], start: 0 });
+    return buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: [], start: 0, still: moved });
   };
   const height = (e: string) => {
     const s = useBrowser.getState();
@@ -421,13 +450,14 @@ export function useGroupMotion(windowId: string, profileId: string, groupId: str
     const kept = new Set(after.list);
     const removed = before.list.filter((e) => !kept.has(e));
     const added = after.list.filter((e) => !had.has(e));
-    if (!removed.length === !added.length) return null;
+    const moved = movedBy(before, after, windowId, profileId);
+    if (!moved && !removed.length === !added.length) return null;
     if (!removed.every(closedIn(before, after, windowId, profileId)) || !added.every(openedIn(before, after, windowId, profileId))) return null;
     const old = offsets(before.state, before.list, (s, e) => entryHeight(s, windowId, profileId, e, basisOf(before)));
     const next = offsets(after.state, after.list, (s, e) => entryHeight(s, windowId, profileId, e, basisOf(after)));
     const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e, before.live);
     const atEnd = !removed.length && groupGrowsAtEnd(before.state, after.state, windowId, profileId, groupId);
-    const plan = buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: !atEnd, snapshot, clipAfter: [], start: 0 });
+    const plan = buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: !atEnd, snapshot, clipAfter: [], start: 0, still: moved });
     if (!atEnd) return plan;
     return { ...(plan ?? { moves: [], ghosts: [], clipped: [] }), below: old.end - next.end };
   };
