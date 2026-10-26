@@ -203,19 +203,20 @@ function GroupHeader({ groupId, windowId, collapsed, peek, open, flat }: { group
                     </Text>
                     <FadeLabel text={label} fontSize={flat ? layout.rowFontSize : 13} weight={flat ? "semibold" : "medium"} color={flat ? (arcTitle ?? flatLabel) : tokens.groupTitle} style={{ position: "absolute", left: 0, right: 0, top: 0, height: 18 }} />
                   </View>
-                  <Animated.View
-                    style={{
-                      width: 10,
-                      height: 10,
-                      marginLeft: 0,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: flat && !hovered ? 0 : 1,
-                      transform: [{ rotate: open.interpolate({ inputRange: [0, 1], outputRange: ["-90deg", "0deg"] }) }],
-                    }}
-                  >
-                    <Symbol name="chevron.down" size={9} weight="semibold" color={withAlpha(tokens.groupTitle, 0.5)} style={{ width: 10, height: 10 }} />
-                  </Animated.View>
+                  {!flat ? (
+                    <Animated.View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        marginLeft: 0,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transform: [{ rotate: open.interpolate({ inputRange: [0, 1], outputRange: ["-90deg", "0deg"] }) }],
+                      }}
+                    >
+                      <Symbol name="chevron.down" size={9} weight="semibold" color={withAlpha(tokens.groupTitle, 0.5)} style={{ width: 10, height: 10 }} />
+                    </Animated.View>
+                  ) : null}
                 </Animated.View>
               )}
               <HoverSlot
