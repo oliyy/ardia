@@ -17,7 +17,7 @@ import { ProfileTint } from "./components/layout/ProfileSwipe";
 import { TOP_CARD_INSET, TOP_STRIP_HEIGHT, TopStripPeek, TopTabStrip } from "./components/layout/TopTabStrip";
 import { useCardGeometry, useTabLayout } from "./components/layout/windowLayout";
 import { WindowProfile } from "./components/layout/WindowProfile";
-import { DockedLayout } from "./components/layout/SidebarDock";
+import { DockedLayout, DockShift } from "./components/layout/SidebarDock";
 import { LittleArdiaWindow } from "./components/littleArdia/LittleArdiaWindow";
 import { SidebarOverlays } from "./components/sidebar/Overlays";
 import { layout, ThemeScope, useTheme } from "./lib/theme";
@@ -56,7 +56,7 @@ function BrowserWindow() {
   const [width, setWidth] = useState(0);
   const card = (
     <>
-      <ContentCard />
+      <DockShift>{(registerEndpoint) => <ContentCard registerEndpoint={registerEndpoint} />}</DockShift>
       {!fullscreen && <ExtensionSidePanel />}
     </>
   );

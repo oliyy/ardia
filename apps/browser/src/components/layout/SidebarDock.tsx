@@ -1,6 +1,6 @@
-import { onWindowEvent, setTrafficLightsCenter, Surface, watchLeftEdge, WindowDragRegion } from "@ardia/shell";
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from "react-native";
+import { ContextMenuArea, onWindowEvent, setTrafficLightsCenter, Surface, watchLeftEdge, WindowDragRegion } from "@ardia/shell";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { switchOn } from "../../lib/killSwitches";
 import { hex, layout, useTheme } from "../../lib/theme";
@@ -16,6 +16,7 @@ import {
   ARC_LIGHTS_CENTER,
   devPeeks,
   DOCK_SPRING,
+  dockMoving,
   LIGHTS_CENTER,
   lightsCenter,
   PEEK_BOTTOM,
@@ -27,6 +28,7 @@ import {
   springConfig,
   useDockMotion,
 } from "./dockMotion";
+import { TabDropArea, type TabDropTarget } from "./fileDrop";
 import { useTabDrag } from "./tabDrag";
 import { useCardGeometry } from "./windowLayout";
 import { usePeek } from "./usePeek";
@@ -41,27 +43,98 @@ AccessibilityInfo.addEventListener("reduceMotionChanged", (on) => (reduceMotion 
 const SPRING = springConfig(DOCK_SPRING);
 const STRIP_WIDTH = 8;
 const HOLD_SLACK = 24;
+const IGNORE = () => {};
 
-function useSidebarDock(open: boolean, animate: boolean, arc: boolean): Animated.Value {
+type EndpointFlush = (valid: () => boolean, done: () => void) => void;
+type RegisterEndpoint = (flush: EndpointFlush) => () => void;
+type CardShift = { shift: Animated.AnimatedInterpolation<number> | Animated.Value; placed: boolean; attach: (view: View | null) => void; registerEndpoint: RegisterEndpoint };
+const CardShiftContext = createContext<CardShift>({ shift: new Animated.Value(0), placed: false, attach: IGNORE, registerEndpoint: () => IGNORE });
+
+function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: boolean, span: number, tabDragging: boolean) {
   const windowId = useWindowId();
   const dock = useRef(new Animated.Value(open ? 1 : 0)).current;
+  const base = useRef(new Animated.Value(open && placed ? -1 : 0)).current;
+  const [wide, setWide] = useState(!(open && placed));
   const was = useRef(open);
-  useEffect(() => {
+  const generation = useRef(0);
+  const laidWide = useRef(wide);
+  const writes = useRef(0);
+  const landed = useRef(0);
+  const clip = useRef<View | null>(null);
+  const consumer = useRef<EndpointFlush | null>(null);
+  const waiting = useRef<(() => void) | null>(null);
+  const geometry = useRef({ placed, span });
+  geometry.current = { placed, span };
+  const [steps] = useState(() => {
+    const acknowledge = (write: number) =>
+      requestAnimationFrame(() => {
+        const done = () => {
+          landed.current = Math.max(landed.current, write);
+          waiting.current?.();
+        };
+        clip.current?.measure(done);
+      });
+    const land = (target: boolean, moved = false) => {
+      const narrow = target && geometry.current.placed;
+      const flips = geometry.current.placed && geometry.current.span !== 0 && laidWide.current === narrow;
+      laidWide.current = !narrow;
+      setWide(!narrow);
+      base.setValue(narrow ? -1 : 0);
+      if (flips || moved) acknowledge(++writes.current);
+      return flips;
+    };
+    const release = (token: number) => {
+      const attempt = () => {
+        if (generation.current !== token || landed.current < writes.current) return;
+        if (!dockMoving(windowId)) {
+          waiting.current = null;
+          return;
+        }
+        const flush = consumer.current;
+        if (!flush) return;
+        waiting.current = null;
+        flush(
+          () => generation.current === token,
+          () => {
+            if (generation.current === token) setDockMoving(windowId, false);
+          },
+        );
+      };
+      waiting.current = attempt;
+      attempt();
+    };
+    const settle = (moved: boolean) => {
+      const token = ++generation.current;
+      dock.stopAnimation();
+      dock.setValue(was.current ? 1 : 0);
+      land(was.current, moved);
+      release(token);
+    };
+    const attach = (view: View | null) => {
+      clip.current = view;
+    };
+    const registerEndpoint = (flush: EndpointFlush) => {
+      consumer.current = flush;
+      waiting.current?.();
+      return () => {
+        if (consumer.current === flush) consumer.current = null;
+      };
+    };
+    return { land, release, settle, attach, registerEndpoint };
+  });
+  useLayoutEffect(() => {
     if (was.current === open) return;
     was.current = open;
-    if (!animate || reduceMotion || !switchOn("sidebarSlide")) {
-      dock.stopAnimation();
+    const token = ++generation.current;
+    dock.stopAnimation();
+    if (!animate || reduceMotion || !switchOn("sidebarSlide") || (arc && open && peekShown(windowId))) {
       dock.setValue(open ? 1 : 0);
-      setDockMoving(windowId, false);
-      return;
-    }
-    if (arc && open && peekShown(windowId)) {
-      dock.stopAnimation();
-      dock.setValue(1);
-      setDockMoving(windowId, false);
+      if (steps.land(open)) setDockMoving(windowId, true);
+      steps.release(token);
       return;
     }
     setDockMoving(windowId, true);
+    if (!open) steps.land(false);
     (arc && !open
       ? Animated.timing(dock, { toValue: 0, duration: ARC_HIDE_MS, easing: Easing.out(Easing.cubic), useNativeDriver: false })
       : Animated.spring(dock, {
@@ -71,10 +144,32 @@ function useSidebarDock(open: boolean, animate: boolean, arc: boolean): Animated
           restSpeedThreshold: 0.01,
           useNativeDriver: false,
         })
-    ).start(({ finished }) => finished && setDockMoving(windowId, false));
+    ).start(({ finished }) => {
+      if (!finished) return;
+      void Promise.resolve().then(() => {
+        if (generation.current !== token) return;
+        steps.land(open);
+        steps.release(token);
+      });
+    });
   }, [open]);
-  useEffect(() => () => setDockMoving(windowId, false), []);
-  return dock;
+  useLayoutEffect(() => {
+    if (dockMoving(windowId)) steps.settle(true);
+    else steps.land(was.current);
+  }, [placed, span]);
+  useLayoutEffect(() => {
+    if (tabDragging && dockMoving(windowId)) steps.settle(false);
+  }, [tabDragging]);
+  useEffect(
+    () => () => {
+      generation.current++;
+      setDockMoving(windowId, false);
+    },
+    [],
+  );
+  const shift = useMemo(() => Animated.multiply(Animated.add(dock, base), placed ? span : 0), [dock, base, placed, span]);
+  const card = useMemo(() => ({ shift, placed, attach: steps.attach, registerEndpoint: steps.registerEndpoint }), [shift, placed, steps]);
+  return { dock, wide, card };
 }
 
 type Inset = { top: number; right: number; bottom: number; left: number };
@@ -104,18 +199,12 @@ export function DockedLayout({
   const width = useSidebarUi((u) => u.dragWidth[windowId]) ?? savedWidth;
   const arc = addressBar && !topTabs && switchOn("sidebarSlide");
   const lights = addressBar && !topTabs ? ARC_LIGHTS_CENTER : LIGHTS_CENTER;
-  const dock = useSidebarDock(open, !topTabs && !fullscreen, arc);
-  const left = useMemo(
-    () =>
-      dock.interpolate({
-        inputRange: [0, 1],
-        outputRange: [inset.left, width],
-      }),
-    [dock, width, inset.left],
-  );
+  const tabDragging = useTabDrag((d) => d.windowId === windowId && d.tabIds.length > 0);
+  const placed = !topTabs && !fullscreen;
+  const { dock, wide, card } = useSidebarDock(open, placed && !tabDragging, arc, placed, width - inset.left, tabDragging);
   return (
-    <>
-      <Animated.View
+    <CardShiftContext.Provider value={card}>
+      <View
         style={
           fullscreen
             ? { flex: 1 }
@@ -125,15 +214,38 @@ export function DockedLayout({
                 paddingTop: inset.top,
                 paddingRight: inset.right,
                 paddingBottom: inset.bottom,
-                paddingLeft: topTabs ? inset.left : left,
+                paddingLeft: topTabs || wide ? inset.left : width,
               }
         }
       >
         {!fullscreen && <WindowDragRegion style={StyleSheet.absoluteFill} />}
         {children}
-      </Animated.View>
+      </View>
       {!topTabs && <SidebarDock dock={dock} open={open} width={width} fullscreen={fullscreen} arc={arc} lights={lights} />}
-    </>
+    </CardShiftContext.Provider>
+  );
+}
+
+export function DockShift({ children }: { children: (registerEndpoint: RegisterEndpoint) => ReactNode }) {
+  const windowId = useWindowId();
+  const { shift, placed, attach, registerEndpoint } = useContext(CardShiftContext);
+  const moving = useDockMotion((m) => !!m.moving[windowId]);
+  const radius = useCardGeometry().radius;
+  const refuse = useMemo<TabDropTarget>(() => ({ windowId, accepts: () => false, enter: IGNORE, move: IGNORE, leave: IGNORE, drop: () => null }), [windowId]);
+  const clipped = moving && placed;
+  return (
+    <View ref={attach} pointerEvents="box-none" style={{ flex: 1, overflow: clipped ? "hidden" : "visible", borderRadius: clipped ? radius : 0 }}>
+      <Animated.View pointerEvents="box-none" style={{ flex: 1, transform: [{ translateX: shift }] }}>
+        {children(registerEndpoint)}
+      </Animated.View>
+      <View pointerEvents={moving ? "auto" : "none"} style={StyleSheet.absoluteFill}>
+        <TabDropArea target={refuse} style={StyleSheet.absoluteFill}>
+          <ContextMenuArea captureDescendants onContextMenu={IGNORE} style={StyleSheet.absoluteFill}>
+            <Pressable focusable={false} style={StyleSheet.absoluteFill} />
+          </ContextMenuArea>
+        </TabDropArea>
+      </View>
+    </View>
   );
 }
 

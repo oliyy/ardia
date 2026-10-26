@@ -1,6 +1,6 @@
 import { WebView, type OpenWindowRequest, type PageEngine } from "@ardia/ardiacore";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Animated, StyleSheet, View, type ViewStyle } from "react-native";
+import { Animated, StyleSheet, unstable_batchedUpdates, View, type ViewStyle } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { focus, switchToTab } from "../lib/actions";
 import { noteFavicon } from "../lib/favicons";
@@ -71,7 +71,9 @@ import { closeLittleArdiaOnEscape } from "./littleArdia/actions";
 import { PeekOverlay } from "./peek/PeekOverlay";
 import { closePeekOnEscape, dismissPeek, startPeeks } from "./peek/actions";
 
-export function ContentCard() {
+type EndpointRequest = { valid: () => boolean; done: () => void };
+
+export function ContentCard({ registerEndpoint }: { registerEndpoint?: (flush: (valid: () => boolean, done: () => void) => void) => () => void }) {
   const windowId = useWindowId();
   const activeId = useActiveTabId();
   const split = useBrowser((s) => splitOf(s, activeId));
@@ -85,6 +87,9 @@ export function ContentCard() {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
   const container = useRef<View>(null);
+  const epoch = useRef(0);
+  const endpoint = useRef<EndpointRequest | null>(null);
+  const [published, setPublished] = useState<{ epoch: number; request: EndpointRequest } | null>(null);
   useEffect(startPermissionPrompts, []);
   useEffect(startChromeTabs, []);
   useEffect(startMedia, []);
@@ -232,11 +237,56 @@ export function ContentCard() {
     if (origin && size.width > 0) setCardAnchor(windowId, { left: origin.x, top: origin.y, width: size.width, height: size.height });
   }, [origin, size.width, size.height, windowId]);
 
+  useEffect(() => {
+    if (!published) return;
+    const { request } = published;
+    if (endpoint.current !== request) return;
+    if (!request.valid()) {
+      endpoint.current = null;
+      return;
+    }
+    if (epoch.current !== published.epoch || !container.current) return;
+    endpoint.current = null;
+    request.done();
+  }, [published]);
+
   const settled = useRef<{ width: number; height: number } | null>(null);
   const measure = (width: number, height: number) => {
+    const mine = ++epoch.current;
+    const view = container.current;
     setSize({ width, height });
-    container.current?.measureInWindow((x, y) => setOrigin({ x, y }));
+    view?.measureInWindow((x, y) => {
+      if (epoch.current === mine && container.current === view) setOrigin({ x, y });
+    });
   };
+  const sampleEndpoint = () => {
+    const request = endpoint.current;
+    const view = container.current;
+    if (!request || !view) return false;
+    if (!request.valid()) {
+      endpoint.current = null;
+      return false;
+    }
+    const mine = ++epoch.current;
+    view.measureInWindow((x, y, width, height) => {
+      if (epoch.current !== mine || container.current !== view || endpoint.current !== request || !request.valid()) return;
+      if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return;
+      unstable_batchedUpdates(() => {
+        setSize({ width, height });
+        setOrigin({ x, y });
+        setPublished({ epoch: mine, request });
+      });
+    });
+    return true;
+  };
+  useLayoutEffect(() => {
+    if (!registerEndpoint) return;
+    return registerEndpoint((valid, done) => {
+      endpoint.current = { valid, done };
+      settled.current = null;
+      sampleEndpoint();
+    });
+  }, [registerEndpoint]);
   useEffect(
     () =>
       useDockMotion.subscribe((m) => {
@@ -259,6 +309,7 @@ export function ContentCard() {
       style={{ flex: 1 }}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
+        if (sampleEndpoint()) return;
         if (size.width > 0 && dockMoving(windowId) && !split) settled.current = { width, height };
         else measure(width, height);
       }}
