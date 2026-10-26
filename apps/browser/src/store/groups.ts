@@ -40,6 +40,31 @@ export function orderSections(ids: string[], tabs: Record<string, Tab>, groups: 
   return out.every((id, i) => id === ids[i]) ? ids : out;
 }
 
+function orderProfileSections(ids: string[], tabs: Record<string, Tab>, groups: Record<string, TabGroup>): string[] {
+  const pinnedGroup = new Set(Object.values(groups).filter((g) => g.pinned).flatMap((g) => g.tabIds));
+  const profiles: string[] = [];
+  const seenProfiles = new Set<string>();
+  const tiles = new Map<string, string[]>();
+  const pinned = new Map<string, string[]>();
+  const ordinary: string[] = [];
+  for (const id of ids) {
+    const tab = tabs[id];
+    if (!tab) {
+      ordinary.push(id);
+      continue;
+    }
+    if (!seenProfiles.has(tab.profileId)) {
+      seenProfiles.add(tab.profileId);
+      profiles.push(tab.profileId);
+    }
+    if (tab.pinned && !tab.pinnedAsRow) tiles.get(tab.profileId)?.push(id) ?? tiles.set(tab.profileId, [id]);
+    else if ((tab.pinned && tab.pinnedAsRow) || pinnedGroup.has(id) || tab.liveItem) pinned.get(tab.profileId)?.push(id) ?? pinned.set(tab.profileId, [id]);
+    else ordinary.push(id);
+  }
+  const out = [...profiles.flatMap((profileId) => [...(tiles.get(profileId) ?? []), ...(pinned.get(profileId) ?? [])]), ...ordinary];
+  return out.every((id, i) => id === ids[i]) ? ids : out;
+}
+
 export function insertAll(list: string[], at: number, items: string[]) {
   const tail = list.splice(at);
   for (const x of items) list.push(x);
@@ -300,7 +325,7 @@ export function settleNesting(s: Pick<BrowserState, "groups" | "windows" | "tabs
   for (const windowId of new Set(Object.values(groups).filter((g) => g.parentId).map((g) => g.windowId))) {
     const w = windows[windowId];
     if (!w) continue;
-    const tabIds = orderSections(placeGroups(w.tabIds, groups, windowId), s.tabs, groups);
+    const tabIds = orderProfileSections(placeGroups(w.tabIds, groups, windowId), s.tabs, groups);
     const window = tabIds.every((id, i) => id === w.tabIds[i]) ? w : { ...w, tabIds };
     if (window !== w) windows = { ...windows, [windowId]: window };
     groups = syncGroupOrder(groups, window);

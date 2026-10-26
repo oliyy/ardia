@@ -10,6 +10,21 @@ const hasPage = (t: Tab) => !!t.navigation || !!t.adoptId;
 
 export const shareKeyOf = (t: Pick<Tab, "profileId" | "id" | "pinKey">) => `${t.profileId}\u0001${pinKeyOf(t)}`;
 
+const livePageHolders = new WeakMap<BrowserState["tabs"], Map<string, Tab[]>>();
+
+function livePageHoldersOf(tabs: BrowserState["tabs"]): Map<string, Tab[]> {
+  let holders = livePageHolders.get(tabs);
+  if (holders) return holders;
+  holders = new Map();
+  for (const tab of Object.values(tabs)) {
+    if (!hasPage(tab) || tab.pageIn) continue;
+    const key = shareKeyOf(tab);
+    holders.get(key)?.push(tab) ?? holders.set(key, [tab]);
+  }
+  livePageHolders.set(tabs, holders);
+  return holders;
+}
+
 function shares(s: BrowserState, t: Tab | undefined): t is Tab {
   return !!t && !isIncognitoProfile(t.profileId) && mirrored(s.windows[t.windowId]) && (inPinnedContainer(s, t.id) || sharedListTab(s, t)) && !splitOf(s, t.id);
 }
@@ -33,30 +48,18 @@ export function holderOf(s: BrowserState, id: string): Tab | undefined {
     const named = s.tabs[t.pageIn];
     if (holds(s, named, t)) return named;
   }
-  const key = pinKeyOf(t);
   let best: Tab | undefined;
-  for (const x of Object.values(s.tabs)) {
-    if (pinKeyOf(x) !== key || !holds(s, x, t)) continue;
+  for (const x of livePageHoldersOf(s.tabs).get(shareKeyOf(t)) ?? []) {
+    if (!holds(s, x, t)) continue;
     if (!best || x.lastActiveAt > best.lastActiveAt) best = x;
   }
   return best;
 }
 
-const livePageKeys = new WeakMap<BrowserState["tabs"], Set<string>>();
-
-function livePageKeysOf(tabs: BrowserState["tabs"]): Set<string> {
-  let keys = livePageKeys.get(tabs);
-  if (!keys) {
-    keys = new Set(Object.values(tabs).filter((t) => hasPage(t) && !t.pageIn).map(shareKeyOf));
-    livePageKeys.set(tabs, keys);
-  }
-  return keys;
-}
-
 export function isPageUnloaded(s: BrowserState, id: string): boolean {
   const t = s.tabs[id];
   if (!t?.url || hasPage(t) || t.pageIn) return false;
-  return !livePageKeysOf(s.tabs).has(shareKeyOf(t)) || !holderOf(s, id);
+  return !livePageHoldersOf(s.tabs).has(shareKeyOf(t)) || !holderOf(s, id);
 }
 
 const swapIds = (ids: string[], a: string, b: string) => {
