@@ -1,6 +1,7 @@
 import { appUrlOrigin, displayHost } from "@ardia/core";
 import type { BrowserState } from "./browser";
 import { DEFAULT_PROFILE_ID } from "./settings";
+import { inAnyPinnedGroup } from "./structure";
 import type { BrowserWindow, Profile, Tab, TabGroup, TabLive, TabSnapshot } from "./types";
 
 
@@ -112,8 +113,7 @@ export function inPinnedContainer(s: Pick<BrowserState, "tabs" | "groups">, id: 
   const tab = s.tabs[id];
   if (!tab) return false;
   if (tab.pinned) return true;
-  for (const g of Object.values(s.groups)) if (g.pinned && g.tabIds.includes(id)) return true;
-  return false;
+  return inAnyPinnedGroup(s.groups, id);
 }
 
 export function viewTabIds(s: BrowserState, windowId: string, profileId?: string): string[] {
