@@ -1,5 +1,5 @@
 import { Surface, Symbol, VisualEffect } from "@ardia/shell";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { useDefaultBrowserCheckIn } from "../../lib/defaultBrowserCheckIn";
 import { hex, useTheme } from "../../lib/theme";
@@ -21,25 +21,26 @@ export function TelemetryAsk({ windowId }: { windowId: string }) {
   const releaseNotes = usePendingReleaseNotes() !== null;
   const [existing] = useState(() => onboardingCompletedAt() !== null);
   const [leaving, setLeaving] = useState<null | (() => void)>(null);
+  const retire = useCallback(
+    (action: () => void) =>
+      setLeaving(() => () => {
+        action();
+        setLeaving(null);
+      }),
+    [],
+  );
+  const onShare = useCallback(() => retire(() => setSharing(true, "ask")), [retire]);
+  const onNotNow = useCallback(() => retire(() => setSharing(false, "ask")), [retire]);
+  const onClose = useCallback(() => retire(dismissAsk), [retire]);
   if (!leaving && !(due && existing && !incognito && !onboarding && !checkIn && !releaseNotes)) return null;
-  const retire = (action: () => void) =>
-    setLeaving(() => () => {
-      action();
-      setLeaving(null);
-    });
   return (
     <View style={{ position: "absolute", left: 0, top: 0, width: FRAME.width, padding: 8 }} pointerEvents="box-none">
-      <Card
-        leaving={leaving}
-        onShare={() => retire(() => setSharing(true, "ask"))}
-        onNotNow={() => retire(() => setSharing(false, "ask"))}
-        onClose={() => retire(dismissAsk)}
-      />
+      <Card leaving={leaving} onShare={onShare} onNotNow={onNotNow} onClose={onClose} />
     </View>
   );
 }
 
-function Card({ leaving, onShare, onNotNow, onClose }: { leaving: null | (() => void); onShare: () => void; onNotNow: () => void; onClose: () => void }) {
+const Card = memo(function Card({ leaving, onShare, onNotNow, onClose }: { leaving: null | (() => void); onShare: () => void; onNotNow: () => void; onClose: () => void }) {
   const theme = useTheme();
   const { hovered, hoverProps } = useHover();
   const opacity = useRef(new Animated.Value(0)).current;
@@ -107,7 +108,7 @@ function Card({ leaving, onShare, onNotNow, onClose }: { leaving: null | (() => 
       </View>
     </Animated.View>
   );
-}
+});
 
 function AskButton({ title, onPress }: { title: string; onPress: () => void }) {
   const theme = useTheme();

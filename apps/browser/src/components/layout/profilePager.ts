@@ -4,6 +4,7 @@ import { Animated, unstable_batchedUpdates } from "react-native";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useBrowser } from "../../store/browser";
+import { endResize } from "../sidebar/state";
 
 export type PagerPage = { id: string; slot: number; resting?: boolean };
 
@@ -53,6 +54,7 @@ class ProfilePager {
   }
 
   readonly onNativeState = (event: PagerStateEvent) => {
+    if (event.phase === "began") endResize(this.windowId);
     if (this.external) return;
     this.commitNative(pagerState(this.windowId) ?? event, event);
   };
@@ -121,6 +123,7 @@ class ProfilePager {
 
   step(delta: -1 | 1) {
     if (!this.current()) return;
+    endResize(this.windowId);
     void stepPager(this.windowId, delta, false, useBrowser.getState().profileOrder.join("\n")).then((ok) => {
       if (ok) return;
       const next = useBrowser.getState().profileOrder[this.index() + delta];
@@ -132,6 +135,7 @@ class ProfilePager {
     const s = useBrowser.getState();
     const index = s.profileOrder.indexOf(profileId);
     if (!s.profiles[profileId] || !this.current() || index < 0) return;
+    endResize(this.windowId);
     if (!this.active) return s.switchProfile(this.windowId, profileId);
     void switchPager(this.windowId, index, s.profileOrder.join("\n")).then((ok) => {
       if (!ok) useBrowser.getState().switchProfile(this.windowId, profileId);
@@ -203,9 +207,9 @@ export function usePagerNativeConfig(windowId: string, width?: number): NativePa
   );
 }
 
-export function usePageStyle(windowId: string, slot: number, width: number) {
+export function usePageStyle(windowId: string, slot: number, width: number | Animated.Value) {
   const { pos } = pagerFor(windowId);
-  return useMemo(() => ({ transform: [{ translateX: Animated.multiply(Animated.add(pos, -slot), -width) }] }), [pos, slot, width]);
+  return useMemo(() => ({ transform: [{ translateX: Animated.multiply(Animated.subtract(slot, pos), width) }] }), [pos, slot, width]);
 }
 
 if (__DEV__) {

@@ -11,6 +11,12 @@
 
 #include <initializer_list>
 
+static void ACCommitPendingPresentation(void) {
+  Class view = NSClassFromString(@"RCTView");
+  SEL commit = NSSelectorFromString(@"ardia_commitPresentation");
+  if ([view respondsToSelector:commit]) ((void (*)(id, SEL))objc_msgSend)(view, commit);
+}
+
 namespace {
 
 BOOL (^gShouldClose)(NSWindow *);
@@ -967,6 +973,7 @@ static NSMapTable<ArdiaCoreTab *, NSNumber *> *FullScreenChanges() {
   _entered = entering;
   _asked = entering ? 1 : -1;
   if (!entering) _leftTab = nil;
+  ACCommitPendingPresentation();
   [CATransaction flush];
   ToggleWindowFullScreen(coreWindow);
   NSArray *covers = _covers;

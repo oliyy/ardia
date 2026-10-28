@@ -16,7 +16,7 @@ final class PowerUpView: MetalSurface {
   private var colors: [SIMD4<Float>] = PowerUpView.oklab(PowerUpView.palettes["pink"]!)
   private var srgbColors: [SIMD4<Float>] = PowerUpView.palettes["pink"]!
   private var halo: HaloView?
-  private var haloFrame: CGRect?
+  private var haloSpec: [Double] = []
 
   static let palettes: [String: [SIMD4<Float>]] = [
     "pink": ["#FF6AFF", "#FE8097", "#FF9966", "#FCE0FF", "#FA62B1"],
@@ -57,25 +57,59 @@ final class PowerUpView: MetalSurface {
     }
   }
 
-  func setHaloFrame(_ frame: CGRect?) {
-    haloFrame = frame
-    if frame != nil, halo == nil {
-      let view = HaloView()
-      view.speed = speed
-      view.cornerRadius = cornerRadius + 2
-      view.setColors(srgbColors)
-      addSubview(view)
-      halo = view
-    } else if frame == nil, let view = halo {
+  func setHaloSpec(_ spec: [Double]) {
+    haloSpec = spec
+    if spec.isEmpty, let view = halo {
       view.removeFromSuperview()
       halo = nil
     }
     layoutHalo()
   }
 
+  private func resolvedHaloRect() -> CGRect? {
+    if haloSpec.count == 4 {
+      guard haloSpec.allSatisfy({ $0.isFinite }), haloSpec[2] > 0, haloSpec[3] > 0 else { return nil }
+      return CGRect(x: haloSpec[0], y: haloSpec[1], width: haloSpec[2], height: haloSpec[3])
+    }
+    guard haloSpec.count == 6 else { return nil }
+    let under = haloSpec[4]
+    let panelHeight = haloSpec[5]
+    let width = Double(bounds.width)
+    let height = Double(bounds.height)
+    guard under.isFinite, under >= 0, panelHeight.isFinite, panelHeight > 0,
+          width.isFinite, width > 0, height.isFinite, height > 0 else { return nil }
+    let content: Double = width < 708 ? (width <= 636 ? width - 20 : 616) : width < 1700 ? 652 : 774
+    let barWidth = min(content, width - 28)
+    let x = max(width / 2 - barWidth / 2, 14) + 1
+    let y = max((height - under) / 2 - 158, 100) + 38 + 1 + under
+    guard barWidth > 0, x.isFinite, y.isFinite else { return nil }
+    return CGRect(x: x, y: y, width: barWidth, height: panelHeight)
+  }
+
   private func layoutHalo() {
-    guard let halo, let haloFrame else { return }
-    halo.frame = haloFrame.insetBy(dx: -CGFloat(halo.inset), dy: -CGFloat(halo.inset))
+    guard !haloSpec.isEmpty else { return }
+    guard let rect = resolvedHaloRect() else {
+      halo?.isHidden = true
+      return
+    }
+    let view = halo ?? makeHalo()
+    let expanded = rect.insetBy(dx: -CGFloat(view.inset), dy: -CGFloat(view.inset))
+    guard expanded.minX.isFinite, expanded.minY.isFinite, expanded.width.isFinite, expanded.height.isFinite else {
+      view.isHidden = true
+      return
+    }
+    view.frame = expanded
+    view.isHidden = false
+  }
+
+  private func makeHalo() -> HaloView {
+    let view = HaloView()
+    view.speed = speed
+    view.cornerRadius = cornerRadius + 2
+    view.setColors(srgbColors)
+    addSubview(view)
+    halo = view
+    return view
   }
 
   override func setFrameSize(_ newSize: NSSize) {

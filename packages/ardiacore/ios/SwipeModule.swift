@@ -446,7 +446,7 @@ final class ACPager {
   }
 
   private func settle(to target: Int, velocity v: Double, from origin: SwipeArea? = nil) {
-    announceActivity()
+    announceActivity(["position": position, "target": target])
     if target != selected {
       selected = target
       sequence = ACPager.next()

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, ScrollView, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { switchProfile } from "../../lib/actions";
@@ -71,7 +71,7 @@ export function ProfileDots({ windowId, width, reserve }: { windowId: string; wi
   );
 }
 
-function ProfileIcon({ id, windowId, page, pos, onHover }: { id: string; windowId: string; page: PagerPage | undefined; pos: Animated.Value; onHover(id: string, active: boolean): void }) {
+const ProfileIcon = memo(function ProfileIcon({ id, windowId, page, pos, onHover }: { id: string; windowId: string; page: PagerPage | undefined; pos: Animated.Value; onHover(id: string, active: boolean): void }) {
   const theme = useTheme();
   const profile = useBrowser(useShallow((s) => ({ name: s.profiles[id]?.name ?? "", icon: s.profiles[id]?.icon ?? null })));
   const { hovered, hoverProps } = useHover();
@@ -82,9 +82,11 @@ function ProfileIcon({ id, windowId, page, pos, onHover }: { id: string; windowI
     return () => onHover(id, false);
   }, [hovered, pressed, id, onHover]);
   const rest = hovered ? HOVERED : IDLE;
-  const opacity = page
-    ? pos.interpolate({ inputRange: [page.slot - 1, page.slot, page.slot + 1], outputRange: [rest, SELECTED, rest], extrapolate: "clamp" })
-    : rest;
+  const slot = page?.slot;
+  const opacity = useMemo(
+    () => (slot === undefined ? rest : pos.interpolate({ inputRange: [slot - 1, slot, slot + 1], outputRange: [rest, SELECTED, rest], extrapolate: "clamp" })),
+    [pos, slot, rest],
+  );
   return (
     <View {...hoverProps}>
       <Pressable
@@ -101,4 +103,4 @@ function ProfileIcon({ id, windowId, page, pos, onHover }: { id: string; windowI
       </Pressable>
     </View>
   );
-}
+});

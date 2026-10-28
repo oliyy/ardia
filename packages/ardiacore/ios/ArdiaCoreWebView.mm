@@ -1173,6 +1173,7 @@ static NSDictionary *ExternalLinkDecision(NSString *url) {
   if (_sightObserver) [NSNotificationCenter.defaultCenter removeObserver:_sightObserver];
   _sightObserver = nil;
   if (!self.window) return;
+  [self keepAncestorsPostingFrameChanges];
   if (_visible) [ArdiaCoreEarlyWindow noteLayoutChangeIn:self.window];
   if (_viewportLeadingX) [self layoutPage];
   __weak ArdiaCoreWebView *weakSelf = self;
@@ -1185,6 +1186,17 @@ static NSDictionary *ExternalLinkDecision(NSString *url) {
   }
   if (_tab) [self adoptIntoWindow];
   else [self ensureTab];
+}
+
+- (void)viewDidMoveToSuperview {
+  [super viewDidMoveToSuperview];
+  [self keepAncestorsPostingFrameChanges];
+}
+
+- (void)keepAncestorsPostingFrameChanges {
+  NSView *content = self.window.contentView;
+  for (NSView *view = self; view && view != content; view = view.superview)
+    view.postsFrameChangedNotifications = YES;
 }
 
 - (void)beginOwnershipChange {

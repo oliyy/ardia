@@ -5,6 +5,7 @@ import { switchOn } from "../lib/killSwitches";
 import { live } from "../live/store";
 import { everySlowly } from "../lib/slowTimers";
 import { layout, ThemeScope, useTheme } from "../lib/theme";
+import { create } from "zustand";
 import { useBrowser } from "../store/browser";
 import { PageProfileContext, useIsIncognito, useSettings, useWindowId, useWindowProfileId } from "../store/hooks";
 import { activeTabId } from "../store/model";
@@ -14,6 +15,7 @@ import { cleanedTabsFor, cleanUpCandidates, groupOf } from "../store/organize";
 import { isPlainSpaceSwitch } from "../store/spaceSwitch";
 import { splitOf } from "../store/splits";
 import { openNewTabInSplit } from "./layout/splitActions";
+import { RESIZE_BAND } from "./layout/useResizeDrag";
 import { listTopGap, SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, SIDEBAR_HEADER_WITH_FIELD, useAddressBarInSidebar } from "./layout/windowLayout";
 import { SIDEBAR_PLAYER_HEIGHT, SidebarPlayer, useSidebarPlayerTab } from "./media/SidebarPlayer";
 import { HoverSlot } from "./HoverSlot";
@@ -51,7 +53,8 @@ import { LibraryGlyph } from "./sidebar/LibraryGlyph";
 import { SpaceHeader } from "./sidebar/SpaceHeader";
 import { SplitRowItem, TabRowItem } from "./sidebar/TabRow";
 import { closeFolderPanel } from "./sidebar/tileFolderUi";
-import { useSidebarTokens } from "./sidebar/tokens";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarTokens, useSidebarWidthOf } from "./sidebar/tokens";
+import { TileInnerProvider } from "./sidebar/tileWidth";
 import { toggleNewTabBar } from "./omnibox/newTabBar";
 
 const GLOW_ROOM = 24;
@@ -61,9 +64,13 @@ const ROWS_PER_FRAME = 32;
 const DOCK_SHARE = 0.4;
 const FOOTER_INACTIVE_OPACITY = 0.55;
 const NONE: string[] = [];
+const LIVE_MIN = SIDEBAR_MIN_WIDTH - RESIZE_BAND;
+const LIVE_MAX = SIDEBAR_MAX_WIDTH + RESIZE_BAND;
+const useUpsellShift = create<Record<string, number>>()(() => ({}));
+const setUpsellShift = (windowId: string, shift: number) => useUpsellShift.setState((u) => (u[windowId] === shift ? u : { ...u, [windowId]: shift }));
 const AnimatedSurface = Animated.createAnimatedComponent(Surface);
 
-export function Sidebar({ width }: { width: number }) {
+export function Sidebar({ width, resizing, receipt }: { width: number; resizing: boolean; receipt: number | undefined }) {
   const theme = useTheme();
   const footerTint = theme.dark ? "#FFFFFF99" : theme.textTertiary;
   const windowId = useWindowId();
@@ -72,6 +79,20 @@ export function Sidebar({ width }: { width: number }) {
   const [pageCurrent, setPageCurrent] = useState(current);
   const { pages, paging } = usePagerPages(windowId);
   const [available, setAvailable] = useState(0);
+  const [arming] = useState(() => {
+    let host: View | null = null;
+    let armed = false;
+    return {
+      attach: (view: View | null) => {
+        host = view;
+        if (armed) host?.setNativeProps({ presentationArming: true });
+      },
+      set: (next: boolean) => {
+        armed = next;
+        host?.setNativeProps({ presentationArming: next });
+      },
+    };
+  });
   const listHeights = useRef(new Map<string, number>());
   const [, setDockChanges] = useState(0);
   const newTabAtTop = useSettings((s) => s.newTabPosition === "top");
@@ -98,9 +119,13 @@ export function Sidebar({ width }: { width: number }) {
     dismissHover();
     closeFolderPanel();
   });
-  const geometry = useRef<SidebarGeometry>({ viewport: 0, regions: { pinned: 0, list: 0 }, newTabAtTop: false, room: 0, pad: 0, tilesFixed: true });
+  const geometry = useRef<SidebarGeometry>({ viewport: 0, content: 0, regions: { pinned: 0, list: 0 }, newTabAtTop: false, room: 0, pad: 0, tilesFixed: true });
   const [wakeReveal] = useState(() => () => geometry.current.laidOut?.());
   const motion = useLibraryMotion(windowId, library, width, wakeReveal);
+  const [pageWidth] = useState(() => new Animated.Value(width));
+  useLayoutEffect(() => pageWidth.setValue(width), [pageWidth, width]);
+  const [tileInner] = useState(() => new Animated.Value(width - layout.sidebarInset * 2));
+  useLayoutEffect(() => tileInner.setValue(width - layout.sidebarInset * 2), [tileInner, width]);
   const faceRest = motion.rest;
   const [pageReady] = useState(() => () => {
     const ready = geometry.current.ready;
@@ -115,6 +140,13 @@ export function Sidebar({ width }: { width: number }) {
   const footerDownloads = addressBar && hasDownloads && !footerButtons;
   const footer = dots || footerDownloads ? (addressBar ? SIDEBAR_FOOTER_HEIGHT : PROFILE_DOTS_HEIGHT) : 0;
   const nothingPinned = useBrowser((s) => sidebarEntries(s, windowId, current).tiles.length === 0);
+  const tileCells = useBrowser((s) => sidebarEntries(s, windowId, current).cells.length);
+  const balancedTiles = useBrowser((s) => s.settings.balancedTopApps);
+  const upsellShift = useUpsellShift((u) => u[windowId] ?? 0);
+  const gridAt = (width: number) => pinGridHeight(tileCells, width - layout.sidebarInset * 2, layout.pinnedHeight, pinColumnCap(addressBar), balancedTiles);
+  const tileShift = tileCells ? gridAt(LIVE_MIN) - gridAt(LIVE_MAX) : 0;
+  const slack = geometry.current.content - scrollY.current - geometry.current.viewport;
+  const shiftBound = tileShift + (upsellShift && slack < tileShift + upsellShift ? upsellShift : 0);
 
   const sidebarHover = useSidebarHoverProps(windowId);
   useRevealTabs(windowId, scroll, scrollY, geometry, pageReady);
@@ -145,7 +177,11 @@ export function Sidebar({ width }: { width: number }) {
             <AnimatedSurface refreshRasterOnRest={motion.rested} pointerEvents={motion.rested ? "box-none" : "none"} style={[StyleSheet.absoluteFill, motion.faceStyle]}>
               <Surface hidesAccessibility={!motion.rested} style={StyleSheet.absoluteFill}>
                 <View
+                  ref={arming.attach}
                   {...sidebarHover}
+                  collapsable={false}
+                  presentationSession={resizing}
+                  presentationShiftBound={shiftBound}
                   pointerEvents={shown === current ? "auto" : "none"}
                   style={{
                     position: "absolute",
@@ -157,25 +193,27 @@ export function Sidebar({ width }: { width: number }) {
                   }}
                   onLayout={(e) => setAvailable(e.nativeEvent.layout.height)}
                 >
-                  {pages.map((page) => (
-                    <SidebarPage
-                      key={page.id}
-                      profileId={page.id}
-                      slot={page.slot}
-                      width={width}
-                      current={page.id === shown}
-                      resting={!!page.resting}
-                      docked={dockedPage(page.id)}
-                      glowRoom={glowRoom}
-                      height={available}
-                      rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
-                      geometry={page.id === shown ? geometry : undefined}
-                      bottomLine={addressBar && footer > 0}
-                      onListHeight={onListHeight}
-                      onScrollView={onScrollView}
-                      onScrollY={onScrollY}
-                    />
-                  ))}
+                  <TileInnerProvider value={tileInner}>
+                    {pages.map((page) => (
+                      <SidebarPage
+                        key={page.id}
+                        profileId={page.id}
+                        slot={page.slot}
+                        pageWidth={pageWidth}
+                        current={page.id === shown}
+                        resting={!!page.resting}
+                        docked={dockedPage(page.id)}
+                        glowRoom={glowRoom}
+                        height={available}
+                        rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
+                        geometry={page.id === shown ? geometry : undefined}
+                        bottomLine={addressBar && footer > 0}
+                        onListHeight={onListHeight}
+                        onScrollView={onScrollView}
+                        onScrollY={onScrollY}
+                      />
+                    ))}
+                  </TileInnerProvider>
                 </View>
 
                 {footer ? (
@@ -207,7 +245,7 @@ export function Sidebar({ width }: { width: number }) {
                   {addressBar ? (
                     <>
                       <SidebarHeaderTools width={width} />
-                      <SidebarAddressRow width={width} />
+                      <SidebarAddressRow width={width} receipt={receipt} />
                     </>
                   ) : (
                     <View pointerEvents="box-none" style={{ height: layout.sidebarHeader, flexDirection: "row", alignItems: "flex-start", paddingLeft: PROFILE_INDICATOR_X, paddingRight: 7, paddingTop: 27 - 17 }}>
@@ -230,7 +268,7 @@ export function Sidebar({ width }: { width: number }) {
             ) : null}
             {motion.moving ? <MotionCatcher /> : null}
 
-            <ResizeHandle windowId={windowId} />
+            <ResizeHandle windowId={windowId} receipt={receipt} onArming={arming.set} />
             {ghost && !ghost.landing && nothingPinned ? (
               addressBar ? (
                 <PinFieldZone top={SIDEBAR_FIELD.top} height={SIDEBAR_FIELD.height} />
@@ -261,7 +299,7 @@ function MotionCatcher() {
 type PageProps = {
   profileId: string;
   slot: number;
-  width: number;
+  pageWidth: Animated.Value;
   current: boolean;
   resting: boolean;
   docked: boolean;
@@ -275,13 +313,13 @@ type PageProps = {
   onScrollY: (y: number) => void;
 };
 
-const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current, resting, docked, glowRoom, height, rows, geometry, bottomLine, onListHeight, onScrollView, onScrollY }: PageProps) {
+const SidebarPage = memo(function SidebarPage({ profileId, slot, pageWidth, current, resting, docked, glowRoom, height, rows, geometry, bottomLine, onListHeight, onScrollView, onScrollY }: PageProps) {
   const windowId = useWindowId();
   const addressBar = useAddressBarInSidebar();
   const incognito = useIsIncognito();
   const topGap = listTopGap(addressBar);
   const pinColumns = pinColumnCap(addressBar);
-  const pageStyle = usePageStyle(windowId, slot, width);
+  const pageStyle = usePageStyle(windowId, slot, pageWidth);
   const [lazy] = useState(() => switchOn("lazySidebarRows"));
   const [beside, setBeside] = useState(() => startsOffScreen(lazy, current));
   useEffect(() => {
@@ -293,16 +331,16 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current,
   const playerTab = useSidebarPlayerTab(windowId, profileId);
   const playerHeight = playerTab ? SIDEBAR_PLAYER_HEIGHT : 0;
   const tiles = useBrowser((s) => (offScreen ? NONE : sidebarEntries(s, windowId, profileId).cells));
-  const innerWidth = width - layout.sidebarInset * 2;
   const dragging = useDragging() && current;
   const previewed = usePinnedCount(tiles);
   const dockRoom = height ? (height - playerHeight) * DOCK_SHARE - topGap - SCROLL_EDGE.gap - SCROLL_EDGE.line : Infinity;
   const balanced = useBrowser((s) => s.settings.balancedTopApps);
-  const gridHeight = (count: number) => pinGridHeight(count, innerWidth, layout.pinnedHeight, pinColumns, balanced);
+  const tilesHeight = useSidebarWidthOf(windowId, (width) => pinGridHeight(tiles.length, width - layout.sidebarInset * 2, layout.pinnedHeight, pinColumns, balanced));
+  const previewHeight = useSidebarWidthOf(windowId, (width) => pinGridHeight(previewed, width - layout.sidebarInset * 2, layout.pinnedHeight, pinColumns, balanced));
   const placedFixed = useRef(true);
-  if (!dragging) placedFixed.current = !tiles.length || gridHeight(tiles.length) <= dockRoom;
+  if (!dragging) placedFixed.current = !tiles.length || tilesHeight <= dockRoom;
   const dockFixed = placedFixed.current;
-  const capped = dockFixed && dragging && gridHeight(previewed) > dockRoom;
+  const capped = dockFixed && dragging && previewHeight > dockRoom;
   const fixedTiles = dockFixed ? tiles : NONE;
   const scrolledTiles = dockFixed ? NONE : tiles;
   const headerTop = scrolledTiles.length ? layout.sidebarInset : fixedTiles.length ? layout.sidebarInset - SCROLL_EDGE.gap - SCROLL_EDGE.line - SCROLL_EDGE.inset : 0;
@@ -340,6 +378,7 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current,
     restored.current = true;
     if (!e.viewport) return;
     geometry.current.viewport = e.viewport;
+    geometry.current.content = e.content;
     Object.assign(geometry.current.regions, origins);
     publishReady();
     geometry.current.laidOut?.();
@@ -380,8 +419,10 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current,
 
   return (
     <Animated.View
+      presentationGate
+      presentationPersistent
       pointerEvents={current ? "auto" : "none"}
-      style={{ position: "absolute", top: 0, bottom: 0, left: 0, width, display: resting ? "none" : "flex", ...pageStyle }}
+      style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, display: resting ? "none" : "flex", ...pageStyle }}
     >
       <Surface hidesAccessibility={!current} style={{ flex: 1 }}>
         <PageProfileContext.Provider value={profileId}>
@@ -398,7 +439,7 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current,
                   >
                     <View onLayout={onFixedLayout} style={{ paddingTop: glowRoom }}>
                       <View style={[{ paddingHorizontal: layout.sidebarInset }, capped ? { maxHeight: topGap + dockRoom, overflow: "hidden" } : null]}>
-                        {dockFixed ? <PinnedGrid tabs={fixedTiles} innerWidth={innerWidth} /> : null}
+                        {dockFixed ? <PinnedGrid tabs={fixedTiles} /> : null}
                       </View>
                       {headerFixed ? (
                         <View style={{ paddingHorizontal: layout.sidebarInset }}>
@@ -426,13 +467,14 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current,
                           }}
                           onContentSizeChange={(_width, contentHeight) => {
                             extent.current.content = contentHeight;
+                            if (geometry) geometry.current.content = contentHeight;
                             followExtent();
                           }}
                           style={{ flex: 1 }}
                           showsVerticalScrollIndicator={false}
                           scrollEventThrottle={16}
                           onScroll={onScroll}
-                          contentContainerStyle={{ flexGrow: 1, width, paddingHorizontal: layout.sidebarInset, paddingTop: pad }}
+                          contentContainerStyle={{ flexGrow: 1, width: "100%", paddingHorizontal: layout.sidebarInset, paddingTop: pad }}
                         >
                           <PageRows
                             windowId={windowId}
@@ -443,7 +485,6 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, width, current,
                             offScreen={offScreen}
                             tiles={scrolledTiles}
                             headerTop={headerTop}
-                            innerWidth={innerWidth}
                             inlineNewTab={inlineNewTab}
                             controller={controller}
                             geometry={geometry}
@@ -492,7 +533,6 @@ type PageRowsProps = {
   offScreen: boolean;
   tiles: string[];
   headerTop: number;
-  innerWidth: number;
   inlineNewTab: boolean;
   controller: ReturnType<typeof useDragController>;
   geometry: RefObject<SidebarGeometry> | undefined;
@@ -500,7 +540,7 @@ type PageRowsProps = {
   onListHeight: (height: number) => void;
 };
 
-function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, headerTop, innerWidth, inlineNewTab, controller, geometry, origins, onListHeight }: PageRowsProps) {
+function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, headerTop, inlineNewTab, controller, geometry, origins, onListHeight }: PageRowsProps) {
   const [captured] = useState(newCapture);
   const { list: all } = useBrowser((s) => {
     const entries = sidebarEntries(s, windowId, profileId);
@@ -549,7 +589,7 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
       <View
         onLayout={(e) => onListHeight(e.nativeEvent.layout.height + SCROLL_EDGE.inset - (inlineNewTab ? ROW_PITCH : 0))}
       >
-        {tiles.length ? <PinnedGrid tabs={tiles} innerWidth={innerWidth} flush /> : null}
+        {tiles.length ? <PinnedGrid tabs={tiles} flush /> : null}
         {spaceHeader && tiles.length ? <SpaceHeader windowId={windowId} profileId={profileId} top={headerTop} /> : null}
         <View
           ref={(v) => {
@@ -646,7 +686,7 @@ const ListEntry = memo(function ListEntry({ entry, motion }: { entry: string; mo
 
 const RootEntry = memo(function RootEntry({ entry, lift, motion }: { entry: string; lift: number; motion: EntryMotion | null }) {
   return (
-    <View style={lift ? { marginTop: lift } : null}>
+    <View presentationGate style={lift ? { marginTop: lift } : null}>
       <HierarchyEntry entry={entry} section="pinned" motion={motion} />
     </View>
   );
@@ -661,7 +701,7 @@ const Tail = memo(function Tail({ id, section }: { id: string; section: Section 
   return <Animated.View ref={wrapper.ref} style={wrapper.style} />;
 });
 
-type SidebarGeometry = { viewport: number; regions: Record<Section, number>; newTabAtTop: boolean; room: number; pad: number; tilesFixed: boolean; ready?: { profileId: string; view: ScrollView }; laidOut?: () => void };
+type SidebarGeometry = { viewport: number; content: number; regions: Record<Section, number>; newTabAtTop: boolean; room: number; pad: number; tilesFixed: boolean; ready?: { profileId: string; view: ScrollView }; laidOut?: () => void };
 
 function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, scrollY: RefObject<number>, geometry: RefObject<SidebarGeometry>, ready: () => boolean) {
   useEffect(() => {
@@ -766,13 +806,16 @@ const NewTabRow = memo(function NewTabRow({ windowId, shift = null, clip = null 
   const [moved, movedRef] = useShift(shift);
   const [movedButtons, movedButtonsRef] = useShift(shift);
   const clipped = useClipped(clip);
-  const [widths, setWidths] = useState({ row: 0, label: 0, hint: 0 });
-  const measure = (key: keyof typeof widths) => (e: LayoutChangeEvent) => {
+  const widths = useRef({ row: 0, label: 0, hint: 0 });
+  const [hintFits, setHintFits] = useState(false);
+  const measure = (key: keyof typeof widths.current) => (e: LayoutChangeEvent) => {
     const width = Math.ceil(e.nativeEvent.layout.width);
-    setWidths((w) => (w[key] === width ? w : { ...w, [key]: width }));
+    if (widths.current[key] === width) return;
+    const next = { ...widths.current, [key]: width };
+    widths.current = next;
+    setHintFits(next.hint > 0 && NEW_TAB_LABEL_X + next.label + CLEANED_HINT_GAP + next.hint <= next.row - CLEANED_HINT_RIGHT);
   };
   const hint = `${cleaned} cleaned`;
-  const hintFits = widths.hint > 0 && NEW_TAB_LABEL_X + widths.label + CLEANED_HINT_GAP + widths.hint <= widths.row - CLEANED_HINT_RIGHT;
   return (
     <View {...hoverProps} onLayout={measure("row")} style={[{ flexDirection: "row", alignItems: "center" }, clipped ? CLIPPED : null]}>
       <View pointerEvents="none" style={MEASURE_OFFSCREEN}>
@@ -834,6 +877,12 @@ const NewTabRow = memo(function NewTabRow({ windowId, shift = null, clip = null 
 });
 
 const UPSELL_MIN = 10;
+const UPSELL_PAD = 10;
+const UPSELL_BORDER = 0.5;
+const UPSELL_ICON = 16;
+const UPSELL_ICON_GAP = 6;
+const UPSELL_BODY = "Ardia can tidy up for you. You can always reopen closed tabs from the ⌄ menu.";
+const upsellText = (width: number) => width - layout.sidebarInset * 2 - (UPSELL_PAD + UPSELL_BORDER) * 2;
 let upsellDeclined = false;
 
 const CleanUpUpsell = memo(function CleanUpUpsell({ windowId, shift }: { windowId: string; shift: Animated.Value | null }) {
@@ -853,7 +902,20 @@ const CleanUpUpsell = memo(function CleanUpUpsell({ windowId, shift }: { windowI
     return everySlowly({ every: 60_000, run: check });
   }, [windowId, off, tabIds, profileId, activeId]);
   const [moved, movedRef] = useShift(shift);
-  if (off || count < UPSELL_MIN) return null;
+  const shown = !off && count >= UPSELL_MIN;
+  useEffect(() => {
+    if (!shown) return;
+    return () => setUpsellShift(windowId, 0);
+  }, [shown, windowId]);
+  const heights = useRef([0, 0, 0, 0]);
+  const measure = (index: number) => (e: LayoutChangeEvent) => {
+    heights.current[index] = e.nativeEvent.layout.height;
+    const [titleMin, bodyMin, titleMax, bodyMax] = heights.current;
+    if (!titleMin || !bodyMin || !titleMax || !bodyMax) return;
+    setUpsellShift(windowId, Math.max(UPSELL_ICON, titleMin) + bodyMin - Math.max(UPSELL_ICON, titleMax) - bodyMax);
+  };
+  if (!shown) return null;
+  const heading = `${count} tabs haven’t been touched in a while`;
   const button = (title: string, onPress: () => void, primary = false) => (
     <Pressable onPress={onPress}>
       {({ pressed }) => (
@@ -877,12 +939,12 @@ const CleanUpUpsell = memo(function CleanUpUpsell({ windowId, shift }: { windowI
     setHidden(true);
   };
   return (
-    <View {...moved} ref={movedRef} style={[{ marginTop: 10, borderRadius: 12, padding: 10, backgroundColor: tokens.groupFill, borderWidth: 0.5, borderColor: tokens.groupStroke, gap: 8 }, moved.style as object]}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Symbol name="wand.and.stars" size={12} color={theme.icon} style={{ width: 16, height: 16 }} />
-        <Text style={{ flex: 1, fontSize: 12, fontWeight: "600", color: theme.textPrimary }}>{count} tabs haven’t been touched in a while</Text>
+    <View {...moved} ref={movedRef} style={[{ marginTop: 10, borderRadius: 12, padding: UPSELL_PAD, backgroundColor: tokens.groupFill, borderWidth: UPSELL_BORDER, borderColor: tokens.groupStroke, gap: 8 }, moved.style as object]}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: UPSELL_ICON_GAP }}>
+        <Symbol name="wand.and.stars" size={12} color={theme.icon} style={{ width: UPSELL_ICON, height: UPSELL_ICON }} />
+        <Text style={{ flex: 1, fontSize: 12, fontWeight: "600", color: theme.textPrimary }}>{heading}</Text>
       </View>
-      <Text style={{ fontSize: 12, color: theme.textSecondary }}>Ardia can tidy up for you. You can always reopen closed tabs from the ⌄ menu.</Text>
+      <Text style={{ fontSize: 12, color: theme.textSecondary }}>{UPSELL_BODY}</Text>
       <View style={{ gap: 6 }}>
         {button("Clean Up Once", () => {
           useBrowser.getState().cleanUpTabs(windowId);
@@ -894,6 +956,16 @@ const CleanUpUpsell = memo(function CleanUpUpsell({ windowId, shift }: { windowI
         })}
         {button("Not Now", dismiss)}
       </View>
+      <Surface hidesAccessibility pointerEvents="none" style={MEASURE_OFFSCREEN}>
+        {[LIVE_MIN, LIVE_MAX].flatMap((width, k) => [
+          <Text key={`title${k}`} onLayout={measure(k * 2)} style={{ width: upsellText(width) - UPSELL_ICON - UPSELL_ICON_GAP, fontSize: 12, fontWeight: "600" }}>
+            {heading}
+          </Text>,
+          <Text key={`body${k}`} onLayout={measure(k * 2 + 1)} style={{ width: upsellText(width), fontSize: 12 }}>
+            {UPSELL_BODY}
+          </Text>,
+        ])}
+      </Surface>
     </View>
   );
 });

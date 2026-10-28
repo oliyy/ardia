@@ -1,12 +1,15 @@
 import { PowerUp } from "@ardia/shaders";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Surface } from "@ardia/shell";
-import { AccessibilityInfo, Animated, StyleSheet, View } from "react-native";
+import { AccessibilityInfo, Animated, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { useShallow } from "zustand/react/shallow";
 import { hex, layout, useTheme } from "../lib/theme";
+import { useBrowser } from "../store/browser";
 import { useWindowId } from "../store/hooks";
 import { useCardAnchors } from "./layout/windowLayout";
 import { springParams } from "./layout/swipeMotion";
 import { NewTabExtras } from "./ntp";
+import { usePendingReleaseNotes, useReleaseNotesPage } from "./ntp/releaseNotes";
 import { useOnboarding } from "./onboarding/state";
 import { Omnibox } from "./Omnibox";
 
@@ -47,6 +50,12 @@ function sameSize(a: Size, b: Size) {
   return a.width === b.width && a.height === b.height;
 }
 
+const HeroOmnibox = memo(Omnibox);
+
+type BasisLayoutEvent = LayoutChangeEvent["nativeEvent"] & { ntpLayoutAccepted?: boolean };
+
+const barBand = (viewWidth: number) => (viewWidth <= 644 ? 0 : viewWidth < 708 ? 1 : viewWidth < 1700 ? 2 : 3);
+
 export function barWidth(viewWidth: number) {
   const content = viewWidth < 708 ? (viewWidth <= 636 ? viewWidth - 20 : 616) : viewWidth < 1700 ? 652 : 774;
   return Math.min(content, viewWidth - 28);
@@ -56,11 +65,23 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
   const theme = useTheme();
   const windowId = useWindowId();
   const onboarding = useOnboarding((s) => s.windowId === windowId);
-  const card = useCardAnchors((s) => s[windowId]);
+  const card = useCardAnchors(
+    useShallow((s) => {
+      const anchor = s[windowId];
+      return anchor ? { width: anchor.width, height: anchor.height } : undefined;
+    }),
+  );
   const [size, setSizeState] = useState<Size | null>(() => (lastSize && (!card || sameSize(lastSize.card, card)) ? lastSize.size : null));
   const setSize = (next: Size) => setSizeState((prev) => (prev && sameSize(prev, next) ? prev : next));
+  const raw = useRef<Size | null>(null);
+  const committedCard = useRef<Size | null>(null);
+  const latch = useRef(false);
+  const [latched, setLatched] = useState(false);
+  useLayoutEffect(() => {
+    committedCard.current = card ?? null;
+  }, [card]);
   useEffect(() => {
-    if (size && card) lastSize = { card: { width: card.width, height: card.height }, size };
+    if (raw.current && card) lastSize = { card: { width: card.width, height: card.height }, size: raw.current };
   }, [size, card?.width, card?.height]);
   const [panelHeight, setPanelHeight] = useState(BAR_HEIGHT);
   const [playIntro] = useState(() => !introPlayed.has(tabId));
@@ -72,6 +93,27 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
   useEffect(() => {
     introPlayed.add(tabId);
   }, [tabId]);
+  const incognito = useBrowser((s) => !!s.windows[windowId]?.incognito);
+  const pendingNotes = usePendingReleaseNotes();
+  const notesPage = useReleaseNotesPage(windowId);
+  const fast = !latched && !((pendingNotes && !incognito && !notesPage) || notesPage);
+  useLayoutEffect(() => {
+    if (!fast && raw.current) setSize(raw.current);
+  }, [fast]);
+  const onRootLayout = (e: LayoutChangeEvent) => {
+    const { layout: next, ntpLayoutAccepted } = e.nativeEvent as BasisLayoutEvent;
+    raw.current = next;
+    const committed = committedCard.current;
+    if (committed) lastSize = { card: { width: committed.width, height: committed.height }, size: next };
+    if (!fast || latch.current) return setSize(next);
+    if (ntpLayoutAccepted === false) {
+      latch.current = true;
+      setLatched(true);
+      return setSize(next);
+    }
+    if (ntpLayoutAccepted !== true) return setSize(next);
+    setSizeState((prev) => (prev && barBand(prev.width) === barBand(next.width) && prev.height === next.height ? prev : next));
+  };
   useEffect(() => {
     if (!playIntro || reduceMotion) return;
     const spring = (value: Animated.Value, delay: number, params: ReturnType<typeof springParams>) =>
@@ -84,7 +126,7 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
     return () => intro.stop();
   }, [playIntro, rise]);
 
-  if (!size) return <View style={{ flex: 1 }} onLayout={(e) => setSize(e.nativeEvent.layout)} />;
+  if (!size) return <View style={{ flex: 1 }} onLayout={onRootLayout} />;
 
   const width = barWidth(size.width);
   const x = Math.max(size.width / 2 - width / 2, 14) + DIA_OFFSET;
@@ -94,7 +136,7 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
   const bar = { x, y: top, width, height: panelHeight };
 
   return (
-    <View style={{ flex: 1 }} onLayout={(e) => setSize(e.nativeEvent.layout)}>
+    <View style={{ flex: 1 }} ntpLayoutBasis={fast ? under : null} onLayout={onRootLayout}>
       {playIntro && theme.powerUpPalette && (
         <PowerUp
           style={StyleSheet.absoluteFill}
@@ -103,10 +145,12 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
           origin={0.5}
           cornerRadius={20}
           halo={bar}
+          haloNtp={fast ? { under, panelHeight } : null}
         />
       )}
       <View
         pointerEvents="none"
+        ntpLayoutRole={fast ? "mark" : null}
         style={{
           position: "absolute",
           left: size.width / 2 + DIA_OFFSET - MARK_SIZE / 2,
@@ -129,7 +173,7 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
           />
         ))}
       </View>
-      <View onLayout={(e) => setPanelHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", left: x, top, width }}>
+      <View ntpLayoutRole={fast ? "bar" : null} onLayout={(e) => setPanelHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", left: x, top, width }}>
         <Surface style={StyleSheet.absoluteFill} fill="#00000000" cornerRadius={20} shadowColor="#000000" shadowOpacity={0.08} shadowRadius={2} shadowOffset={[0, 0.5]} />
         <Surface style={StyleSheet.absoluteFill} fill="#00000000" cornerRadius={20} shadowColor="#000000" shadowOpacity={0.04} shadowRadius={1} shadowOffset={[0, 2]} />
         <Surface
@@ -138,10 +182,10 @@ export function NewTabPage({ tabId, toolbar = true }: { tabId: string; toolbar?:
           borderColor={hex(theme.ntpBarBorder)}
           borderWidth={BAR_BORDER}
         >
-          {onboarding ? <View style={{ height: BAR_HEIGHT - 2 * BAR_BORDER }} /> : <Omnibox variant="hero" tabId={tabId} />}
+          {onboarding ? <View style={{ height: BAR_HEIGHT - 2 * BAR_BORDER }} /> : <HeroOmnibox variant="hero" tabId={tabId} />}
         </Surface>
       </View>
-      <NewTabExtras size={size} bar={bar} />
+      <NewTabExtras size={size} bar={bar} native={fast} />
     </View>
   );
 }

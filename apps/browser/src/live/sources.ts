@@ -142,15 +142,35 @@ const confluence: LiveSource = {
 
 type GoogleTokens = { access_token: string; refresh_token: string; expires_at: number; client_secret: string };
 
+let googleEpoch = 0;
+let googleQueue: Promise<unknown> = Promise.resolve();
+
+function googleSerial<T>(task: () => Promise<T>): Promise<T> {
+  const run = googleQueue.then(task);
+  googleQueue = run.catch(() => undefined);
+  return run;
+}
+
+const googleChanged = () => new LiveError("signedOut", "Google Drive account changed");
+
 async function googleAccessToken(): Promise<string> {
-  const stored = JSON.parse(await secret("gdrive")) as GoogleTokens;
+  const epoch = googleEpoch;
+  const raw = await googleSerial(async () => (epoch === googleEpoch ? getSecret("gdrive") : null));
+  if (epoch !== googleEpoch) throw googleChanged();
+  if (!raw) throw new LiveError(live().accounts.gdrive ? "signedOut" : "notConfigured", "Not signed in");
+  const stored = JSON.parse(raw) as GoogleTokens;
   if (stored.expires_at > Date.now() + 60_000) return stored.access_token;
   const json = await request<{ access_token: string; expires_in: number }>(endpoints.googleToken, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form({ client_id: live().config.googleClientId, client_secret: stored.client_secret, refresh_token: stored.refresh_token, grant_type: "refresh_token" }),
   });
-  await setSecret("gdrive", JSON.stringify({ ...stored, access_token: json.access_token, expires_at: Date.now() + json.expires_in * 1000 }));
+  const saved = await googleSerial(async () => {
+    if (epoch !== googleEpoch) return false;
+    await setSecret("gdrive", JSON.stringify({ ...stored, access_token: json.access_token, expires_at: Date.now() + json.expires_in * 1000 }));
+    return true;
+  });
+  if (!saved || epoch !== googleEpoch) throw googleChanged();
   return json.access_token;
 }
 
@@ -234,6 +254,7 @@ export async function connectConfluence(site: string, email: string, token: stri
 }
 
 export async function connectGoogle(clientId: string, clientSecret: string, code: string, verifier: string, redirectUri: string) {
+  const intent = ++googleEpoch;
   const json = await request<{ access_token: string; refresh_token?: string; expires_in: number }>(endpoints.googleToken, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -241,15 +262,31 @@ export async function connectGoogle(clientId: string, clientSecret: string, code
   });
   if (!json.refresh_token) throw new LiveError("signedOut", "Google didn't return a refresh token");
   const tokens: GoogleTokens = { access_token: json.access_token, refresh_token: json.refresh_token, expires_at: Date.now() + json.expires_in * 1000, client_secret: clientSecret };
-  await setSecret("gdrive", JSON.stringify(tokens));
   const about = await request<{ user?: { displayName: string; emailAddress: string; photoLink?: string } }>(`${endpoints.drive}/about?fields=user`, {
     headers: { Authorization: `Bearer ${json.access_token}` },
   }).catch(() => null);
-  updateConfig({ googleClientId: clientId });
-  setAccount("gdrive", account(about?.user?.emailAddress ?? "Google Drive", about?.user?.displayName ?? null, about?.user?.photoLink ?? null));
+  const committed = await googleSerial(async () => {
+    if (intent !== googleEpoch) return false;
+    const epoch = ++googleEpoch;
+    await setSecret("gdrive", JSON.stringify(tokens));
+    if (epoch !== googleEpoch) return false;
+    updateConfig({ googleClientId: clientId });
+    setAccount("gdrive", account(about?.user?.emailAddress ?? "Google Drive", about?.user?.displayName ?? null, about?.user?.photoLink ?? null));
+    return true;
+  });
+  if (!committed) throw googleChanged();
+}
+
+function disconnectGoogle(): Promise<void> {
+  googleEpoch++;
+  return googleSerial(async () => {
+    await deleteSecret("gdrive");
+    setAccount("gdrive", null);
+  });
 }
 
 export async function disconnect(source: LiveSourceId) {
+  if (source === "gdrive") return disconnectGoogle();
   await deleteSecret(source);
   setAccount(source, null);
 }

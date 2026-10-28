@@ -17,6 +17,12 @@
 #include <mach/mach.h>
 #include <os/lock.h>
 
+static void ACCommitPendingPresentation(void) {
+  Class view = NSClassFromString(@"RCTView");
+  SEL commit = NSSelectorFromString(@"ardia_commitPresentation");
+  if ([view respondsToSelector:commit]) ((void (*)(id, SEL))objc_msgSend)(view, commit);
+}
+
 @interface ACEarlyShown : NSObject
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, copy) NSString *appWindow;
@@ -1279,6 +1285,7 @@ CGImageRef TakePrefetched(NSString *windowId) {
                                                                    DropPictures(closing);
                                                                    Forget(closing);
                                                                  }];
+  ACCommitPendingPresentation();
   [window makeKeyAndOrderFront:nil];
   [window displayIfNeeded];
   [CATransaction flush];

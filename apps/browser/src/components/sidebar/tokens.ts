@@ -138,7 +138,10 @@ export const SIDEBAR_MIN_WIDTH = 160;
 export const SIDEBAR_MAX_WIDTH = 500;
 
 export function useSidebarWidth(windowId: string): number {
+  return useSidebarWidthOf(windowId, (width) => width);
+}
+
+export function useSidebarWidthOf<T>(windowId: string, of: (width: number) => T): T {
   const saved = useBrowser((s) => s.settings.sidebarWidth ?? layout.sidebarWidth);
-  const dragging = useSidebarUi((u) => u.dragWidth[windowId]);
-  return dragging ?? saved;
+  return useSidebarUi((u) => of(u.dragWidth[windowId] ?? saved));
 }

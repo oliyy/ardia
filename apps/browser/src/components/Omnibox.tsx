@@ -151,7 +151,7 @@ export function Omnibox({
     const unregister = registerHeroBar(windowId, tabId, focus);
     return () => {
       unregister();
-      saveNtpQuery(tabId, snapshot.current);
+      saveNtpQuery(tabId, snapshot.current && { ...snapshot.current, selection: selection.current });
     };
   }, [hero, windowId, tabId]);
 

@@ -2,6 +2,7 @@ import { listExtensions, stepPager } from "@ardia/ardiacore";
 import { confirm, focusWindow } from "@ardia/shell";
 import { pageToProfile } from "../components/layout/profilePager";
 import { profileNames, requestCreateProfile, type CreateProfilePreset } from "../components/profiles/CreateProfile";
+import { endResize } from "../components/sidebar/state";
 import { useBrowser, type CreateWindowOptions } from "../store/browser";
 import { rootOf } from "../store/groups";
 import { closesWindow, engineProfile, isIncognitoProfile, plural, resolveWindowId } from "../store/model";
@@ -130,12 +131,14 @@ export function moveTabToWindow(tabId: string, target: string) {
 }
 
 export function switchProfile(windowId: string, profileId: string, animated = false) {
+  endResize(windowId);
   if (animated) pageToProfile(windowId, profileId);
   else store().switchProfile(windowId, profileId);
 }
 
 export function cycleProfile(windowId: string, delta: 1 | -1) {
   if (!cycleTarget(windowId, delta)) return;
+  endResize(windowId);
   void stepPager(windowId, delta, true, store().profileOrder.join("\n")).then((ok) => ok || cycleFromStore(windowId, delta));
 }
 

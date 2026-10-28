@@ -180,9 +180,10 @@ final class TabRowBackground: ExpoView {
     background.backgroundColor = fill
     background.opacity = windowActive ? 1 : Self.inactiveOpacity
     background.cornerRadius = radius
+    background.shadowOpacity = current ? 1 : 0
     background.shadowColor = current ? palette.selectedShadow : CGColor.clear
     background.shadowOffset = CGSize(width: 0, height: flipped ? 1 : -1)
-    background.shadowPath = CGPath(roundedRect: background.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    background.shadowPath = current ? CGPath(roundedRect: background.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil) : nil
 
     let iconFrame = CGRect(x: bounds.minX, y: bounds.minY, width: 2 * iconMinX + iconWidth, height: bounds.height)
     if Self.isValidFrame(iconFrame) { iconRegion.frame = iconFrame }

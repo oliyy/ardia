@@ -19,7 +19,7 @@ const rep = reporter(join(scratch, "shortcuts-test.log"), { name: "shortcuts-tes
 const server = createServer((req, res) => {
   const name = new URL(req.url, "http://x").search.slice(1) || "page";
   res.writeHead(200, { "content-type": "text/html" });
-  res.end(`<!doctype html><title>${name}</title><body style="font:20px system-ui"><h1>${name}</h1><input id=f value="hello field" style="position:fixed;left:20px;top:120px;width:300px;height:30px">`);
+  res.end(`<!doctype html><title>${name}</title><body style="font:20px system-ui"><h1>${name}</h1><input id=f value="hello field" style="position:fixed;left:400px;top:120px;width:300px;height:30px">`);
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const pages = `http://127.0.0.1:${server.address().port}`;
@@ -400,7 +400,7 @@ const resetToPageField = async (value, selection) => {
     for (const id of w.tabIds) if (!${JSON.stringify(ids)}.includes(id)) s.closeTab(id);
     s.setFind("t3", { open: false }); s.activate("t3"); return 1;`);
   await sleep(500);
-  await ac(`return ac.shell.devClick("w1", { in: "page", x: 60, y: 135, wait: 150 });`);
+  await ac(`return ac.shell.devClick("w1", { in: "page", x: 440, y: 135, wait: 150 });`);
   await pageField(`(f.value = ${JSON.stringify(value)}, f.focus(), f.setSelectionRange(${selection[0]}, ${selection[1]}), true)`);
   await sleep(100);
 };
@@ -507,7 +507,7 @@ for (const busy of [0, 120]) {
   await cdp("?t3", "(window.qUps = 0, document.getElementById('f').addEventListener('keyup', (e) => e.key === 'q' && window.qUps++), true)");
   await postKeys([keyPress("l", 37), { ...keyPress("q", 12, 30, []), phase: "down" }]);
   await sleep(100);
-  await ac(`return ac.shell.devClick("w1", { in: "page", x: 60, y: 135, wait: 100 });`);
+  await ac(`return ac.shell.devClick("w1", { in: "page", x: 440, y: 135, wait: 100 });`);
   await postKeys([{ ...keyPress("q", 12, 0, []), phase: "up" }]);
   await sleep(500);
   const ups = await cdp("?t3", "window.qUps");
@@ -521,7 +521,7 @@ for (const busy of [0, 120]) {
   await cdp("?t3", "(window.nextUps = 0, window.nextDowns = 0, document.getElementById('f').addEventListener('keyup', (e) => e.key === 'q' && window.nextUps++), document.getElementById('f').addEventListener('keydown', (e) => e.key === 'q' && window.nextDowns++), true)");
   await postKeys([keyPress("l", 37), { ...keyPress("q", 12, 30, []), phase: "down" }]);
   await sleep(100);
-  await ac(`return ac.shell.devClick("w1", { in: "page", x: 60, y: 135, wait: 100 });`);
+  await ac(`return ac.shell.devClick("w1", { in: "page", x: 440, y: 135, wait: 100 });`);
   await postKeys([keyPress("q", 12, 0, [])]);
   await sleep(400);
   const [downs, ups] = [await cdp("?t3", "window.nextDowns"), await cdp("?t3", "window.nextUps")];
@@ -547,7 +547,7 @@ for (const [name, keys, busy, firstExpected] of handoffEnds) {
   await postKeys(keys);
   await sleep(1200);
   await ac(`const s = ac.store.getState(); if (s.windowUi.w1?.panel.open) s.closePanel("w1"); return 1;`);
-  if (name.startsWith("⌘L ⌘V")) await ac(`return ac.shell.devClick("w1", { in: "page", x: 60, y: 135, wait: 150 });`);
+  if (name.startsWith("⌘L ⌘V")) await ac(`return ac.shell.devClick("w1", { in: "page", x: 440, y: 135, wait: 150 });`);
   const active = await activeId();
   const first = await pastesIn(active);
   const strays = await pastesElsewhere(active);

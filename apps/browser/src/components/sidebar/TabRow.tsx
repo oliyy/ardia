@@ -26,6 +26,8 @@ import { TabIcon } from "./TabIcon";
 import { TabBadges } from "../media/TabBadges";
 import { ARC_SELECTED_INACTIVE, arcSelectedLabel, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 
+const AnimatedSurface = Animated.createAnimatedComponent(Surface);
+
 export const clickMods = (e: GestureResponderEvent) => {
   const n = e.nativeEvent as unknown as { metaKey?: boolean; shiftKey?: boolean; altKey?: boolean };
   return { metaKey: !!n.metaKey, shiftKey: !!n.shiftKey, altKey: !!n.altKey };
@@ -39,7 +41,7 @@ export const TabRowItem = memo(function TabRowItem({ tabId, section, motion = nu
   const { wrapper, handle, dragging } = useDragItem(`t:${tabId}`, { kind: "row", tabIds: [tabId], section }, selection, motion?.clip);
   const onto = useDropOnto(`t:${tabId}`);
   return (
-    <Animated.View ref={wrapper.ref} style={wrapper.style} {...handle}>
+    <Animated.View ref={wrapper.ref} presentationGate style={wrapper.style} {...handle}>
       <TabRow tabId={tabId} onto={onto} shift={motion?.shift ?? null} dragging={dragging} />
     </Animated.View>
   );
@@ -117,88 +119,90 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
           >
             {({ pressed }) => (
               <PressFeedback pressed={pressed}>
-                <Surface
-                  fill={arcPaint ? undefined : hex(onto || (!active && pressed) ? theme.tabPressed : fill)}
-                  inactiveFillOpacity={arcPaint ? undefined : arcLabel && active && !onto ? ARC_SELECTED_INACTIVE : undefined}
-                  cornerRadius={layout.rowRadius}
-                  borderWidth={border}
-                  borderColor={border ? hex(tokens.multiSelectedStroke) : undefined}
-                  borderColors={!arcPaint && active ? theme.tabSelectedBorder.map(hex) : undefined}
-                  shadowColor={!arcPaint && active ? hex(theme.tabSelectedShadow) : undefined}
-                  shadowOpacity={!arcPaint && active ? 1 : 0}
-                  shadowRadius={theme.tabSelectedShadowRadius}
-                  shadowOffset={[0, 0.5]}
-                  style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding - border, paddingRight: 6 - border }}
-                >
-                  {arcPaint ? (
-                    <ArcTabRowBackground
-                      dark={theme.dark}
-                      current={active}
-                      contentVisible={visible}
-                      multiSelected={selected}
-                      hovered={hovered}
-                      canReset={resettable}
-                      iconMinX={layout.rowPadding}
-                      iconWidth={ICON_WIDTH}
-                      regionHovered={region.regionHovered}
-                      regionPressed={region.regionPressed}
-                      pointerEvents="none"
-                      style={StyleSheet.absoluteFill}
-                    />
-                  ) : null}
-                  {resettable ? (
-                    <View {...backToPin.hoverProps}>
-                      <Pressable onPress={() => useBrowser.getState().returnToPinnedUrl(tab.id)} tooltip="Back to Pinned URL (⌘↩)">
-                        {resetting ? (
-                          <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
-                            <Symbol name="arrow.uturn.backward" size={11} weight="semibold" color={active ? theme.tabSelectedText : theme.textTab} style={{ width: 16, height: 16 }} />
-                          </View>
-                        ) : (
-                          <View>
-                            <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} />
-                            <TabBadges tabId={tab.id} />
-                          </View>
-                        )}
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <View>
-                      <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} />
-                      <TabBadges tabId={tab.id} />
-                    </View>
-                  )}
-                  {(playingAudio || tab.muted) && (
-                    <Pressable onPress={() => toggleMute(tab.id)} style={{ marginLeft: 6 }} tooltip={tab.muted ? "Unmute Site" : "Mute Site"}>
-                      <Symbol name={tab.muted ? "speaker.slash" : "speaker.wave.2"} size={12} color={theme.textTab} style={{ width: 18, height: 16 }} />
-                    </Pressable>
-                  )}
-                  {renaming ? (
-                    <RenameField
-                      initial={tab.customTitle ?? tab.title}
-                      placeholder={tab.title || "Tab name"}
-                      color={(active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textPrimary)}
-                      fontSize={layout.rowFontSize}
-                      gap={layout.rowLabelGap}
-                      arc={arcLayout}
-                      current={active}
-                      onDone={(text) => (text === null ? endRename({ kind: "tab", id: tabId }) : commitRename({ kind: "tab", id: tabId }, text))}
-                    />
-                  ) : (
-                    <FadeLabel
-                      text={title}
-                      fontSize={layout.rowFontSize}
-                      color={arcTitle ?? (active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textTab)}
-                      style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }}
-                    />
-                  )}
-                  <HoverSlot
-                    hovered={hovered && !renaming}
-                    width={22}
-                    hover={<IconButton icon={closeControl.icon} size={10} weight="semibold" box={22} radius={6} onPress={() => pressTabClose(tab.id)} tooltip={closeControl.tooltip} />}
+                {(motion) => (
+                  <AnimatedSurface
+                    fill={arcPaint ? undefined : hex(onto || (!active && pressed) ? theme.tabPressed : fill)}
+                    inactiveFillOpacity={arcPaint ? undefined : arcLabel && active && !onto ? ARC_SELECTED_INACTIVE : undefined}
+                    cornerRadius={layout.rowRadius}
+                    borderWidth={border}
+                    borderColor={border ? hex(tokens.multiSelectedStroke) : undefined}
+                    borderColors={!arcPaint && active ? theme.tabSelectedBorder.map(hex) : undefined}
+                    shadowColor={!arcPaint && active ? hex(theme.tabSelectedShadow) : undefined}
+                    shadowOpacity={!arcPaint && active ? 1 : 0}
+                    shadowRadius={theme.tabSelectedShadowRadius}
+                    shadowOffset={[0, 0.5]}
+                    style={[{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding - border, paddingRight: 6 - border }, motion]}
                   >
-                    {loading && <ActivitySpinner style={{ width: 12, height: 12, marginRight: 2 }} />}
-                  </HoverSlot>
-                </Surface>
+                    {arcPaint ? (
+                      <ArcTabRowBackground
+                        dark={theme.dark}
+                        current={active}
+                        contentVisible={visible}
+                        multiSelected={selected}
+                        hovered={hovered}
+                        canReset={resettable}
+                        iconMinX={layout.rowPadding}
+                        iconWidth={ICON_WIDTH}
+                        regionHovered={region.regionHovered}
+                        regionPressed={region.regionPressed}
+                        pointerEvents="none"
+                        style={StyleSheet.absoluteFill}
+                      />
+                    ) : null}
+                    {resettable ? (
+                      <View {...backToPin.hoverProps}>
+                        <Pressable onPress={() => useBrowser.getState().returnToPinnedUrl(tab.id)} tooltip="Back to Pinned URL (⌘↩)">
+                          {resetting ? (
+                            <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
+                              <Symbol name="arrow.uturn.backward" size={11} weight="semibold" color={active ? theme.tabSelectedText : theme.textTab} style={{ width: 16, height: 16 }} />
+                            </View>
+                          ) : (
+                            <View>
+                              <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} />
+                              <TabBadges tabId={tab.id} />
+                            </View>
+                          )}
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View>
+                        <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} />
+                        <TabBadges tabId={tab.id} />
+                      </View>
+                    )}
+                    {(playingAudio || tab.muted) && (
+                      <Pressable onPress={() => toggleMute(tab.id)} style={{ marginLeft: 6 }} tooltip={tab.muted ? "Unmute Site" : "Mute Site"}>
+                        <Symbol name={tab.muted ? "speaker.slash" : "speaker.wave.2"} size={12} color={theme.textTab} style={{ width: 18, height: 16 }} />
+                      </Pressable>
+                    )}
+                    {renaming ? (
+                      <RenameField
+                        initial={tab.customTitle ?? tab.title}
+                        placeholder={tab.title || "Tab name"}
+                        color={(active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textPrimary)}
+                        fontSize={layout.rowFontSize}
+                        gap={layout.rowLabelGap}
+                        arc={arcLayout}
+                        current={active}
+                        onDone={(text) => (text === null ? endRename({ kind: "tab", id: tabId }) : commitRename({ kind: "tab", id: tabId }, text))}
+                      />
+                    ) : (
+                      <FadeLabel
+                        text={title}
+                        fontSize={layout.rowFontSize}
+                        color={arcTitle ?? (active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textTab)}
+                        style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }}
+                      />
+                    )}
+                    <HoverSlot
+                      hovered={hovered && !renaming}
+                      width={22}
+                      hover={<IconButton icon={closeControl.icon} size={10} weight="semibold" box={22} radius={6} onPress={() => pressTabClose(tab.id)} tooltip={closeControl.tooltip} />}
+                    >
+                      {loading && <ActivitySpinner style={{ width: 12, height: 12, marginRight: 2 }} />}
+                    </HoverSlot>
+                  </AnimatedSurface>
+                )}
               </PressFeedback>
             )}
           </Pressable>
@@ -277,7 +281,7 @@ export const SplitRowItem = memo(function SplitRowItem({ splitId, section, paren
   const [moved, movedRef] = useShift(motion?.shift ?? null, useCallback((v: View | null) => registerRow(windowId, `s:${splitId}`, hidden ? null : v), [windowId, splitId, hidden]));
   if (tabIds.length < 2) return null;
   return (
-    <Animated.View ref={wrapper.ref} style={wrapper.style} {...handle}>
+    <Animated.View ref={wrapper.ref} presentationGate style={wrapper.style} {...handle}>
       <View {...moved} ref={movedRef} {...hoverProps} style={moved.style as object}>
         <Surface
           fill={hex(active ? tokens.selectedFill : hovered ? theme.tabHover : "rgba(0,0,0,0)")}
@@ -310,19 +314,24 @@ function SplitPane({ tabId, windowId }: { tabId: string; windowId: string }) {
         <Pressable onPress={(e) => clickTab(windowId, tabId, clickMods(e))}>
           {({ pressed }) => (
             <PressFeedback pressed={pressed}>
-              <View
-                style={{
-                  height: layout.rowHeight - 6,
-                  borderRadius: 7,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  paddingLeft: 6,
-                  backgroundColor: active ? undefined : pressed ? theme.tabPressed : hovered ? theme.rowHover : undefined,
-                }}
-              >
-                <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} size={14} />
-                <FadeLabel text={tabTitle(tab)} fontSize={12} color={(active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textTab)} style={{ flex: 1, height: 16, marginLeft: 5 }} />
-              </View>
+              {(motion) => (
+                <Animated.View
+                  style={[
+                    {
+                      height: layout.rowHeight - 6,
+                      borderRadius: 7,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingLeft: 6,
+                      backgroundColor: active ? undefined : pressed ? theme.tabPressed : hovered ? theme.rowHover : undefined,
+                    },
+                    motion,
+                  ]}
+                >
+                  <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} size={14} />
+                  <FadeLabel text={tabTitle(tab)} fontSize={12} color={(active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textTab)} style={{ flex: 1, height: 16, marginLeft: 5 }} />
+                </Animated.View>
+              )}
             </PressFeedback>
           )}
         </Pressable>

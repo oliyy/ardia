@@ -52,11 +52,15 @@ type DockLink = { registerEndpoint: RegisterEndpoint; leading: CardLeading | nul
 type CardShift = { placed: boolean; attach: (view: View | null) => void; link: DockLink };
 const UNDOCKED: DockLink = { registerEndpoint: () => IGNORE, leading: null, shift: new Animated.Value(0), interrupt: IGNORE };
 const CardShiftContext = createContext<CardShift>({ placed: false, attach: IGNORE, link: UNDOCKED });
+const DockReceiptContext = createContext<number | undefined>(undefined);
+
+export const useDockReceipt = () => useContext(DockReceiptContext);
 
 function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: boolean, edge: number, span: number, tabDragging: boolean) {
   const windowId = useWindowId();
   const dock = useRef(new Animated.Value(open ? 1 : 0)).current;
   const base = useRef(new Animated.Value(open && placed ? -1 : 0)).current;
+  const reach = useRef(new Animated.Value(placed ? span : 0)).current;
   const [wide, setWide] = useState(!(open && placed));
   const was = useRef(open);
   const generation = useRef(0);
@@ -168,6 +172,7 @@ function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: b
     });
   }, [open]);
   useLayoutEffect(() => {
+    reach.setValue(placed ? span : 0);
     if (dockMoving(windowId)) steps.settle(true);
     else steps.land(was.current);
   }, [placed, span]);
@@ -181,7 +186,7 @@ function useSidebarDock(open: boolean, animate: boolean, arc: boolean, placed: b
     },
     [],
   );
-  const shift = useMemo(() => Animated.multiply(Animated.add(dock, base), placed ? span : 0), [dock, base, placed, span]);
+  const shift = useMemo(() => Animated.multiply(Animated.add(dock, base), reach), [dock, base, reach]);
   const card = useMemo(
     () => ({
       placed,
@@ -217,7 +222,9 @@ export function DockedLayout({
         ] as const,
     ),
   );
-  const width = useSidebarUi((u) => u.dragWidth[windowId]) ?? savedWidth;
+  const [dragged, receipt] = useSidebarUi(useShallow((u) => [u.dragWidth[windowId], u.dragReceipt[windowId]] as const));
+  const width = dragged ?? savedWidth;
+  const resizing = dragged !== undefined;
   const arc = addressBar && !topTabs && switchOn("sidebarSlide");
   const lights = addressBar && !topTabs ? ARC_LIGHTS_CENTER : LIGHTS_CENTER;
   const tabDragging = useTabDrag((d) => d.windowId === windowId && d.tabIds.length > 0);
@@ -240,9 +247,9 @@ export function DockedLayout({
         }
       >
         {!fullscreen && <WindowDragRegion style={StyleSheet.absoluteFill} />}
-        {children}
+        <DockReceiptContext.Provider value={receipt}>{children}</DockReceiptContext.Provider>
       </View>
-      {!topTabs && <SidebarDock dock={dock} open={open} width={width} fullscreen={fullscreen} arc={arc} lights={lights} />}
+      {!topTabs && <SidebarDock dock={dock} open={open} width={width} resizing={resizing} receipt={receipt} fullscreen={fullscreen} arc={arc} lights={lights} />}
     </CardShiftContext.Provider>
   );
 }
@@ -275,6 +282,8 @@ function SidebarDock({
   dock,
   open,
   width,
+  resizing,
+  receipt,
   fullscreen,
   arc,
   lights,
@@ -282,6 +291,8 @@ function SidebarDock({
   dock: Animated.Value;
   open: boolean;
   width: number;
+  resizing: boolean;
+  receipt: number | undefined;
   fullscreen: boolean;
   arc: boolean;
   lights: readonly [number, number];
@@ -334,10 +345,10 @@ function SidebarDock({
   const sidebar = useMemo(
     () => (
       <ProfileSwipe>
-        <Sidebar width={width} />
+        <Sidebar width={width} resizing={resizing} receipt={receipt} />
       </ProfileSwipe>
     ),
-    [width],
+    [width, resizing, receipt],
   );
 
   const leaveStrip = (e: { nativeEvent: { clientX: number; clientY: number } }) => {

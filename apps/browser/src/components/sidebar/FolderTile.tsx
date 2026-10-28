@@ -12,6 +12,7 @@ import { dismissHover, useRowHover } from "./hover";
 import { registerRow } from "./state";
 import { TabIcon } from "./TabIcon";
 import { FolderDropRing, RestingTile, TileFace, useSlotPosition } from "./TileFace";
+import type { TileWidth } from "./tileWidth";
 import { closedByPress, openTileFolderMenu, toggleFolderPanel, useFolderPanel } from "./tileFolderUi";
 
 const MOSAIC_CELL = 9;
@@ -19,7 +20,7 @@ const MOSAIC_GAP = 2;
 const MOSAIC_PAD = 3.5;
 const MOSAIC = MOSAIC_PAD * 2 + MOSAIC_CELL * 2 + MOSAIC_GAP;
 
-export const FolderTile = memo(function FolderTile({ folderId, width, sliding, x, y }: { folderId: string; width: number; sliding: boolean; x: number; y: number }) {
+export const FolderTile = memo(function FolderTile({ folderId, grid, sliding, column, row }: { folderId: string; grid: TileWidth; sliding: boolean; column: number; row: number }) {
   const theme = useTheme();
   const windowId = useWindowId();
   const members = useBrowser(useShallow((s) => folderMembers(s, windowId, folderId)));
@@ -31,7 +32,7 @@ export const FolderTile = memo(function FolderTile({ folderId, width, sliding, x
   const { hovered, hoverProps } = useRowHover(windowId, { kind: "folder", id: folderId });
   const { wrapper, handle, dragging } = useDragItem(`tf:${folderId}`, { kind: "tile", tabIds: members, section: "tiles", folderId });
   const target = useFolderTarget(`tf:${folderId}`);
-  const position = useSlotPosition(x, y, width, sliding, dragging);
+  const position = useSlotPosition(column, row, grid, sliding, dragging);
   const pressedAt = useRef<number | undefined>(undefined);
   if (!members.length) return null;
   const glyph = <Symbol name="folder.fill" size={7} color={theme.textSecondary} style={{ position: "absolute", bottom: 3, right: 4, width: 10, height: 9 }} />;
@@ -50,9 +51,9 @@ export const FolderTile = memo(function FolderTile({ folderId, width, sliding, x
           >
             {({ pressed }) =>
               shown ? (
-                <TileFace tabId={shown} width={width} active selected={false} hovered={hovered} pressed={pressed} badge={glyph} />
+                <TileFace tabId={shown} width={grid} active selected={false} hovered={hovered} pressed={pressed} badge={glyph} />
               ) : (
-                <RestingTile width={width} selected={open} hovered={hovered} pressed={pressed}>
+                <RestingTile width={grid} selected={open} hovered={hovered} pressed={pressed}>
                   <FolderMosaic tabIds={members} />
                 </RestingTile>
               )

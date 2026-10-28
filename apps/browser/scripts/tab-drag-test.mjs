@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 import { launch, reporter, session, sleep } from "../../../scripts/lib/instance.mjs";
+import { TILE_GAP } from "../src/components/sidebar/pinZone.ts";
 
 const args = process.argv.slice(2);
 const appArg = args.find((a) => !a.startsWith("--"));
@@ -514,7 +515,7 @@ try {
     assert.ok(folder, "a folder tile");
     assert.deepEqual(after.filter((t) => t.section === "tiles").map((t) => (t.folder ? "folder" : t.key)), order, "in the target's place");
     const row = after.filter((t) => t.section === "tiles" && Math.abs(t.y - folder.y) < 2).sort((p, q) => p.x - q.x);
-    row.slice(1).forEach((t, i) => assert.equal(t.x - (row[i].x + row[i].w), 6, `6 pt gaps: ${JSON.stringify(row.map((r) => [r.x, r.w]))}`));
+    row.slice(1).forEach((t, i) => assert.equal(t.x - (row[i].x + row[i].w), TILE_GAP, `${TILE_GAP} pt gaps: ${JSON.stringify(row.map((r) => [r.x, r.w]))}`));
   });
 
   await check("sidebar: a tile let go on a folder joins it at once; passing over a tile's edge only reorders", async () => {
@@ -740,22 +741,26 @@ try {
   });
 
   await check("file drop: a finished download dragged from the Downloads popover opens in the tab list", async () => {
-    await run(`ac.store.setState({ downloads: [{ id: "dl-drop", url: "https://example.com/downloaded.pdf", filename: "downloaded.pdf", path: ${JSON.stringify(download)}, state: "finished", paused: false, received: 10, total: 10, speed: 0, mimeType: "application/pdf" }] });
-      st().setDownloadsOpen("w1", true); return settle(900);`);
-    const spot = await run(`return win("w1").then((n) => { const pts = []; for (let y = 30; y < 420; y += 6) for (let x = 20; x < 700; x += 12) pts.push([x, y]);
-      return Promise.all(pts.map(([x, y]) => C.devWindow(n, "hit:" + x + "," + y).then((h) => (/FileDragView/.test(h) ? [x, y] : null)))).then((hits) => hits.filter(Boolean)); });`);
-    assert.ok(spot.length, "a download row in the popover");
-    const [sx, sy] = spot[Math.floor(spot.length / 2)];
-    const dragged = await run(`return act("w1", "drag:${sx},${sy};${sx + 8},${sy + 6};${sx + 60},${sy + 160}").then(() => settle(900)).then(() => ac.shell.devFileDrag.lastFileDrag());`);
-    assert.deepEqual(dragged, [download], "the row starts a file drag");
-    await run(`st().setDownloadsOpen("w1", false); return settle(600);`);
-    const rows = await listRows();
-    const b = rows[1];
-    const x = Math.round(b.x + b.w / 2);
-    const out = await fileDrop([[x, b.y - 6], [x, b.y + 3]], { fileDrag: true });
-    assert.deepEqual(out.added.map((a) => a.url), [fileUrl(download)]);
-    assert.equal(out.order[out.order.indexOf(b.id) - 1], out.added[0].id);
-    await closeAdded(out);
+    try {
+      await run(`ac.store.setState({ downloads: [{ id: "dl-drop", url: "https://example.com/downloaded.pdf", filename: "downloaded.pdf", path: ${JSON.stringify(download)}, state: "finished", paused: false, received: 10, total: 10, speed: 0, mimeType: "application/pdf" }] });
+        st().setDownloadsOpen("w1", true); return settle(900);`);
+      const spot = await run(`return win("w1").then((n) => { const pts = []; for (let y = 30; y < st().windows.w1.frame[3]; y += 6) for (let x = 20; x < 700; x += 12) pts.push([x, y]);
+        return Promise.all(pts.map(([x, y]) => C.devWindow(n, "hit:" + x + "," + y).then((h) => (/FileDragView/.test(h) ? [x, y] : null)))).then((hits) => hits.filter(Boolean)); });`);
+      assert.ok(spot.length, "a download row in the popover");
+      const [sx, sy] = spot[Math.floor(spot.length / 2)];
+      const dragged = await run(`return act("w1", "drag:${sx},${sy};${sx + 8},${sy + 6};${sx + 60},${sy + 160}").then(() => settle(900)).then(() => ac.shell.devFileDrag.lastFileDrag());`);
+      assert.deepEqual(dragged, [download], "the row starts a file drag");
+      await run(`st().setDownloadsOpen("w1", false); return settle(600);`);
+      const rows = await listRows();
+      const b = rows[1];
+      const x = Math.round(b.x + b.w / 2);
+      const out = await fileDrop([[x, b.y - 6], [x, b.y + 3]], { fileDrag: true });
+      assert.deepEqual(out.added.map((a) => a.url), [fileUrl(download)]);
+      assert.equal(out.order[out.order.indexOf(b.id) - 1], out.added[0].id);
+      await closeAdded(out);
+    } finally {
+      await run(`st().setDownloadsOpen("w1", false); ac.store.setState((s) => ({ downloads: s.downloads.filter((d) => d.id !== "dl-drop") })); return settle(600);`);
+    }
   });
 
   await check("file drop: a file dropped on the top strip opens where the incoming gap was", async () => {

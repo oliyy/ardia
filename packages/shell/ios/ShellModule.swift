@@ -685,16 +685,42 @@ public class FadeLabelModule: Module {
 }
 
 final class FadeLabel: ExpoView {
-  private let field = NSTextField(labelWithString: "")
-  private let fade = CAGradientLayer()
+  private enum FieldAnchor {
+    case stretch
+    case leading
+    case trailing
+  }
 
-  var text = "" { didSet { update() } }
+  private static let rightToLeftScalars: [ClosedRange<UInt32>] = [
+    0x0590...0x08FF, 0xFB1D...0xFDFF, 0xFE70...0xFEFF, 0x10800...0x10FFF, 0x1E800...0x1EFFF,
+  ]
+  private static let bidiControlScalars: Set<UInt32> = [
+    0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069,
+  ]
+
+  private let field = NSTextField(labelWithString: "")
+  private let label = FadeLabelText()
+  private let fade = CAGradientLayer()
+  private var fitting = NSSize.zero
+  private var anchor = FieldAnchor.stretch
+  private weak var measuredWindow: NSWindow?
+  private var measuredScale: CGFloat = 0
+
+  var text = "" {
+    didSet {
+      update()
+      if text != oldValue {
+        NSAccessibility.post(element: label, notification: .valueChanged)
+      }
+    }
+  }
   var fontSize: Double = 13 { didSet { update() } }
   var weight = "regular" { didSet { update() } }
   var color: NSColor = .labelColor {
     didSet {
       if letterSpacing == 0 {
         field.textColor = color
+        label.needsDisplay = true
       } else {
         update()
       }
@@ -711,7 +737,12 @@ final class FadeLabel: ExpoView {
     field.maximumNumberOfLines = 1
     field.cell?.truncatesLastVisibleLine = false
     field.isSelectable = false
-    addSubview(field)
+    label.field = field
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.autoresizingMask = []
+    label.wantsLayer = true
+    label.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    addSubview(label)
     fade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
     fade.startPoint = CGPoint(x: 0, y: 0.5)
     fade.endPoint = CGPoint(x: 1, y: 0.5)
@@ -723,6 +754,24 @@ final class FadeLabel: ExpoView {
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
     relayout()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    refresh()
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    refresh()
+  }
+
+  private func refresh() {
+    if let window, window !== measuredWindow || window.backingScaleFactor != measuredScale {
+      measure()
+    } else {
+      relayout()
+    }
   }
 
   private func update() {
@@ -737,24 +786,108 @@ final class FadeLabel: ExpoView {
     } else {
       field.attributedStringValue = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .kern: letterSpacing])
     }
+    label.needsDisplay = true
+    measure()
+  }
+
+  private func measure() {
+    let scale = window?.backingScaleFactor ?? 1
+    let cellSize = field.cell?.cellSize ?? .zero
+    fitting = NSSize(width: Self.pixelCeil(cellSize.width, scale), height: Self.pixelCeil(cellSize.height, scale))
+    anchor = Self.anchor(for: text, alignment: field.alignment, direction: field.userInterfaceLayoutDirection)
+    measuredWindow = window
+    measuredScale = window?.backingScaleFactor ?? 0
     relayout()
   }
 
+  private static func pixelCeil(_ value: CGFloat, _ scale: CGFloat) -> CGFloat {
+    (value * scale - 0.001).rounded(.up) / scale
+  }
+
+  private static func anchor(for text: String, alignment: NSTextAlignment, direction: NSUserInterfaceLayoutDirection) -> FieldAnchor {
+    guard alignment == .natural else { return .stretch }
+    var rightToLeft = false
+    var leftToRightLetter = false
+    for scalar in text.unicodeScalars {
+      if bidiControlScalars.contains(scalar.value) { return .stretch }
+      if rightToLeftScalars.contains(where: { $0.contains(scalar.value) }) {
+        rightToLeft = true
+      } else if scalar.properties.isAlphabetic {
+        leftToRightLetter = true
+      }
+    }
+    let defaultDirection = NSParagraphStyle.defaultWritingDirection(forLanguage: nil)
+    if !rightToLeft {
+      return direction == .leftToRight && defaultDirection == .leftToRight ? .leading : .stretch
+    }
+    return !leftToRightLetter && direction == .rightToLeft && defaultDirection == .rightToLeft ? .trailing : .stretch
+  }
+
   private func relayout() {
-    let fitting = field.fittingSize
-    field.frame = NSRect(x: 0, y: (bounds.height - fitting.height) / 2, width: max(bounds.width, fitting.width), height: fitting.height)
-    field.wantsLayer = true
+    var x: CGFloat = 0
+    var width = max(bounds.width, fitting.width)
+    if fitting.width <= bounds.width {
+      let slack = bounds.width - fitting.width
+      let scale = window?.backingScaleFactor ?? 0
+      if anchor == .leading {
+        width = fitting.width
+      } else if anchor == .trailing, scale > 0, (slack * scale).rounded() == slack * scale {
+        x = slack
+        width = fitting.width
+      }
+    }
+    let frame = NSRect(x: x, y: (bounds.height - fitting.height) / 2, width: width, height: fitting.height)
+    if label.frame.size != frame.size {
+      label.needsDisplay = true
+    }
+    label.frame = frame
     guard bounds.width > 0, fitting.width > bounds.width + 0.5 else {
-      field.layer?.mask = nil
+      label.layer?.mask = nil
       return
     }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    fade.frame = CGRect(x: 0, y: 0, width: bounds.width, height: field.frame.height)
+    fade.frame = CGRect(x: 0, y: 0, width: bounds.width, height: label.frame.height)
     let start = max(0, 1 - fadeWidth / bounds.width)
     fade.locations = [0, NSNumber(value: start), 1]
-    field.layer?.mask = fade
+    label.layer?.mask = fade
     CATransaction.commit()
+  }
+}
+
+private final class FadeLabelText: NSView {
+  weak var field: NSTextField?
+
+  override var isFlipped: Bool { true }
+
+  override var allowsVibrancy: Bool { field?.allowsVibrancy ?? false }
+
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  override func draw(_ dirtyRect: NSRect) {
+    guard let field, let cell = field.cell else { return }
+    cell.draw(withFrame: bounds, in: self)
+    cell.controlView = field
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    needsDisplay = true
+  }
+
+  override func isAccessibilityElement() -> Bool { true }
+
+  override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+
+  override func accessibilityValue() -> Any? { field?.stringValue }
+
+  override func accessibilityFrame() -> NSRect {
+    NSAccessibility.screenRect(fromView: self, rect: bounds.insetBy(dx: 1, dy: -1))
   }
 }
 

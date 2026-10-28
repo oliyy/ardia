@@ -1,5 +1,7 @@
 import { requireNativeModule, requireNativeViewManager, requireOptionalNativeModule, type EventSubscription } from "expo-modules-core";
+import { forwardRef } from "react";
 import type { ViewProps } from "react-native";
+import { useNativePropsRef, type NativePropsRef, type NativeViewInstance } from "./nativeProps";
 
 export * from "./system";
 export * from "./app";
@@ -399,7 +401,12 @@ export type ArcFavoriteBackgroundProps = ViewProps & {
   mutedColor?: string | null;
 };
 
-export const ArcFavoriteBackground = requireNativeViewManager<ArcFavoriteBackgroundProps>("ArdiaArcFavoriteBackground");
+const NativeArcFavoriteBackground = requireNativeViewManager<ArcFavoriteBackgroundProps & { ref?: NativePropsRef }>("ArdiaArcFavoriteBackground");
+
+export const ArcFavoriteBackground = forwardRef<NativeViewInstance, ArcFavoriteBackgroundProps>(function ArcFavoriteBackground(props, ref) {
+  const attach = useNativePropsRef(ref);
+  return <NativeArcFavoriteBackground {...props} ref={attach} />;
+});
 
 export type ArcTabRowBackgroundProps = ViewProps & {
   dark: boolean;
@@ -490,21 +497,36 @@ type NativeSurfaceProps = Omit<SurfaceProps, "shadowColor" | "shadowOpacity" | "
   surfaceShadowOpacity?: number;
   surfaceShadowRadius?: number;
   surfaceShadowOffset?: [number, number];
+  ref?: NativePropsRef;
 };
 
 const NativeSurface = requireNativeViewManager<NativeSurfaceProps>("ArdiaSurface");
 
-export function Surface({ shadowColor, shadowOpacity, shadowRadius, shadowOffset, ...props }: SurfaceProps) {
+const SURFACE_SHADOW_PROPS = new Map([
+  ["shadowColor", "surfaceShadowColor"],
+  ["shadowOpacity", "surfaceShadowOpacity"],
+  ["shadowRadius", "surfaceShadowRadius"],
+  ["shadowOffset", "surfaceShadowOffset"],
+]);
+
+const surfaceNativeProps = (props: Record<string, unknown>) =>
+  Object.keys(props).some((key) => SURFACE_SHADOW_PROPS.has(key))
+    ? Object.fromEntries(Object.entries(props).map(([key, value]) => [SURFACE_SHADOW_PROPS.get(key) ?? key, value]))
+    : props;
+
+export const Surface = forwardRef<NativeViewInstance, SurfaceProps>(function Surface({ shadowColor, shadowOpacity, shadowRadius, shadowOffset, ...props }, ref) {
+  const attach = useNativePropsRef(ref, surfaceNativeProps);
   return (
     <NativeSurface
       {...props}
+      ref={attach}
       surfaceShadowColor={shadowColor}
       surfaceShadowOpacity={shadowOpacity}
       surfaceShadowRadius={shadowRadius}
       surfaceShadowOffset={shadowOffset}
     />
   );
-}
+});
 
 export type VisualEffectProps = ViewProps & {
   material?: string;
@@ -580,7 +602,12 @@ export type DockSelectionProps = ViewProps & {
   glass?: boolean;
 };
 
-export const DockSelection = requireNativeViewManager<DockSelectionProps>("ArdiaDockSelection");
+const NativeDockSelection = requireNativeViewManager<DockSelectionProps & { ref?: NativePropsRef }>("ArdiaDockSelection");
+
+export const DockSelection = forwardRef<NativeViewInstance, DockSelectionProps>(function DockSelection(props, ref) {
+  const attach = useNativePropsRef(ref);
+  return <NativeDockSelection {...props} ref={attach} />;
+});
 
 const InlineCompletionModule = requireNativeModule<{
   complete(tag: number, typed: string, completion: string): Promise<InlineWrite>;

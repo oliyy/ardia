@@ -1,5 +1,5 @@
 import { ContextMenuArea, MouseArea, Symbol } from "@ardia/shell";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Animated, Pressable, View } from "react-native";
 import { closeTab } from "../../lib/actions";
 import { layout, useTheme } from "../../lib/theme";
@@ -13,20 +13,26 @@ import { cellKey, PIN_SLOT, useDragController, useDragging, useDragItem, useDrop
 import { FolderTile } from "./FolderTile";
 import { dismissHover, useRowHover } from "./hover";
 import { openTabMenu } from "./menus";
-import { pinColumnCap, pinGrid, pinGridHeight, TILE_GAP } from "./pinZone";
+import { pinColumnCap, pinGrid, pinGridHeight } from "./pinZone";
 import { registerRow } from "./state";
 import { clickMods } from "./TabRow";
 import { FolderDropRing, TileFace, useSlotPosition } from "./TileFace";
 import { folderIdOfCell } from "../../store/tileFolders";
-import { useSidebarTokens } from "./tokens";
+import { tileWidthNode, useTileInner, type TileWidth } from "./tileWidth";
+import { useSidebarTokens, useSidebarWidthOf } from "./tokens";
 
-export const PinnedGrid = memo(function PinnedGrid({ tabs, innerWidth, flush = false }: { tabs: string[]; innerWidth: number; flush?: boolean }) {
+export const PinnedGrid = memo(function PinnedGrid({ tabs, flush = false }: { tabs: string[]; flush?: boolean }) {
+  const windowId = useWindowId();
   const controller = useDragController();
   const count = usePinnedCount(tabs);
   const balanced = useBrowser((s) => s.settings.balancedTopApps);
   const addressBar = useAddressBarInSidebar();
   const maxColumns = pinColumnCap(addressBar);
-  const { columns, width } = pinGrid(count, innerWidth, maxColumns, balanced);
+  const columns = useSidebarWidthOf(windowId, (width) => pinGrid(count, width - layout.sidebarInset * 2, maxColumns, balanced).columns);
+  const height = useSidebarWidthOf(windowId, (width) => pinGridHeight(count, width - layout.sidebarInset * 2, layout.pinnedHeight, maxColumns, balanced));
+  const inner = useTileInner();
+  const exact = maxColumns === pinColumnCap(true);
+  const grid = useMemo(() => tileWidthNode(inner, columns, exact), [inner, columns, exact]);
   const slots = usePinSlots(tabs);
   const tail = useDragItem("tail:tiles", { kind: "tail", tabIds: [], section: "tiles" });
   const dragging = useDragging();
@@ -39,15 +45,15 @@ export const PinnedGrid = memo(function PinnedGrid({ tabs, innerWidth, flush = f
       }}
       style={{ marginTop: flush ? 0 : topGap }}
     >
-      <View style={{ height: pinGridHeight(count, innerWidth, layout.pinnedHeight, maxColumns, balanced) }}>
+      <View style={{ height }}>
         {tabs.map((cell, i) => {
-          const x = (slots[i]! % columns) * (width + TILE_GAP);
-          const y = Math.floor(slots[i]! / columns) * PIN_SLOT;
+          const column = slots[i]! % columns;
+          const row = Math.floor(slots[i]! / columns);
           const folderId = folderIdOfCell(cell);
           return folderId ? (
-            <FolderTile key={cellKey(cell)} folderId={folderId} width={width} sliding={dragging} x={x} y={y} />
+            <FolderTile key={cellKey(cell)} folderId={folderId} grid={grid} sliding={dragging} column={column} row={row} />
           ) : (
-            <PinnedTile key={cellKey(cell)} tabId={cell} width={width} sliding={dragging} x={x} y={y} />
+            <PinnedTile key={cellKey(cell)} tabId={cell} grid={grid} sliding={dragging} column={column} row={row} />
           );
         })}
       </View>
@@ -143,7 +149,7 @@ function backToPinnedUrl(windowId: string, tabId: string) {
   if (activeTabId(s, windowId) === tabId) s.returnToPinnedUrl(tabId);
 }
 
-const PinnedTile = memo(function PinnedTile({ tabId, width, sliding, x, y }: { tabId: string; width: number; sliding: boolean; x: number; y: number }) {
+const PinnedTile = memo(function PinnedTile({ tabId, grid, sliding, column, row }: { tabId: string; grid: TileWidth; sliding: boolean; column: number; row: number }) {
   const theme = useTheme();
   const windowId = useWindowId();
   const tab = useTab(tabId);
@@ -153,7 +159,7 @@ const PinnedTile = memo(function PinnedTile({ tabId, width, sliding, x, y }: { t
   const { hovered, hoverProps } = useRowHover(windowId, { kind: "tab", id: tabId });
   const { wrapper, handle, dragging } = useDragItem(`t:${tabId}`, { kind: "tile", tabIds: [tabId], section: "tiles" }, () => useBrowser.getState().selection[windowId] ?? []);
   const target = useFolderTarget(`t:${tabId}`);
-  const position = useSlotPosition(x, y, width, sliding, dragging);
+  const position = useSlotPosition(column, row, grid, sliding, dragging);
   if (!tab) return null;
 
   return (
@@ -177,7 +183,7 @@ const PinnedTile = memo(function PinnedTile({ tabId, width, sliding, x, y }: { t
                 clickTab(windowId, tabId, clickMods(e));
               }}
             >
-              {({ pressed }) => <TileFace tabId={tabId} width={width} active={active} selected={selected} hovered={hovered} pressed={pressed} />}
+              {({ pressed }) => <TileFace tabId={tabId} width={grid} active={active} selected={selected} hovered={hovered} pressed={pressed} />}
             </Pressable>
           </ContextMenuArea>
         </MouseArea>

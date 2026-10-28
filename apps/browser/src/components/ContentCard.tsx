@@ -1,6 +1,6 @@
 import { WebView, type OpenWindowRequest, type PageEngine, type WebViewHandle } from "@ardia/ardiacore";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Animated, Platform, StyleSheet, unstable_batchedUpdates, View, type ViewStyle } from "react-native";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Animated, findNodeHandle, Platform, StyleSheet, unstable_batchedUpdates, View, type NativeSyntheticEvent, type ViewStyle } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { focus, switchToTab } from "../lib/actions";
 import { noteFavicon } from "../lib/favicons";
@@ -39,11 +39,13 @@ import { SplitEmptyState } from "./layout/SplitEmptyState";
 import { pagerFor } from "./layout/profilePager";
 import { openFromPage } from "./layout/openFromPage";
 import { dockMoving, useDockMotion, usePeekEdge } from "./layout/dockMotion";
+import { useDockReceipt } from "./layout/SidebarDock";
 import { FrozenPage } from "./layout/frozenPage";
 import { useFrozenPages } from "./layout/pinHandoff";
 import { CardLoadingLine } from "./layout/CardLoadingLine";
 import { holderOf } from "../store/pinShare";
 import { closeFolderPanelIn } from "./sidebar/tileFolderUi";
+import { useSidebarUi } from "./sidebar/state";
 import { setCardAnchor, setUrlAnchor, useAddressBarInSidebar, useCardGeometry, useTabLayout, useToolbarExtensionsWidths } from "./layout/windowLayout";
 import { NewTabPage } from "./NewTabPage";
 import { EmptyCard } from "./EmptyCard";
@@ -81,6 +83,8 @@ type DockLink = {
   shift: Animated.AnimatedInterpolation<number> | Animated.Value;
   interrupt: () => void;
 };
+type MountReceipt = { receipt: number; target: number; x: number; y: number; width: number; height: number };
+type ReceiptBinding = { view: View | null; windowId: string; receipt: number | undefined; highest: number };
 
 export function ContentCard({ dock }: { dock?: DockLink }) {
   const registerEndpoint = dock?.registerEndpoint;
@@ -96,18 +100,31 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
   const barMode = useBookmarksBarMode(windowId);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
+  const resizing = useSidebarUi((u) => windowId in u.dragWidth);
+  const parked = useRef(size);
+  if (!resizing) parked.current = size;
   const container = useRef<View>(null);
   const epoch = useRef(0);
   const endpoint = useRef<EndpointRequest | null>(null);
   const [published, setPublished] = useState<{ epoch: number; request: EndpointRequest } | null>(null);
   const retiring = useRef<(() => void) | null>(null);
   const handedOff = useRef(false);
+  const binding = useRef<ReceiptBinding>({ view: null, windowId, receipt: undefined, highest: 0 });
+  const receiptMode = useRef(false);
+  const frameEpoch = useRef(0);
+  const floor = useRef(0);
+  const measured = useRef<{ view: View; windowId: string } | null>(null);
+  const local = useRef<{ view: View; windowId: string; x: number; y: number; width: number; height: number } | null>(null);
+  const wasResizing = useRef(resizing);
   const activeUrl = useBrowser((s) => (activeId ? (s.tabs[activeId]?.url ?? "") : ""));
   const activeEngine = useBrowser((s) => (activeId ? tabEngine(s, activeId) : null));
   const activeFronted = useBrowser((s) => !!activeId && !!s.tabs[activeId]?.pageIn);
   const windowProfile = useBrowser((s) => s.windows[windowId]?.profileId ?? "");
   const bridged = useFrozenPages((f) => !!f.bridges[windowId]);
   const activeNewTabShown = usePages((s) => !!activeId && !!s.pages[activeId]?.newTabShown);
+  const popoverOpen = usePages((s) => !!activeId && !!s.popover[activeId]);
+  const panelOpen = useBrowser((s) => !!s.windowUi[windowId]?.panel.open);
+  const tabDragged = useTabDrag((d) => d.tabIds.length > 0 && (d.windowId === windowId || d.overWindow === windowId));
   useEffect(startPermissionPrompts, []);
   useEffect(startChromeTabs, []);
   useEffect(startMedia, []);
@@ -273,9 +290,52 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
     const mine = ++epoch.current;
     const view = container.current;
     setSize({ width, height });
+    const own = ++frameEpoch.current;
     view?.measureInWindow((x, y) => {
-      if (epoch.current === mine && container.current === view) setOrigin({ x, y });
+      if (epoch.current !== mine || frameEpoch.current !== own || container.current !== view) return;
+      if (view && Number.isFinite(x) && Number.isFinite(y)) measured.current = { view, windowId };
+      setOrigin({ x, y });
     });
+  };
+  const publishFrame = (x: number, y: number, width: number, height: number) =>
+    unstable_batchedUpdates(() => {
+      setSize((s) => (s.width === width && s.height === height ? s : { width, height }));
+      setOrigin((o) => (o && o.x === x && o.y === y ? o : { x, y }));
+    });
+  const currentFrame = () => {
+    const view = container.current;
+    if (!view || endpoint.current || dockMoving(windowId)) return;
+    const own = ++frameEpoch.current;
+    const sampled = epoch.current;
+    view.measureInWindow((x, y, width, height) => {
+      if (frameEpoch.current !== own || epoch.current !== sampled || container.current !== view || endpoint.current || dockMoving(windowId)) return;
+      if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return;
+      measured.current = { view, windowId };
+      publishFrame(x, y, width, height);
+    });
+  };
+  const disarm = () => {
+    receiptMode.current = false;
+    frameEpoch.current++;
+    currentFrame();
+  };
+  const received = (e: NativeSyntheticEvent<MountReceipt>) => {
+    if (!receiptMode.current || endpoint.current || dockMoving(windowId)) return;
+    const { receipt: token, target, x, y, width, height } = e.nativeEvent;
+    const bound = binding.current;
+    const view = container.current;
+    if (!view || bound.view !== view || bound.windowId !== windowId || bound.receipt === undefined) return disarm();
+    if (!Number.isSafeInteger(token) || token <= floor.current || token > bound.receipt) return;
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return;
+    const tag = findNodeHandle(view);
+    if (tag === null || target !== tag) return;
+    if (token === bound.receipt) {
+      const laid = local.current;
+      if (!laid || laid.view !== view || laid.windowId !== windowId || laid.width !== width || laid.height !== height) return disarm();
+    }
+    frameEpoch.current++;
+    floor.current = token;
+    publishFrame(x, y, width, height);
   };
   const sampleEndpoint = () => {
     const request = endpoint.current;
@@ -300,6 +360,7 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
   useLayoutEffect(() => {
     if (!registerEndpoint) return;
     return registerEndpoint((valid, done) => {
+      receiptMode.current = false;
       endpoint.current = { valid, done };
       settled.current = null;
       if (handedOff.current && valid()) retiring.current?.();
@@ -308,7 +369,11 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
   }, [registerEndpoint]);
   useEffect(
     () =>
-      useDockMotion.subscribe((m) => {
+      useDockMotion.subscribe((m, prev) => {
+        if (m.moving[windowId] && !prev.moving[windowId]) {
+          receiptMode.current = false;
+          frameEpoch.current++;
+        }
         if (m.moving[windowId] || !settled.current) return;
         const { width, height } = settled.current;
         settled.current = null;
@@ -356,80 +421,157 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
       dock?.interrupt();
     }
   });
+  const eligible =
+    !split &&
+    !fullscreenTab &&
+    !peekId &&
+    !small &&
+    !!activeRect &&
+    activeRect.x === 0 &&
+    activeRect.y === 0 &&
+    activeRect.width === size.width &&
+    activeRect.height === size.height &&
+    !tabDragged &&
+    !panelOpen &&
+    !popoverOpen;
+  useLayoutEffect(() => {
+    frameEpoch.current++;
+    const began = resizing && !wasResizing.current;
+    const ended = !resizing && wasResizing.current;
+    wasResizing.current = resizing;
+    const bound = binding.current;
+    const view = container.current;
+    const known = measured.current;
+    const laid = local.current;
+    receiptMode.current =
+      began &&
+      eligible &&
+      !!view &&
+      bound.view === view &&
+      bound.windowId === windowId &&
+      bound.receipt !== undefined &&
+      !!known &&
+      known.view === view &&
+      known.windowId === windowId &&
+      !!laid &&
+      laid.view === view &&
+      laid.windowId === windowId &&
+      !endpoint.current &&
+      !dockMoving(windowId);
+    if (began && bound.receipt !== undefined) floor.current = Math.max(floor.current, bound.receipt - 1);
+    if (ended) floor.current = Math.max(floor.current, bound.highest);
+    if (!ended) return;
+    const frame = requestAnimationFrame(currentFrame);
+    return () => cancelAnimationFrame(frame);
+  }, [resizing, windowId]);
+  useLayoutEffect(() => {
+    if (receiptMode.current) disarm();
+  }, [eligible, handoff, flowing]);
   const popoversOverCard = peekEdge !== undefined && addressInSidebar && !small && !fullscreenTab && origin && activeRect ? activeId : undefined;
 
   return (
-    <Animated.View
-      ref={container}
-      style={{ flex: 1, marginRight: flowing && dock ? dock.shift : 0 }}
-      onLayout={(e) => {
-        const { width, height } = e.nativeEvent.layout;
-        if (sampleEndpoint()) return;
-        if (size.width > 0 && dockMoving(windowId) && !split) settled.current = { width, height };
-        else measure(width, height);
-      }}
-    >
-      {size.width > 0 &&
-        shown.map((key) => {
-          const tabId = key.slice(0, key.indexOf("|"));
-          const rect = panes[tabId];
-          return (
-            <TabPane
-              key={key}
-              tabId={tabId}
-              windowId={windowId}
-              rect={rect}
-              fills={!!rect && rect.x === 0 && rect.y === 0 && rect.width === size.width && rect.height === size.height}
-              fullWidth={size.width}
-              fullHeight={size.height}
-              focused={tabId === activeId}
-              inActiveSplit={!!split?.tabIds.includes(tabId)}
-              fullscreen={tabId === fullscreenTab}
-              covered={!!fullscreenTab && tabId !== fullscreenTab}
-              geometry={geometryFor(rect)}
-              toolbar={!addressInSidebar && !small}
-              autoHide={hideWhileScrolling && !addressInSidebar && !small}
-              small={small}
-              mounted={mountedIds.has(tabId)}
-              warm={warmPanes[tabId]}
-              barMode={barMode}
-              windowToolbar={windowToolbar}
-              popovers={tabId !== popoversOverCard}
-              peekShown={!!peekId}
-              leading={tabId === owner.pane ? owner.leading : null}
-              retiring={retiring}
-            />
-          );
-        })}
-      {size.width > 0 && windowToolbar && activeId && panes[activeId] && (
-        <WindowToolbar windowId={windowId} tabId={activeId} geometry={geometryFor(panes[activeId])} autoHide={hideWhileScrolling} />
-      )}
-      {size.width > 0 && !split && !fullscreenTab && (
-        <FrozenPage windowId={windowId} tabId={activeId} top={(!addressInSidebar && !small && !hideWhileScrolling ? layout.toolbarHeight : 0) + (barMode === "always" && !small && !hideWhileScrolling ? BOOKMARKS_BAR_HEIGHT : 0)} />
-      )}
-      {split && !fullscreenTab && <SplitDividers split={split} dividers={dividers} width={size.width} height={size.height} />}
-      {size.width > 0 && popoversOverCard && origin && activeRect && peekEdge !== undefined && (
-        <BesidePeekPopovers
-          tabId={popoversOverCard}
-          left={Math.max(activeRect.x, peekEdge - origin.x) + POPOVER_MARGIN}
-          top={activeRect.y + POPOVER_MARGIN}
-          room={size.width}
-        />
-      )}
-      {!fullscreenTab && <DropTargets panes={panes} origin={origin} />}
-      {(!fullscreenTab || peekFullscreen) && !small && (
-        <PeekOverlay
-          windowId={windowId}
-          width={size.width}
-          height={size.height}
-          origin={origin}
-          fullscreen={peekFullscreen}
-          page={(tabId, sourceId, width) => <PeekPage tabId={tabId} sourceId={sourceId} windowId={windowId} width={width} fullscreen={peekFullscreen} />}
-        />
-      )}
-      <SplitToast windowId={windowId} />
-    </Animated.View>
+    <>
+      <Animated.View
+        ref={container}
+        style={{ flex: 1, marginRight: flowing && dock ? dock.shift : 0 }}
+        onMountReceipt={received}
+        onLayout={(e) => {
+          const { x, y, width, height } = e.nativeEvent.layout;
+          const view = container.current;
+          const prev = local.current;
+          const valid = !!view && [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0;
+          local.current = valid && view ? { view, windowId, x, y, width, height } : null;
+          if (receiptMode.current) {
+            const pending = binding.current.receipt !== undefined && binding.current.receipt > floor.current;
+            if (!valid || !prev || prev.view !== view || prev.windowId !== windowId || prev.x !== x || prev.y !== y || prev.height !== height || (prev.width !== width && !pending)) {
+              receiptMode.current = false;
+              frameEpoch.current++;
+            }
+          }
+          if (sampleEndpoint()) return;
+          if (size.width > 0 && dockMoving(windowId) && !split) {
+            receiptMode.current = false;
+            settled.current = { width, height };
+          } else if (!receiptMode.current) measure(width, height);
+        }}
+      >
+        {size.width > 0 &&
+          shown.map((key) => {
+            const tabId = key.slice(0, key.indexOf("|"));
+            const rect = panes[tabId];
+            return (
+              <TabPane
+                key={key}
+                tabId={tabId}
+                windowId={windowId}
+                rect={rect}
+                fills={!!rect && rect.x === 0 && rect.y === 0 && rect.width === size.width && rect.height === size.height}
+                fullWidth={parked.current.width}
+                fullHeight={parked.current.height}
+                focused={tabId === activeId}
+                inActiveSplit={!!split?.tabIds.includes(tabId)}
+                fullscreen={tabId === fullscreenTab}
+                covered={!!fullscreenTab && tabId !== fullscreenTab}
+                geometry={geometryFor(rect)}
+                toolbar={!addressInSidebar && !small}
+                autoHide={hideWhileScrolling && !addressInSidebar && !small}
+                small={small}
+                mounted={mountedIds.has(tabId)}
+                warm={warmPanes[tabId]}
+                barMode={barMode}
+                windowToolbar={windowToolbar}
+                popovers={tabId !== popoversOverCard}
+                peekShown={!!peekId}
+                leading={tabId === owner.pane ? owner.leading : null}
+                retiring={retiring}
+              />
+            );
+          })}
+        {size.width > 0 && windowToolbar && activeId && panes[activeId] && (
+          <WindowToolbar windowId={windowId} tabId={activeId} geometry={geometryFor(panes[activeId])} autoHide={hideWhileScrolling} />
+        )}
+        {size.width > 0 && !split && !fullscreenTab && (
+          <FrozenPage windowId={windowId} tabId={activeId} top={(!addressInSidebar && !small && !hideWhileScrolling ? layout.toolbarHeight : 0) + (barMode === "always" && !small && !hideWhileScrolling ? BOOKMARKS_BAR_HEIGHT : 0)} />
+        )}
+        {split && !fullscreenTab && <SplitDividers split={split} dividers={dividers} width={size.width} height={size.height} />}
+        {size.width > 0 && popoversOverCard && origin && activeRect && peekEdge !== undefined && (
+          <BesidePeekPopovers
+            tabId={popoversOverCard}
+            left={Math.max(activeRect.x, peekEdge - origin.x) + POPOVER_MARGIN}
+            top={activeRect.y + POPOVER_MARGIN}
+            room={size.width}
+          />
+        )}
+        {!fullscreenTab && <DropTargets panes={panes} origin={origin} />}
+        {(!fullscreenTab || peekFullscreen) && !small && (
+          <PeekOverlay
+            windowId={windowId}
+            width={size.width}
+            height={size.height}
+            origin={origin}
+            fullscreen={peekFullscreen}
+            page={(tabId, sourceId, width) => <PeekPage tabId={tabId} sourceId={sourceId} windowId={windowId} width={width} fullscreen={peekFullscreen} />}
+          />
+        )}
+        <SplitToast windowId={windowId} />
+      </Animated.View>
+      <ReceiptBridge target={container} binding={binding} windowId={windowId} />
+    </>
   );
+}
+
+function ReceiptBridge({ target, binding, windowId }: { target: RefObject<View | null>; binding: RefObject<ReceiptBinding>; windowId: string }) {
+  const receipt = useDockReceipt();
+  useLayoutEffect(() => {
+    const view = target.current;
+    const bound = binding.current;
+    bound.view = view;
+    bound.windowId = windowId;
+    bound.receipt = receipt;
+    if (receipt !== undefined && receipt > bound.highest) bound.highest = receipt;
+    view?.setNativeProps({ mountReceipt: receipt ?? null });
+  }, [receipt, windowId, target, binding]);
+  return null;
 }
 
 const TabPane = memo(function TabPane({

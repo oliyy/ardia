@@ -46,19 +46,20 @@ export type PowerUpProps = ViewProps & {
   origin?: number;
   cornerRadius?: number;
   halo?: Rect | null;
+  haloNtp?: { under: number; panelHeight: number } | null;
 };
 
-type NativePowerUpProps = Omit<PowerUpProps, "palette" | "halo"> & { palette?: string[]; haloFrame: number[] };
+type NativePowerUpProps = Omit<PowerUpProps, "palette" | "halo" | "haloNtp"> & { palette?: string[]; haloSpec: number[] };
 
 const NativePowerUp = requireNativeViewManager<NativePowerUpProps>("ArdiaPowerUp");
 
-export function PowerUp({ palette = "pink", halo = null, ...props }: PowerUpProps) {
+export function PowerUp({ palette = "pink", halo = null, haloNtp = null, ...props }: PowerUpProps) {
   return (
     <NativePowerUp
       pointerEvents="none"
       {...props}
       palette={typeof palette === "string" ? [palette] : palette}
-      haloFrame={halo ? rect(halo) : [0, 0, 0, 0]}
+      haloSpec={halo ? (haloNtp ? [...rect(halo), haloNtp.under, haloNtp.panelHeight] : rect(halo)) : []}
     />
   );
 }

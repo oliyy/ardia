@@ -239,7 +239,7 @@ function RefreshButton({ spinning, tooltip, onPress }: { spinning: boolean; tool
 function SectionTitle({ title }: { title: string }) {
   const theme = useTheme();
   return (
-    <View style={{ height: 22, justifyContent: "flex-end", paddingLeft: 9, paddingBottom: 2 }}>
+    <View presentationGate style={{ height: 22, justifyContent: "flex-end", paddingLeft: 9, paddingBottom: 2 }}>
       <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: "600", color: theme.textSecondary }}>
         {title}
       </Text>
@@ -285,7 +285,7 @@ function MoreRow({ folderId, section, count }: { folderId: string; section: stri
   const theme = useTheme();
   const { hovered, hoverProps } = useHover();
   return (
-    <View {...hoverProps}>
+    <View presentationGate {...hoverProps}>
       <Pressable onPress={() => setLive((s) => ({ showAll: { ...s.showAll, [`${folderId}:${section}`]: true } }))}>
         <View style={{ height: 26, borderRadius: 8, flexDirection: "row", alignItems: "center", paddingLeft: 9, backgroundColor: hovered ? theme.rowHover : undefined }}>
           <Symbol name="ellipsis" size={11} color={theme.textSecondary} style={{ width: 16, height: 16 }} />
@@ -304,7 +304,7 @@ function StackRow({ folderId, windowId, stack }: { folderId: string; windowId: s
   const { hovered, hoverProps } = useHover();
   const repo = stack.repo.split("/")[1] ?? stack.repo;
   return (
-    <View>
+    <View presentationGate>
       <View {...hoverProps}>
         <ContextMenuArea
           onContextMenu={() => {
@@ -373,7 +373,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   const subtitleText = approved ? [subtitle, "Approved"].filter(Boolean).join(" · ") : subtitle;
 
   return (
-    <Animated.View style={completion ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
+    <Animated.View presentationGate style={completion ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
       <View
         ref={(v) => {
           registerRow(windowId, key, hidden ? null : v);

@@ -10,14 +10,21 @@ import { GlassFill, liquidGlass } from "../glass";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { SLIDE } from "../layout/stripReorder";
 import { TabBadges } from "../media/TabBadges";
+import { PIN_SLOT } from "./dnd";
+import { TILE_GAP } from "./pinZone";
 import { TabIcon } from "./TabIcon";
+import { tileWidthNow, useTileInner, type TileWidth } from "./tileWidth";
 import { useSidebarTokens } from "./tokens";
 
 const SELECTION_STROKE = 3;
 const GLASS_RIM = 1;
 export const TILE_RADIUS = 10;
 
-type FaceState = { width: number; active: boolean; selected: boolean; hovered: boolean; pressed: boolean };
+const AnimatedSurface = Animated.createAnimatedComponent(Surface);
+const AnimatedDockSelection = Animated.createAnimatedComponent(DockSelection);
+const AnimatedArcFavoriteBackground = Animated.createAnimatedComponent(ArcFavoriteBackground);
+
+type FaceState = { width: TileWidth; active: boolean; selected: boolean; hovered: boolean; pressed: boolean };
 
 export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string; badge?: ReactNode }) {
   const theme = useTheme();
@@ -43,7 +50,7 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
     );
   if (active && tileTheme)
     return (
-      <DockSelection
+      <AnimatedDockSelection
         image={tileTheme.image}
         emoji={tileTheme.emoji}
         theme={tileTheme.theme.kind}
@@ -63,11 +70,11 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
           icon
         )}
         {badge}
-      </DockSelection>
+      </AnimatedDockSelection>
     );
   if (active)
     return (
-      <Surface
+      <AnimatedSurface
         fill={hex(theme.pinnedSelectedRim)}
         cornerRadius={TILE_RADIUS}
         shadowColor={theme.dark ? "#FFFFFF" : "#000000"}
@@ -90,7 +97,7 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
           {icon}
         </View>
         {badge}
-      </Surface>
+      </AnimatedSurface>
     );
   return (
     <RestingTile {...state}>
@@ -110,7 +117,7 @@ export function RestingTile({ width, selected, hovered, pressed, children }: Omi
       </GlassTile>
     );
   return (
-    <View
+    <Animated.View
       style={{
         width,
         height: layout.pinnedHeight,
@@ -123,7 +130,7 @@ export function RestingTile({ width, selected, hovered, pressed, children }: Omi
       }}
     >
       {children}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -132,7 +139,7 @@ function GlassTile({ width, active, selected, hovered, pressed, tileTheme, child
   const tokens = useSidebarTokens();
   const fill = active ? theme.pinnedSelectedFill : pressed ? theme.tabPressed : hovered || selected ? theme.tabHover : theme.pinnedResting;
   return (
-    <View style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}>
+    <Animated.View style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}>
       <GlassFill radius={TILE_RADIUS} fill={fill} raised={active && !pressed} />
       {active ? (
         <DockSelection
@@ -150,7 +157,7 @@ function GlassTile({ width, active, selected, hovered, pressed, tileTheme, child
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: TILE_RADIUS, borderWidth: 1, borderColor: tokens.dragBorder }]} />
       ) : null}
       {children}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -184,16 +191,48 @@ export function FolderDropRing({ on }: { on: boolean }) {
   );
 }
 
-export function useSlotPosition(x: number, y: number, width: number, sliding: boolean, dragging: boolean) {
-  const position = useMemo(() => new Animated.ValueXY({ x, y }), []);
-  const placedWidth = useRef(width);
+const slotAt = (column: number, row: number, grid: TileWidth) => {
+  const width = tileWidthNow(grid);
+  return { width, x: column * (width + TILE_GAP), y: row * PIN_SLOT };
+};
+
+export function useSlotPosition(column: number, row: number, grid: TileWidth, sliding: boolean, dragging: boolean) {
+  const inner = useTileInner();
+  const [position] = useState(() => {
+    const { x, y } = slotAt(column, row, grid);
+    return new Animated.ValueXY({ x, y });
+  });
+  const latest = useRef({ column, row, grid, sliding, dragging });
+  const placedWidth = useRef(tileWidthNow(grid));
+  const [place] = useState(() => {
+    let last: { width: number; x: number; y: number; sliding: boolean; dragging: boolean } | null = null;
+    return () => {
+      const { column, row, grid, sliding, dragging } = latest.current;
+      const { width, x, y } = slotAt(column, row, grid);
+      if (last && last.width === width && last.x === x && last.y === y && last.sliding === sliding && last.dragging === dragging) return;
+      last = { width, x, y, sliding, dragging };
+      if (dragging) return;
+      const resized = placedWidth.current !== width;
+      placedWidth.current = width;
+      if (sliding && !resized) Animated.spring(position, { toValue: { x, y }, ...SLIDE }).start();
+      else {
+        position.x.stopAnimation((at) => {
+          if (at !== x) position.x.setValue(x);
+        });
+        position.y.stopAnimation((at) => {
+          if (at !== y) position.y.setValue(y);
+        });
+      }
+    };
+  });
   useLayoutEffect(() => {
-    if (dragging) return;
-    const resized = placedWidth.current !== width;
-    placedWidth.current = width;
-    if (sliding && !resized) Animated.spring(position, { toValue: { x, y }, ...SLIDE }).start();
-    else position.setValue({ x, y });
-  }, [x, y, width, sliding, dragging, position]);
+    const id = inner.addListener(place);
+    return () => inner.removeListener(id);
+  }, [inner, place]);
+  useLayoutEffect(() => {
+    latest.current = { column, row, grid, sliding, dragging };
+    place();
+  }, [column, row, grid, sliding, dragging, place]);
   useEffect(() => () => position.stopAnimation(), [position]);
   return position;
 }
@@ -207,7 +246,7 @@ function ArcTileFace({ tabId, badge, width, active, selected, hovered, pressed }
   const muted = theme.custom?.favoriteMutedColor;
   const mutedColor = muted ? colorHexAlpha(theme.dark ? muted.dark : muted.light) : theme.dark ? undefined : hex(theme.icon);
   return (
-    <Surface
+    <AnimatedSurface
       fill={active ? undefined : hex(pressed ? theme.tabPressed : hovered || selected ? theme.tabHover : tokens.fieldFill)}
       cornerRadius={layout.rowRadius}
       borderWidth={!active && selected ? 1 : 0}
@@ -215,12 +254,12 @@ function ArcTileFace({ tabId, badge, width, active, selected, hovered, pressed }
       logicalWidth={!active ? width : undefined}
       style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}
     >
-      {active ? <ArcFavoriteBackground source={tab.customIcon ? null : shown} cornerRadius={layout.rowRadius} hovered={hovered} logicalWidth={width} dark={theme.dark} mutedColor={mutedColor} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
+      {active ? <AnimatedArcFavoriteBackground source={tab.customIcon ? null : shown} cornerRadius={layout.rowRadius} hovered={hovered} logicalWidth={width} dark={theme.dark} mutedColor={mutedColor} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
       <View>
         <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} onSource={setShown} />
         <TabBadges tabId={tabId} />
       </View>
       {badge}
-    </Surface>
+    </AnimatedSurface>
   );
 }

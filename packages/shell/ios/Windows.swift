@@ -167,6 +167,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
       if let observer { NotificationCenter.default.removeObserver(observer) }
       observer = nil
       guard let self, let waiting = self.unrevealed.removeValue(forKey: id) else { return }
+      Self.commitPendingPresentation()
       if let window, let scales = self.entrances.removeValue(forKey: id) {
         LittleWindowMotion.enter(window, scales: scales)
       } else {
@@ -191,6 +192,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
       guard self.windows[id] != nil else { return }
       self.contentShown.insert(id)
       guard self.pendingOrder.contains(where: { self.pendingOpens[$0]?.behind == id }) else { return }
+      Self.commitPendingPresentation()
       CATransaction.flush()
       self.openPending(behind: id)
     }
@@ -424,6 +426,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
       NotificationCenter.default.removeObserver(self, name: nil, object: window)
       windows[id] = nil
       window.animationBehavior = .none
+      Self.commitPendingPresentation()
       window.orderOut(nil)
       CATransaction.flush()
       if let waiting = unrevealed.removeValue(forKey: id) { waiting.forEach { $0() } }
@@ -437,6 +440,12 @@ final class WindowManager: NSObject, NSWindowDelegate {
     }
     closingFromJS.insert(id)
     window.close()
+  }
+
+  static func commitPendingPresentation() {
+    let commit = NSSelectorFromString("ardia_commitPresentation")
+    guard let view = NSClassFromString("RCTView"), (view as AnyObject).responds(to: commit) else { return }
+    _ = (view as AnyObject).perform(commit)
   }
 
   func focus(id: String) {
@@ -770,6 +779,7 @@ enum LittleWindowMotion {
     view.alphaValue = 1
     layer.add(group(parts, duration: entranceDuration), forKey: entranceKey)
     CATransaction.commit()
+    WindowManager.commitPendingPresentation()
     CATransaction.flush()
     window.alphaValue = 1
     DispatchQueue.main.asyncAfter(deadline: .now() + settleAfter, execute: settle)

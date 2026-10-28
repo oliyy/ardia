@@ -135,5 +135,5 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
     if (g) measure(g);
   };
   const out = !live ? NONE : gesture.current ? held(gesture.current) : { hovered: idle, pressed: false };
-  return { overlayProps, rowLeft, touchProps, onLayout, regionHovered: out.hovered, regionPressed: out.pressed };
+  return { overlayProps, rowLeft, touchProps, onLayout: gesture.current ? onLayout : undefined, regionHovered: out.hovered, regionPressed: out.pressed };
 }

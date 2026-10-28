@@ -78,7 +78,7 @@ export const GroupBlock = memo(function GroupBlock({ groupId, section, parentGro
   const stroke = spec ? withAlpha(spec.hex, 0.3) : tokens.groupStroke;
 
   return (
-    <Animated.View ref={wrapper.ref} style={wrapper.style}>
+    <Animated.View ref={wrapper.ref} presentationGate style={wrapper.style}>
       <View {...moved} ref={movedRef} style={[flat ? null : { borderRadius: GROUP_RADIUS, backgroundColor: fill, borderWidth: GROUP_BORDER, borderColor: stroke, paddingHorizontal: PAD }, moved.style as object]}>
         <View ref={headerRef} {...handle} style={{ marginHorizontal: flat ? 0 : -PAD }}>
           <GroupHeader groupId={groupId} windowId={windowId} collapsed={collapsed} peek={peek} open={fold.open} flat={flat} />

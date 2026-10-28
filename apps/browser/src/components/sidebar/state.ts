@@ -12,6 +12,7 @@ type SidebarUi = {
   searchTabs: string | null;
   switcher: { windowId: string; ids: string[]; index: number; visible: boolean } | null;
   dragWidth: Record<string, number>;
+  dragReceipt: Record<string, number>;
   reveal: { windowId: string; id: string } | null;
   plusMenu: { windowId: string; anchor: Anchor; id: number } | null;
 };
@@ -23,6 +24,7 @@ export const useSidebarUi = create<SidebarUi>()(() => ({
   searchTabs: null,
   switcher: null,
   dragWidth: {},
+  dragReceipt: {},
   reveal: null,
   plusMenu: null,
 }));
@@ -30,6 +32,17 @@ export const useSidebarUi = create<SidebarUi>()(() => ({
 export const sidebarUi = () => useSidebarUi.getState();
 export const setSidebarUi = (patch: Partial<SidebarUi>) => useSidebarUi.setState(patch);
 export const revealInSidebar = (windowId: string, id: string) => setSidebarUi({ reveal: { windowId, id } });
+
+const resizes = new Map<string, () => void>();
+
+export function registerResize(windowId: string, cancel: () => void) {
+  resizes.set(windowId, cancel);
+  return () => void (resizes.get(windowId) === cancel && resizes.delete(windowId));
+}
+
+export function endResize(windowId: string) {
+  if (windowId in sidebarUi().dragWidth) resizes.get(windowId)?.();
+}
 
 const rows = new Map<string, Map<string, View>>();
 

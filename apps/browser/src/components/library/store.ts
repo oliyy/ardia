@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { endResize } from "../sidebar/state";
 import type { ArchiveFilter, DownloadFilter } from "./groups";
 
 export type LibrarySection = "downloads" | "archived";
@@ -30,6 +31,7 @@ export const watchLibrary = (changed: () => void) => useLibraryStore.subscribe(c
 export function showLibrary(windowId: string, section?: LibrarySection) {
   const shown = useLibraryStore.getState()[windowId];
   if (!shown) {
+    endResize(windowId);
     openings.set(windowId, libraryOpenings(windowId) + 1);
     useLibraryStore.setState({ [windowId]: freshView(section ?? "downloads") });
   } else if (section && section !== shown.section) useLibraryStore.setState({ [windowId]: { ...shown, section } });
@@ -37,7 +39,9 @@ export function showLibrary(windowId: string, section?: LibrarySection) {
 
 export function closeLibrary(windowId: string) {
   const { [windowId]: shown, ...rest } = useLibraryStore.getState();
-  if (shown) useLibraryStore.setState(rest, true);
+  if (!shown) return;
+  endResize(windowId);
+  useLibraryStore.setState(rest, true);
 }
 
 export function updateLibrary(windowId: string, patch: (view: LibraryView) => Partial<LibraryView>) {
