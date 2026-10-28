@@ -855,16 +855,48 @@ final class FadeLabel: ExpoView {
   }
 }
 
+private enum FadeLabelSystemStyle {
+  static var generation = 0
+  static let watched: Void = {
+    let bump: (Notification) -> Void = { _ in generation += 1 }
+    _ = NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: nil, using: bump)
+    _ = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: nil, using: bump)
+  }()
+}
+
+private struct FadeLabelDrawingTraits: Equatable {
+  let appearance: NSAppearance.Name
+  let scale: CGFloat
+  let colorSpace: NSColorSpace?
+  let system: Int
+
+  init(_ view: NSView) {
+    _ = FadeLabelSystemStyle.watched
+    appearance = view.effectiveAppearance.name
+    scale = view.window?.backingScaleFactor ?? 0
+    colorSpace = view.window?.colorSpace
+    system = FadeLabelSystemStyle.generation
+  }
+}
+
 private final class FadeLabelText: NSView {
   weak var field: NSTextField?
+  private var drawnTraits: FadeLabelDrawingTraits?
 
   override var isFlipped: Bool { true }
+
+  override var visibleRect: NSRect {
+    let host = superview.map { convert($0.bounds, from: $0) } ?? bounds
+    return bounds.union(host).intersection(super.visibleRect)
+  }
 
   override var allowsVibrancy: Bool { field?.allowsVibrancy ?? false }
 
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
   override func draw(_ dirtyRect: NSRect) {
+    drawnTraits = FadeLabelDrawingTraits(self)
     guard let field, let cell = field.cell else { return }
     cell.draw(withFrame: bounds, in: self)
     cell.controlView = field
@@ -872,12 +904,18 @@ private final class FadeLabelText: NSView {
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
-    needsDisplay = true
+    redrawIfTraitsChanged()
   }
 
   override func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
-    needsDisplay = true
+    redrawIfTraitsChanged()
+  }
+
+  private func redrawIfTraitsChanged() {
+    if window != nil, FadeLabelDrawingTraits(self) != drawnTraits {
+      needsDisplay = true
+    }
   }
 
   override func isAccessibilityElement() -> Bool { true }
