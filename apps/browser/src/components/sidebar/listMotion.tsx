@@ -21,21 +21,25 @@ const TAIL = "~tail";
 const FRAME_SLACK_MS = 50;
 const devScale = () => (__DEV__ ? ((globalThis as { sidebarMotionScale?: number }).sidebarMotionScale ?? 1) : 1);
 
-type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean };
+export type SlideTiming = { ms: number; easing: (t: number) => number };
+export type FoldSlideOptions = { timing: SlideTiming; tail: boolean };
+type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean; ms: number; easing: (t: number) => number };
 type Ghost = { key: string; anchor: string | null; y: number; snapshot: EntrySnapshot; opacity: Animated.Value; until: number };
 type ReorderIntent = { windowId: string; profileId: string; key: string };
 type Snapshot = { state: BrowserState; list: string[]; live: LiveData; heights: LiveHeights; intent?: ReorderIntent };
 type Move = { key: string; from: number };
-type Plan = { moves: Move[]; ghosts: Ghost[]; clipped: string[]; below: number };
+type Plan = { moves: Move[]; ghosts: Ghost[]; clipped: string[]; below: number; timing?: SlideTiming };
 type Offsets = { at: Map<string, number>; end: number };
 type Height = (s: BrowserState, entry: string) => number;
 type Planner = (before: Snapshot, after: Snapshot, slides: Map<string, Slide>, ghosts: Ghost[], t: number) => Plan | null;
 export type ListSlot = { entry: string } | { ghost: Ghost; top: number };
 export type Capture = { state: BrowserState | null; list: string[] | null; live: LiveData | null; pending: Snapshot | null };
 export type Boundary = (list: string[]) => { above: number; below: number };
-export type ListMotionScope = { enabled: boolean; slideBelow: ((entry: string, delta: number) => void) | null };
+export type FoldChain = (entry: string, delta: number) => Animated.Value | null;
+export type ListMotionScope = { enabled: boolean; slideBelow: ((entry: string, delta: number) => void) | null; fold?: { pinned: FoldChain; list: FoldChain } };
 
 export const ListMotionContext = createContext<ListMotionScope>({ enabled: false, slideBelow: null });
+export const FoldChainContext = createContext<FoldChain | null>(null);
 export const newCapture = (): Capture => ({ state: null, list: null, live: null, pending: null });
 
 const placedAnywhere = (s: BrowserState, folderId: string) => Object.values(s.pinPlace).some((table) => !!table[liveNode(folderId)]);
@@ -127,8 +131,8 @@ function prefixHeight(s: BrowserState, entries: string[], count: number, height:
 
 function shiftAt(slide: Slide | undefined, t: number): number {
   if (!slide) return 0;
-  const p = Math.min(1, Math.max(0, (t - slide.at) / (SLIDE_MS * devScale())));
-  return slide.from * (1 - SLIDE_EASING(p));
+  const p = Math.min(1, Math.max(0, (t - slide.at) / slide.ms));
+  return slide.from * (1 - slide.easing(p));
 }
 
 type Diff = {
@@ -264,7 +268,7 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
   if (ghosts.current.some((g) => g.until && now >= g.until)) ghosts.current = ghosts.current.filter((g) => !g.until || now < g.until);
 
   const prepare = (plan: Plan, at: number) => {
-    for (const m of plan.moves) if (!slides.has(m.key)) slides.set(m.key, { value: new Animated.Value(m.from), from: m.from, at, until: 0, landed: false });
+    for (const m of plan.moves) if (!slides.has(m.key)) slides.set(m.key, { value: new Animated.Value(m.from), from: m.from, at, until: 0, landed: false, ms: plan.timing?.ms ?? SLIDE_MS * devScale(), easing: plan.timing?.easing ?? SLIDE_EASING });
     ghosts.current = [...ghosts.current, ...plan.ghosts];
     clipped.clear();
     for (const key of plan.clipped) clipped.add(key);
@@ -285,14 +289,16 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
     for (const key of clipped) if (key !== TAIL && !live.has(key)) clipped.delete(key);
   }
 
-  const slideBelow = useRef((entry: string, delta: number) => {
+  const slideBelow = useRef((entry: string, delta: number, fold?: FoldSlideOptions): Animated.Value | null => {
     const list = latest.current;
     const i = list.indexOf(entry);
-    if (i < 0) return;
+    if (i < 0) return null;
     const t = Date.now();
-    const keys = [...list.slice(i + 1), TAIL];
-    prepare({ moves: keys.map((key) => ({ key, from: shiftAt(slides.get(key), t) + delta })), ghosts: [], clipped: [list[i + 1] ?? TAIL], below: 0 }, t);
+    const keys = [...list.slice(i + 1), ...(!fold || fold.tail ? [TAIL] : [])];
+    if (!keys.length) return null;
+    prepare({ moves: keys.map((key) => ({ key, from: shiftAt(slides.get(key), t) + delta })), ghosts: [], clipped: fold ? [] : [list[i + 1] ?? TAIL], below: 0, ...(fold ? { timing: fold.timing } : {}) }, t);
     rerender((n) => n + 1);
+    return slides.get(keys[0]!)?.value ?? null;
   }).current;
 
   useLayoutEffect(() => {
@@ -300,7 +306,8 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
     if (!plan) return;
     queued.current = null;
     const at = Date.now();
-    const slideMs = SLIDE_MS * devScale();
+    const slideMs = plan.timing?.ms ?? SLIDE_MS * devScale();
+    const easing = plan.timing?.easing ?? SLIDE_EASING;
     const token = plan.clipped.length ? {} : null;
     clipping.current = token;
     for (const [i, m] of plan.moves.entries()) {
@@ -311,7 +318,9 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
       slide.at = at;
       slide.until = at + slideMs + FRAME_SLACK_MS;
       slide.landed = false;
-      const timing = Animated.timing(slide.value, { toValue: 0, duration: slideMs, easing: SLIDE_EASING, useNativeDriver: native });
+      slide.ms = slideMs;
+      slide.easing = easing;
+      const timing = Animated.timing(slide.value, { toValue: 0, duration: slideMs, easing, useNativeDriver: native });
       const clips = i === 0 && token;
       timing.start(({ finished }) => {
         if (!finished) return;

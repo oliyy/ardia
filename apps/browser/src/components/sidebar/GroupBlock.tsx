@@ -1,5 +1,5 @@
 import { ArcTabRowBackground, ContextMenuArea, FadeLabel, Surface, Symbol } from "@ardia/shell";
-import { memo, useContext, useState } from "react";
+import { memo, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { hex, layout, useTheme } from "../../lib/theme";
@@ -12,13 +12,13 @@ import { IconButton } from "../primitives";
 import { commitRename, endRename, openPath, startRename } from "./actions";
 import { FolderScope, useDragFolded, useDragItem, useDragging, useDropInto } from "./dnd";
 import { useShift, type EntryMotion } from "./entryMotion";
-import { Fold, useFold, useFoldHidden } from "./Fold";
+import { Fold, FOLD_TIMING, foldsSettled, holdFolds, useFold, useFoldHidden, type FoldSlide } from "./Fold";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS, entryHeight, groupFrame, keptEntry } from "./geometry";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { folderPath } from "./entries";
 import { dismissHover, useRowHover } from "./hover";
-import { capture, GhostSlot, ListMotionContext, newCapture, useGroupMotion } from "./listMotion";
+import { capture, FoldChainContext, GhostSlot, ListMotionContext, newCapture, useGroupMotion, type FoldChain } from "./listMotion";
 import { LiveFolderBlock } from "./LiveFolderBlock";
 import { pressGroupClose, useGroupCloseControl } from "./closeControl";
 import { openGroupMenu } from "./menus";
@@ -72,6 +72,30 @@ export const GroupBlock = memo(function GroupBlock({ groupId, section, parentGro
   const scope = useContext(ListMotionContext);
   const motion = useGroupMotion(windowId, profileId, groupId, entries, captured, section === "list" && !parentGroup ? scope : { enabled: scope.enabled, slideBelow: null }, scope.enabled && !collapsed);
   const [moved, movedRef] = useShift(own?.shift ?? null);
+  const parentChain = useContext(FoldChainContext);
+  const foldChain = parentGroup ? parentChain : (scope.fold?.[section] ?? null);
+  const childChain = useMemo<FoldChain>(
+    () => (entry, delta) => {
+      const inside = motion.slideBelow(entry, delta, { timing: FOLD_TIMING, tail: false });
+      const up = foldChain ? foldChain(`g:${groupId}`, delta) : null;
+      return inside ?? up;
+    },
+    [motion.slideBelow, foldChain, groupId],
+  );
+  const [foldSlide, setFoldSlide] = useState<FoldSlide | null>(null);
+  const lastStored = useRef(stored);
+  useLayoutEffect(() => {
+    if (lastStored.current === stored) return;
+    lastStored.current = stored;
+    const s = useBrowser.getState();
+    const group = s.groups[groupId];
+    if (!foldChain || !group || !flat || !scope.enabled || peek || collapsed !== stored || selectedInside || !uniformRows(entries) || !foldsSettled(windowId)) return setFoldSlide(null);
+    const height = (closed: boolean) => entryHeight({ ...s, groups: { ...s.groups, [groupId]: { ...group, collapsed: closed } } }, windowId, profileId, `g:${groupId}`);
+    const delta = height(false) - height(true);
+    const shift = delta > 0 ? foldChain(`g:${groupId}`, stored ? delta : -delta) : null;
+    if (shift) holdFolds(windowId);
+    setFoldSlide(shift ? { shift, delta, expand: !stored, kept: activeEntry } : null);
+  }, [stored]);
 
   const spec = color ? GROUP_COLORS[color] : null;
   const fill = spec ? withAlpha(spec.hex, 0.16) : tokens.groupFill;
@@ -85,25 +109,28 @@ export const GroupBlock = memo(function GroupBlock({ groupId, section, parentGro
         </View>
         <View style={{ marginLeft: ARC_FOLDER_INDENT }}>
           <FolderScope groupId={groupId}>
-            <Fold
-              fold={fold}
-              collapsed={collapsed}
-              entries={motion.slots(entries).map((slot) =>
-                "ghost" in slot
-                  ? { key: slot.ghost.key, ghost: true, node: <GhostSlot snapshot={slot.ghost.snapshot} top={slot.top} opacity={slot.ghost.opacity} /> }
-                  : {
-                      key: slot.entry,
-                      node: <HierarchyEntry entry={slot.entry} section={section} parentGroup={groupId} motion={motion.motion(slot.entry)} peek={collapsed && slot.entry === activeEntry} />,
-                    },
-              )}
-              keep={activeEntry}
-              gap={layout.rowGap}
-              rowHeight={uniformRows(entries) ? layout.rowHeight : undefined}
-              padTop={entries.length ? frame.padTop : 0}
-              padBottom={frame.padBottom}
-              mountClosed={selectedInside}
-              footer={<GroupTail groupId={groupId} section={section} />}
-            />
+            <FoldChainContext.Provider value={fold.moving ? null : childChain}>
+              <Fold
+                fold={fold}
+                collapsed={collapsed}
+                entries={motion.slots(entries).map((slot) =>
+                  "ghost" in slot
+                    ? { key: slot.ghost.key, ghost: true, node: <GhostSlot snapshot={slot.ghost.snapshot} top={slot.top} opacity={slot.ghost.opacity} /> }
+                    : {
+                        key: slot.entry,
+                        node: <HierarchyEntry entry={slot.entry} section={section} parentGroup={groupId} motion={motion.motion(slot.entry)} peek={collapsed && slot.entry === activeEntry} />,
+                      },
+                )}
+                keep={activeEntry}
+                gap={layout.rowGap}
+                rowHeight={uniformRows(entries) ? layout.rowHeight : undefined}
+                padTop={entries.length ? frame.padTop : 0}
+                padBottom={frame.padBottom}
+                mountClosed={selectedInside}
+                footer={<GroupTail groupId={groupId} section={section} />}
+                slide={foldSlide}
+              />
+            </FoldChainContext.Provider>
           </FolderScope>
         </View>
         {motion.tail ? <Animated.View style={{ marginTop: motion.tail }} /> : null}

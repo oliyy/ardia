@@ -32,6 +32,7 @@ import { SidebarAddressRow, SidebarHeaderTools } from "./sidebar/AddressBar";
 import { canTidyPins } from "../store/tidyPins";
 import { ClearDivider, dividerHeight, useSidebarHoverProps } from "./sidebar/ClearDivider";
 import { DragGhost, DropLine } from "./sidebar/DragGhost";
+import { FOLD_TIMING } from "./sidebar/Fold";
 import { DragProvider, DragScope, useDragController, useDragging, useDragItem, usePinnedCount, type Ghost } from "./sidebar/dnd";
 import { SidebarDropArea } from "./sidebar/fileDrop";
 import { useClipped, useShift, type ClipSource, type EntryMotion } from "./sidebar/entryMotion";
@@ -584,7 +585,14 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
   };
   const pinnedMotion = usePinnedMotion(windowId, profileId, pinned, pinnedCaptured, animated, boundary);
   const liftOf = (entry: string) => rootLift(addressBar, pinned[pinned.indexOf(entry) - 1], entry);
-  const scope = useMemo(() => ({ enabled: animated, slideBelow: motion.slideBelow }), [animated, motion.slideBelow]);
+  const fold = useMemo(
+    () => ({
+      pinned: (entry: string, delta: number) => pinnedMotion.slideBelow(entry, delta, { timing: FOLD_TIMING, tail: true }),
+      list: (entry: string, delta: number) => motion.slideBelow(entry, delta, { timing: FOLD_TIMING, tail: true }),
+    }),
+    [pinnedMotion.slideBelow, motion.slideBelow],
+  );
+  const scope = useMemo(() => ({ enabled: animated, slideBelow: motion.slideBelow, fold }), [animated, motion.slideBelow, fold]);
   if (geometry) geometry.current.newTabAtTop = newTabsAtTop && inlineNewTab;
   return (
     <ListMotionContext.Provider value={scope}>
