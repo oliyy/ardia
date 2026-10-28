@@ -8531,10 +8531,304 @@ index d6a40e42d9328fbc2f82c5e2ee1a00666a246aa5..cbf9bd8bb60893524f96306f0786ae01
  RCT_EXPORT_SHADOW_PROPERTY(borderRightWidth, float)
  RCT_EXPORT_SHADOW_PROPERTY(borderBottomWidth, float)
 diff --git a/React/Views/ScrollView/RCTScrollView.m b/React/Views/ScrollView/RCTScrollView.m
-index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a50af9f28 100644
+index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..09028d6278581014f3287bc575d9ce532e773e4e 100644
 --- a/React/Views/ScrollView/RCTScrollView.m
 +++ b/React/Views/ScrollView/RCTScrollView.m
-@@ -299,6 +299,7 @@ - (void)setAccessibilityLabel:(NSString *)accessibilityLabel
+@@ -8,6 +8,7 @@
+ #import "RCTScrollView.h"
+ 
+ #import <React/RCTUIKit.h> // [macOS]
++#import <objc/runtime.h>
+ 
+ #import "RCTConvert.h"
+ #import "RCTHandledKey.h" // [macOS]
+@@ -53,6 +54,263 @@ + (BOOL)isCompatibleWithResponsiveScrolling;
+ #endif // macOS]
+ @end
+ 
++#if TARGET_OS_OSX
++static const NSTimeInterval ArdiaWheelLatchExpiry = 0.5;
++
++static NSUInteger ArdiaWheelGeneration;
++static NSUInteger ArdiaWheelDispatchDepth;
++static __unsafe_unretained NSWindow *ArdiaWheelDispatchWindow;
++static __unsafe_unretained NSEvent *ArdiaWheelDispatchEvent;
++
++static NSUInteger ArdiaWheelLatchGeneration;
++static __weak RCTCustomScrollView *ArdiaWheelLatchTarget;
++static __weak NSWindow *ArdiaWheelLatchWindow;
++static NSEventModifierFlags ArdiaWheelLatchFlags;
++static NSTimeInterval ArdiaWheelLatchTimestamp;
++static NSTimeInterval ArdiaWheelLatchUptime;
++static IMP ArdiaWheelLatchHook;
++
++static NSUInteger ArdiaWheelCaptureGeneration;
++static __unsafe_unretained NSEvent *ArdiaWheelCaptureEvent;
++static __weak RCTCustomScrollView *ArdiaWheelCaptured;
++
++static NSHashTable<NSView *> *ArdiaWheelLatchInserted;
++
++static NSUInteger ArdiaWheelPruneGeneration;
++static __unsafe_unretained NSEvent *ArdiaWheelPruneEvent;
++static __weak RCTCustomScrollView *ArdiaWheelPruneTarget;
++static NSPoint ArdiaWheelPrunePoint;
++
++static void ArdiaWheelLatchInvalidate(void)
++{
++  ArdiaWheelGeneration++;
++}
++
++static IMP ArdiaWheelForwarding(void)
++{
++  return class_getMethodImplementation([NSView class], @selector(scrollWheel:));
++}
++
++static BOOL ArdiaWheelForwards(NSView *view, IMP forwarding)
++{
++  return class_getMethodImplementation(object_getClass(view), @selector(scrollWheel:)) == forwarding;
++}
++
++static BOOL ArdiaWheelSubviewsTransparent(NSView *view, IMP forwarding)
++{
++  for (NSView *child in view.subviews) {
++    if (child.nextResponder != view || !ArdiaWheelForwards(child, forwarding) || !ArdiaWheelSubviewsTransparent(child, forwarding)) {
++      return NO;
++    }
++  }
++  return YES;
++}
++
++static BOOL ArdiaWheelPruneArmed(void)
++{
++  return ArdiaWheelPruneEvent != nil && ArdiaWheelPruneGeneration == ArdiaWheelGeneration;
++}
++
++static BOOL ArdiaWheelLatchEditingInside(NSWindow *window, NSView *target)
++{
++  NSResponder *responder = window.firstResponder;
++  return [responder isKindOfClass:[NSText class]] && [(NSView *)responder isDescendantOf:target];
++}
++
++static void ArdiaWheelLatchSubviewAdded(NSView *subview)
++{
++  if (!NSThread.isMainThread) {
++    dispatch_async(dispatch_get_main_queue(), ^{
++      ArdiaWheelLatchInvalidate();
++    });
++    return;
++  }
++  if (ArdiaWheelLatchGeneration != ArdiaWheelGeneration) {
++    return;
++  }
++  if (NSProcessInfo.processInfo.systemUptime - ArdiaWheelLatchUptime > ArdiaWheelLatchExpiry) {
++    ArdiaWheelLatchInvalidate();
++    return;
++  }
++  RCTCustomScrollView *target = ArdiaWheelLatchTarget;
++  if (target == nil) {
++    return;
++  }
++  if ([target isDescendantOf:subview]) {
++    ArdiaWheelLatchInvalidate();
++    return;
++  }
++  if (![subview isDescendantOf:target]) {
++    return;
++  }
++  const IMP forwarding = ArdiaWheelForwarding();
++  if (ArdiaWheelPruneArmed() || !ArdiaWheelForwards(subview, forwarding) || !ArdiaWheelSubviewsTransparent(subview, forwarding)) {
++    ArdiaWheelLatchInvalidate();
++    return;
++  }
++  [ArdiaWheelLatchInserted addObject:subview];
++}
++
++static BOOL ArdiaWheelLatchInsertionsStandard(void)
++{
++  for (NSView *view in ArdiaWheelLatchInserted) {
++    if (view.nextResponder != view.superview) {
++      return NO;
++    }
++  }
++  [ArdiaWheelLatchInserted removeAllObjects];
++  return YES;
++}
++
++static void ArdiaWheelLatchWatch(void)
++{
++  static dispatch_once_t once;
++  dispatch_once(&once, ^{
++    ArdiaWheelLatchInserted = [NSHashTable weakObjectsHashTable];
++    const SEL selector = @selector(didAddSubview:);
++    Method method = class_getInstanceMethod([NSView class], selector);
++    const IMP original = method_getImplementation(method);
++    ArdiaWheelLatchHook = imp_implementationWithBlock(^(NSView *view, NSView *subview) {
++      ((void (*)(id, SEL, NSView *))original)(view, selector, subview);
++      ArdiaWheelLatchSubviewAdded(subview);
++    });
++    method_setImplementation(method, ArdiaWheelLatchHook);
++    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
++    [center addObserverForName:NSApplicationDidResignActiveNotification
++                        object:nil
++                         queue:nil
++                    usingBlock:^(__unused NSNotification *note) {
++                      ArdiaWheelLatchInvalidate();
++                    }];
++    [center addObserverForName:NSWindowWillCloseNotification
++                        object:nil
++                         queue:nil
++                    usingBlock:^(NSNotification *note) {
++                      if (note.object == ArdiaWheelLatchWindow) {
++                        ArdiaWheelLatchInvalidate();
++                      }
++                    }];
++  });
++}
++
++static BOOL ArdiaWheelLatchUsable(RCTCustomScrollView *target, NSWindow *window, NSEvent *event)
++{
++  return target != nil && ArdiaWheelLatchWindow == window && target.window == window && !target.isHiddenOrHasHiddenAncestor &&
++      target.isScrollEnabled &&
++      (event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask) == ArdiaWheelLatchFlags &&
++      !ArdiaWheelLatchEditingInside(window, target);
++}
++
++static void ArdiaWheelLatchWillSend(NSWindow *window, NSEvent *event)
++{
++  const NSEventPhase phase = event.phase;
++  if (phase & (NSEventPhaseMayBegin | NSEventPhaseBegan)) {
++    ArdiaWheelLatchInvalidate();
++    ArdiaWheelCaptureGeneration = ArdiaWheelGeneration;
++    ArdiaWheelCaptureEvent = (phase & NSEventPhaseBegan) ? event : nil;
++    ArdiaWheelCaptured = nil;
++    return;
++  }
++  if (!(phase & (NSEventPhaseChanged | NSEventPhaseEnded | NSEventPhaseCancelled)) || ArdiaWheelLatchGeneration != ArdiaWheelGeneration) {
++    return;
++  }
++  if (event.timestamp - ArdiaWheelLatchTimestamp > ArdiaWheelLatchExpiry || !ArdiaWheelLatchInsertionsStandard()) {
++    ArdiaWheelLatchInvalidate();
++    return;
++  }
++  ArdiaWheelLatchTimestamp = event.timestamp;
++  ArdiaWheelLatchUptime = NSProcessInfo.processInfo.systemUptime;
++  RCTCustomScrollView *target = ArdiaWheelLatchTarget;
++  if (ArdiaWheelLatchUsable(target, window, event)) {
++    ArdiaWheelPruneGeneration = ArdiaWheelGeneration;
++    ArdiaWheelPruneEvent = event;
++    ArdiaWheelPruneTarget = target;
++    ArdiaWheelPrunePoint = event.locationInWindow;
++  }
++}
++
++static void ArdiaWheelLatchDidSend(NSWindow *window, NSEvent *event, BOOL completed)
++{
++  ArdiaWheelPruneEvent = nil;
++  ArdiaWheelPruneTarget = nil;
++  const NSUInteger generation = ArdiaWheelCaptureGeneration;
++  RCTCustomScrollView *captured = ArdiaWheelCaptureEvent == event && generation == ArdiaWheelGeneration ? ArdiaWheelCaptured : nil;
++  ArdiaWheelCaptureEvent = nil;
++  ArdiaWheelCaptured = nil;
++  const NSEventPhase phase = event.phase;
++  if (!completed || phase == NSEventPhaseNone || (phase & (NSEventPhaseEnded | NSEventPhaseCancelled))) {
++    ArdiaWheelLatchInvalidate();
++    return;
++  }
++  if (captured == nil || captured.window != window || !ArdiaWheelSubviewsTransparent(captured, ArdiaWheelForwarding()) ||
++      ArdiaWheelLatchEditingInside(window, captured)) {
++    return;
++  }
++  ArdiaWheelLatchWatch();
++  if (generation != ArdiaWheelGeneration ||
++      class_getMethodImplementation([NSView class], @selector(didAddSubview:)) != ArdiaWheelLatchHook) {
++    return;
++  }
++  [ArdiaWheelLatchInserted removeAllObjects];
++  ArdiaWheelLatchTarget = captured;
++  ArdiaWheelLatchWindow = window;
++  ArdiaWheelLatchFlags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
++  ArdiaWheelLatchTimestamp = event.timestamp;
++  ArdiaWheelLatchUptime = NSProcessInfo.processInfo.systemUptime;
++  ArdiaWheelLatchGeneration = generation;
++}
++
++static BOOL ArdiaWheelPruneApplies(RCTCustomScrollView *view, NSPoint point)
++{
++  if (ArdiaWheelPruneGeneration != ArdiaWheelGeneration || ArdiaWheelDispatchDepth != 1 ||
++      ArdiaWheelDispatchEvent != ArdiaWheelPruneEvent || view.window != ArdiaWheelDispatchWindow) {
++    return NO;
++  }
++  const NSPoint expected = [view.superview convertPoint:ArdiaWheelPrunePoint fromView:nil];
++  return fabs(point.x - expected.x) < 0.01 && fabs(point.y - expected.y) < 0.01;
++}
++
++void ArdiaScrollWheelLatchSendEvent(NSWindow *window, NSEvent *event, void (NS_NOESCAPE ^send)(void))
++{
++  if (ArdiaWheelDispatchDepth > 0 && ArdiaWheelDispatchWindow == window && ArdiaWheelDispatchEvent == event) {
++    send();
++    return;
++  }
++  if (ArdiaWheelDispatchDepth > 0) {
++    ArdiaWheelLatchInvalidate();
++  }
++  __unsafe_unretained NSWindow *const outerWindow = ArdiaWheelDispatchWindow;
++  __unsafe_unretained NSEvent *const outerEvent = ArdiaWheelDispatchEvent;
++  ArdiaWheelDispatchDepth++;
++  ArdiaWheelDispatchWindow = window;
++  ArdiaWheelDispatchEvent = event;
++  const BOOL latching = ArdiaWheelDispatchDepth == 1 && event.type == NSEventTypeScrollWheel;
++  BOOL completed = NO;
++  @try {
++    if (latching) {
++      ArdiaWheelLatchWillSend(window, event);
++    }
++    send();
++    completed = YES;
++  } @finally {
++    BOOL finished = !latching;
++    @try {
++      if (latching) {
++        ArdiaWheelLatchDidSend(window, event, completed);
++        finished = YES;
++      }
++    } @finally {
++      if (!finished) {
++        ArdiaWheelLatchInvalidate();
++      }
++      ArdiaWheelDispatchDepth--;
++      ArdiaWheelDispatchWindow = outerWindow;
++      ArdiaWheelDispatchEvent = outerEvent;
++    }
++  }
++}
++#endif
++
+ @implementation RCTCustomScrollView
+ 
+ - (instancetype)initWithFrame:(CGRect)frame
+@@ -122,8 +380,21 @@ - (void)scrollWheel:(NSEvent *)theEvent
+     [[self nextResponder] scrollWheel:theEvent];
+     return;
+   }
++  if (theEvent == ArdiaWheelCaptureEvent && ArdiaWheelCaptureGeneration == ArdiaWheelGeneration && ArdiaWheelCaptured == nil) {
++    ArdiaWheelCaptured = self;
++  }
+   [super scrollWheel:theEvent];
+ }
++
++- (NSView *)hitTest:(NSPoint)point
++{
++  if (ArdiaWheelPruneTarget == self && ArdiaWheelPruneApplies(self, point)) {
++    ArdiaWheelPruneTarget = nil;
++    ArdiaWheelPruneEvent = nil;
++    return !self.isHidden && NSMouseInRect(point, self.frame, self.superview.isFlipped) ? self : nil;
++  }
++  return [super hitTest:point];
++}
+ #endif // macOS]
+ 
+ - (void)handleCustomPan:(__unused UIGestureRecognizer *)sender // [macOS]
+@@ -299,6 +570,7 @@ - (void)setAccessibilityLabel:(NSString *)accessibilityLabel
  }
  - (void)setDocumentView:(__kindof NSView *)documentView
  {
@@ -8542,7 +8836,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a
    [super setDocumentView:documentView];
    [documentView setAccessibilityLabel:[self accessibilityLabel]];
  }
-@@ -330,6 +331,10 @@ @implementation RCTScrollView {
+@@ -330,6 +602,10 @@ @implementation RCTScrollView {
    BOOL _notifyDidScroll;
    BOOL _disableScrollEvents;
    NSPoint _lastScrollPosition;
@@ -8553,7 +8847,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a
  #endif // macOS]
    CGRect _lastClippedToRect;
    uint16_t _coalescingKey;
-@@ -740,13 +745,26 @@ - (void)viewDidMoveToWindow
+@@ -740,13 +1016,26 @@ - (void)viewDidMoveToWindow
    NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
    if ([self window] == nil) {
      // Unregister for bounds change notifications
@@ -8581,7 +8875,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a
      // Register for bounds change notifications so we can track scrolling
      [defaultCenter addObserver:self
                        selector:@selector(scrollViewDocumentViewBoundsDidChange:)
-@@ -756,9 +774,18 @@ - (void)viewDidMoveToWindow
+@@ -756,9 +1045,18 @@ - (void)viewDidMoveToWindow
                        selector:@selector(preferredScrollerStyleDidChange:)
                            name:NSPreferredScrollerStyleDidChangeNotification
                          object:nil];
@@ -8600,7 +8894,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a
  }
  #endif // macOS]
  
-@@ -888,6 +915,7 @@ - (void)flashScrollIndicators
+@@ -888,6 +1186,7 @@ - (void)flashScrollIndicators
  #if TARGET_OS_OSX // [macOS
  - (void)scrollViewDocumentViewBoundsDidChange:(__unused NSNotification *)notification
  {
@@ -8608,7 +8902,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a
    if (_disableScrollEvents) {
      return;
    }
-@@ -901,6 +929,28 @@ - (void)scrollViewDocumentViewBoundsDidChange:(__unused NSNotification *)notific
+@@ -901,6 +1200,28 @@ - (void)scrollViewDocumentViewBoundsDidChange:(__unused NSNotification *)notific
      [self scrollViewDidScroll:_scrollView];
    }
  }

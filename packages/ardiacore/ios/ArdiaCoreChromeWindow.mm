@@ -11,6 +11,8 @@
 
 #include <initializer_list>
 
+extern "C" void ArdiaScrollWheelLatchSendEvent(NSWindow *window, NSEvent *event, void (NS_NOESCAPE ^send)(void));
+
 static const NSUInteger kPresentationRetries = 2;
 static const NSTimeInterval kPresentationRetryDelay = 1.0 / 60;
 
@@ -51,6 +53,7 @@ NSColor *WindowColor() {
 constexpr CGFloat kTrafficLightInsetX = 18;
 constexpr CGFloat kTrafficLightTop = 20;
 const void *kInsetLightsKey = &kInsetLightsKey;
+const void *kLatchesScrollWheelKey = &kLatchesScrollWheelKey;
 const void *kLightsCenterKey = &kLightsCenterKey;
 
 const void *kLoggedKey = &kLoggedKey;
@@ -274,8 +277,32 @@ void InsetTrafficLights(NSWindow *window) {
 
 void WatchFullScreenLights(NSWindow *window);
 
+void LatchScrollWheelGestures(NSWindow *window) {
+  objc_setAssociatedObject(window, kLatchesScrollWheelKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  static NSMutableSet<Class> *wrappedClasses = [NSMutableSet set];
+  static NSMutableSet<NSValue *> *wrappers = [NSMutableSet set];
+  Class cls = window.class;
+  const SEL sel = @selector(sendEvent:);
+  Method method = class_getInstanceMethod(cls, sel);
+  const IMP original = method_getImplementation(method);
+  if ([wrappedClasses containsObject:cls] || [wrappers containsObject:[NSValue valueWithPointer:(const void *)original]]) return;
+  [wrappedClasses addObject:cls];
+  const IMP ours = imp_implementationWithBlock(^(NSWindow *target, NSEvent *event) {
+    if (!objc_getAssociatedObject(target, kLatchesScrollWheelKey)) {
+      ((void (*)(id, SEL, NSEvent *))original)(target, sel, event);
+      return;
+    }
+    ArdiaScrollWheelLatchSendEvent(target, event, ^{
+      ((void (*)(id, SEL, NSEvent *))original)(target, sel, event);
+    });
+  });
+  [wrappers addObject:[NSValue valueWithPointer:(const void *)ours]];
+  if (!class_addMethod(cls, sel, ours, method_getTypeEncoding(method))) method_setImplementation(method, ours);
+}
+
 void ConfigureWindow(NSWindow *window) {
   InstallTrafficLightsLog();
+  LatchScrollWheelGestures(window);
   const NSRect frame = window.frame;
   window.styleMask |= NSWindowStyleMaskFullSizeContentView;
   if (!NSEqualRects(window.frame, frame)) [window setFrame:frame display:NO];
