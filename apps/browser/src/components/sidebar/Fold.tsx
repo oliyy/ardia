@@ -18,7 +18,7 @@ export const holdFolds = (windowId: string) => void foldsUntil.set(windowId, Dat
 const FoldHidden = createContext(false);
 export const useFoldHidden = () => useContext(FoldHidden);
 
-type FoldState = { open: Animated.Value; moving: boolean };
+type FoldState = { open: Animated.Value; moving: boolean; settled: boolean };
 
 const FoldedAway = createContext(false);
 
@@ -55,7 +55,7 @@ export function useFold(collapsed: boolean): FoldState {
       animation.stop();
     };
   }, [collapsed]);
-  return { open, moving: running || settled !== collapsed };
+  return { open, moving: running || settled !== collapsed, settled };
 }
 
 export type FoldEntry = { key: string; node: ReactNode; ghost?: boolean };
@@ -87,7 +87,7 @@ export function Fold({
   footer?: ReactNode;
   slide?: FoldSlide | null;
 }) {
-  const { open, moving } = fold;
+  const { open, moving, settled: restCollapsed } = fold;
   const outerHidden = useFoldHidden();
   const parentAway = useFoldedAway();
   const measuring = rowHeight === undefined;
@@ -147,7 +147,7 @@ export function Fold({
           ? { height: 0, opacity: 0, overflow: "hidden" as const }
           : null;
   const mountAll = !collapsed || moving || mountClosed || measuring;
-  const footerHidden = outerHidden || collapsed;
+  const footerHidden = outerHidden || restCollapsed;
 
   return (
     <Animated.View style={outer} pointerEvents={collapsed ? "box-none" : "auto"}>
@@ -155,14 +155,14 @@ export function Fold({
         {entries.map(({ key, node }) => {
           const stays = key === kept;
           if (!stays && !mountAll) return null;
-          const hidden = outerHidden || (collapsed && !stays);
+          const hidden = outerHidden || (restCollapsed && !stays);
           return (
             <Animated.View
               key={key}
               style={folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : sliding ? (stays ? slideStyles?.kept : slideStyles?.entry) : null}
               pointerEvents={collapsed && !stays ? "none" : "auto"}
             >
-              <FoldedAway.Provider value={parentAway || ((collapsed || moving) && !stays)}>
+              <FoldedAway.Provider value={parentAway || (!stays && (restCollapsed || (moving && !collapsed)))}>
                 <FoldHidden.Provider value={hidden}>
                   {measuring || mountClosed ? (
                     <Surface
