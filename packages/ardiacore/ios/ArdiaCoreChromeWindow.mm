@@ -286,6 +286,7 @@ void ConfigureWindow(NSWindow *window) {
   window.backgroundColor = WindowColor();
   window.releasedWhenClosed = NO;
   window.tabbingMode = NSWindowTabbingModeDisallowed;
+  window.restorable = NO;
   InsetTrafficLights(window);
   WatchFullScreenLights(window);
 }
