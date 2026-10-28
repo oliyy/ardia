@@ -166,15 +166,17 @@ final class WindowManager: NSObject, NSWindowDelegate {
     let reveal: () -> Void = { [weak self, weak window] in
       if let observer { NotificationCenter.default.removeObserver(observer) }
       observer = nil
-      guard let self, let waiting = self.unrevealed.removeValue(forKey: id) else { return }
-      Self.commitPendingPresentation()
-      if let window, let scales = self.entrances.removeValue(forKey: id) {
-        LittleWindowMotion.enter(window, scales: scales)
-      } else {
-        window?.alphaValue = 1
+      guard let self, self.unrevealed[id] != nil else { return }
+      Self.afterPresentationCommits { [weak self, weak window] in
+        guard let self, let waiting = self.unrevealed.removeValue(forKey: id) else { return }
+        if let window, let scales = self.entrances.removeValue(forKey: id) {
+          LittleWindowMotion.enter(window, scales: scales)
+        } else {
+          window?.alphaValue = 1
+        }
+        CATransaction.flush()
+        waiting.forEach { $0() }
       }
-      CATransaction.flush()
-      waiting.forEach { $0() }
     }
     observer = NotificationCenter.default.addObserver(forName: Notification.Name("RCTContentDidAppearNotification"), object: root, queue: .main) {
       _ in reveal()
@@ -418,6 +420,11 @@ final class WindowManager: NSObject, NSWindowDelegate {
       pendingOrder.removeAll { $0 == id }
       return
     }
+    guard let window = windows[id], ChromeWindows.root(of: window) != nil else { return closeNow(id: id) }
+    Self.afterPresentationCommits { [weak self] in self?.closeNow(id: id) }
+  }
+
+  private func closeNow(id: String) {
     entrances[id] = nil
     contentShown.remove(id)
     if let observer = firstContentObservers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(observer) }
@@ -426,7 +433,6 @@ final class WindowManager: NSObject, NSWindowDelegate {
       NotificationCenter.default.removeObserver(self, name: nil, object: window)
       windows[id] = nil
       window.animationBehavior = .none
-      Self.commitPendingPresentation()
       window.orderOut(nil)
       CATransaction.flush()
       if let waiting = unrevealed.removeValue(forKey: id) { waiting.forEach { $0() } }
@@ -442,10 +448,21 @@ final class WindowManager: NSObject, NSWindowDelegate {
     window.close()
   }
 
-  static func commitPendingPresentation() {
+  private static let presentationRetries = 2
+  private static let presentationRetryDelay = 1.0 / 60
+
+  @discardableResult static func commitPendingPresentation() -> Bool {
     let commit = NSSelectorFromString("ardia_commitPresentation")
-    guard let view = NSClassFromString("RCTView"), (view as AnyObject).responds(to: commit) else { return }
-    _ = (view as AnyObject).perform(commit)
+    guard let view = NSClassFromString("RCTView") as? NSObject.Type, (view as AnyObject).responds(to: commit),
+      let call = (view as AnyObject).method(for: commit)
+    else { return true }
+    typealias Commit = @convention(c) (AnyObject, Selector) -> ObjCBool
+    return unsafeBitCast(call, to: Commit.self)(view, commit).boolValue
+  }
+
+  private static func afterPresentationCommits(attempt: Int = 0, _ action: @escaping () -> Void) {
+    guard !commitPendingPresentation(), attempt < presentationRetries else { return action() }
+    DispatchQueue.main.asyncAfter(deadline: .now() + presentationRetryDelay) { afterPresentationCommits(attempt: attempt + 1, action) }
   }
 
   func focus(id: String) {
@@ -779,7 +796,6 @@ enum LittleWindowMotion {
     view.alphaValue = 1
     layer.add(group(parts, duration: entranceDuration), forKey: entranceKey)
     CATransaction.commit()
-    WindowManager.commitPendingPresentation()
     CATransaction.flush()
     window.alphaValue = 1
     DispatchQueue.main.asyncAfter(deadline: .now() + settleAfter, execute: settle)

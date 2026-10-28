@@ -11,10 +11,20 @@
 
 #include <initializer_list>
 
-static void ACCommitPendingPresentation(void) {
+static const NSUInteger kPresentationRetries = 2;
+static const NSTimeInterval kPresentationRetryDelay = 1.0 / 60;
+
+static BOOL ACCommitPendingPresentation(void) {
   Class view = NSClassFromString(@"RCTView");
   SEL commit = NSSelectorFromString(@"ardia_commitPresentation");
-  if ([view respondsToSelector:commit]) ((void (*)(id, SEL))objc_msgSend)(view, commit);
+  return ![view respondsToSelector:commit] || ((BOOL (*)(id, SEL))objc_msgSend)(view, commit);
+}
+
+static void ACAfterPresentationCommits(NSUInteger attempt, void (^action)(void)) {
+  if (ACCommitPendingPresentation() || attempt >= kPresentationRetries) return action();
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPresentationRetryDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    ACAfterPresentationCommits(attempt + 1, action);
+  });
 }
 
 namespace {
@@ -948,15 +958,17 @@ static NSMapTable<ArdiaCoreTab *, NSNumber *> *FullScreenChanges() {
   __weak ACWindowFullScreen *weakSelf = self;
   [ACPageCover coverTabs:[self shownTabs:tab entering:entering]
                     then:^(NSArray<ACPageCover *> *covers) {
-                      ACWindowFullScreen *me = weakSelf;
-                      if (!me || me->_coverTurn != turn) {
-                        for (ACPageCover *cover in covers) [cover uncover:NO];
-                        return;
-                      }
-                      me->_picturing = NO;
-                      for (ACPageCover *cover in me->_covers) [cover uncover:NO];
-                      me->_covers = covers;
-                      [me toggle:entering];
+                      ACAfterPresentationCommits(0, ^{
+                        ACWindowFullScreen *me = weakSelf;
+                        if (!me || me->_coverTurn != turn) {
+                          for (ACPageCover *cover in covers) [cover uncover:NO];
+                          return;
+                        }
+                        me->_picturing = NO;
+                        for (ACPageCover *cover in me->_covers) [cover uncover:NO];
+                        me->_covers = covers;
+                        [me toggle:entering];
+                      });
                     }];
 }
 
@@ -973,7 +985,6 @@ static NSMapTable<ArdiaCoreTab *, NSNumber *> *FullScreenChanges() {
   _entered = entering;
   _asked = entering ? 1 : -1;
   if (!entering) _leftTab = nil;
-  ACCommitPendingPresentation();
   [CATransaction flush];
   ToggleWindowFullScreen(coreWindow);
   NSArray *covers = _covers;
