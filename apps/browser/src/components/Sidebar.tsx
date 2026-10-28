@@ -16,7 +16,7 @@ import { isPlainSpaceSwitch } from "../store/spaceSwitch";
 import { splitOf } from "../store/splits";
 import { openNewTabInSplit } from "./layout/splitActions";
 import { RESIZE_BAND } from "./layout/useResizeDrag";
-import { listTopGap, SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, SIDEBAR_HEADER_WITH_FIELD, useAddressBarInSidebar } from "./layout/windowLayout";
+import { AddressBarScope, listTopGap, SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT, SIDEBAR_HEADER_WITH_FIELD, useAddressBarInSidebar } from "./layout/windowLayout";
 import { SIDEBAR_PLAYER_HEIGHT, SidebarPlayer, useSidebarPlayerTab } from "./media/SidebarPlayer";
 import { HoverSlot } from "./HoverSlot";
 import { LibraryPanel } from "./library/LibraryPanel";
@@ -194,25 +194,27 @@ export function Sidebar({ width, resizing, receipt }: { width: number; resizing:
                   onLayout={(e) => setAvailable(e.nativeEvent.layout.height)}
                 >
                   <TileInnerProvider value={tileInner}>
-                    {pages.map((page) => (
-                      <SidebarPage
-                        key={page.id}
-                        profileId={page.id}
-                        slot={page.slot}
-                        pageWidth={pageWidth}
-                        current={page.id === shown}
-                        resting={!!page.resting}
-                        docked={dockedPage(page.id)}
-                        glowRoom={glowRoom}
-                        height={available}
-                        rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
-                        geometry={page.id === shown ? geometry : undefined}
-                        bottomLine={addressBar && footer > 0}
-                        onListHeight={onListHeight}
-                        onScrollView={onScrollView}
-                        onScrollY={onScrollY}
-                      />
-                    ))}
+                    <AddressBarScope>
+                      {pages.map((page) => (
+                        <SidebarPage
+                          key={page.id}
+                          profileId={page.id}
+                          slot={page.slot}
+                          pageWidth={pageWidth}
+                          current={page.id === shown}
+                          resting={!!page.resting}
+                          docked={dockedPage(page.id)}
+                          glowRoom={glowRoom}
+                          height={available}
+                          rows={page.id === shown ? undefined : Math.ceil(available / ROW_PITCH) + 1}
+                          geometry={page.id === shown ? geometry : undefined}
+                          bottomLine={addressBar && footer > 0}
+                          onListHeight={onListHeight}
+                          onScrollView={onScrollView}
+                          onScrollY={onScrollY}
+                        />
+                      ))}
+                    </AddressBarScope>
                   </TileInnerProvider>
                 </View>
 

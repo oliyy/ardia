@@ -1,5 +1,5 @@
 import type { AreaLightPalette } from "@ardia/shaders";
-import { createContext, createElement, useContext, useMemo, type ReactNode } from "react";
+import { createContext, createElement, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { useBrowser, type BrowserState } from "../store/browser";
 import { PageProfileContext, WindowContext } from "../store/hooks";
 import type { Profile, ProfileColor, ProfileTheme } from "../store/types";
@@ -268,20 +268,51 @@ function themeSelector(windowId: string | null, page: string | null): ThemeSelec
   };
 }
 
-const ThemeContext = createContext<ThemeSelector | null>(null);
-const unscopedTheme = themeSelector(null, null);
+type ThemeSource = { read: () => Theme; subscribe: (changed: () => void) => () => void };
+
+function themeSource(select: ThemeSelector): ThemeSource {
+  const listeners = new Set<() => void>();
+  let shown: Theme | null = null;
+  let stop: (() => void) | null = null;
+  const read = () => select(useBrowser.getState());
+  return {
+    read,
+    subscribe(changed) {
+      listeners.add(changed);
+      if (!stop) {
+        shown = read();
+        stop = useBrowser.subscribe((s) => {
+          const next = select(s);
+          if (next === shown) return;
+          shown = next;
+          for (const notify of [...listeners]) notify();
+        });
+      }
+      return () => {
+        listeners.delete(changed);
+        if (listeners.size || !stop) return;
+        stop();
+        stop = null;
+      };
+    },
+  };
+}
+
+const ThemeContext = createContext<ThemeSource | null>(null);
+const unscopedTheme = themeSource(themeSelector(null, null));
 
 export function ThemeScope({ children }: { children: ReactNode }) {
   const windowId = useContext(WindowContext);
   const page = useContext(PageProfileContext);
-  const select = useMemo(() => themeSelector(windowId, page), [windowId, page]);
-  return createElement(ThemeContext.Provider, { value: select }, children);
+  const source = useMemo(() => themeSource(themeSelector(windowId, page)), [windowId, page]);
+  return createElement(ThemeContext.Provider, { value: source }, children);
 }
 
 export function useTheme(): Theme {
   const scoped = useContext(ThemeContext);
   if (!scoped && __DEV__) console.warn("useTheme outside a ThemeScope");
-  return useBrowser(scoped ?? unscopedTheme);
+  const source = scoped ?? unscopedTheme;
+  return useSyncExternalStore(source.subscribe, source.read);
 }
 
 export const layout = {

@@ -37,7 +37,7 @@ export function groupCloseControl(s: BrowserState, groupId: string): CloseContro
   return openMembers(s, groupId).length ? UNLOAD_GROUP : null;
 }
 
-export const useGroupCloseControl = (groupId: string) => useBrowser((s) => groupCloseControl(s, groupId));
+export const useGroupCloseControl = (groupId: string | null) => useBrowser((s) => (groupId ? groupCloseControl(s, groupId) : null));
 
 export function pressGroupClose(groupId: string) {
   const s = useBrowser.getState();

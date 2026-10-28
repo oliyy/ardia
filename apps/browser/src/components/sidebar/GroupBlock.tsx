@@ -146,7 +146,7 @@ function GroupHeader({ groupId, windowId, collapsed, peek, open, flat }: { group
   const { hovered, hoverProps } = useRowHover(windowId, collapsed && !renaming ? { kind: "group", id: groupId } : null);
   const countdown = useMeetingCountdown(groupId);
   const folderColors = useFolderColors(group?.color ?? null);
-  const closeControl = useGroupCloseControl(groupId);
+  const closeControl = useGroupCloseControl(hovered && !renaming ? groupId : null);
   if (!group) return null;
   const target = { kind: "group" as const, id: groupId };
   const arcPaint = flat && !dropInto;

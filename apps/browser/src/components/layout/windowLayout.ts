@@ -1,9 +1,10 @@
+import { createContext, createElement, useContext, type ReactNode } from "react";
 import { create } from "zustand";
 import { switchOn } from "../../lib/killSwitches";
 import { ARC_LIGHTS_CENTER, LIGHTS_CENTER, lightsCenter, TOP_STRIP_LIGHTS_CENTER } from "./dockMotion";
 import { layout } from "../../lib/theme";
 import { useBrowser, type BrowserState } from "../../store/browser";
-import { useWindowId } from "../../store/hooks";
+import { useScopedBrowser, useWindowId } from "../../store/hooks";
 import { isSmallWindow } from "../../store/small";
 
 export function useTabLayout(): "sidebar" | "top" {
@@ -25,9 +26,18 @@ export function commandBarCentred(s: BrowserState, windowId: string): boolean {
   return s.settings.commandBarPlacement === "centred" && !!s.windows[windowId] && s.windows[windowId]!.kind !== "small";
 }
 
+const AddressBarContext = createContext<boolean | null>(null);
+
+export function AddressBarScope({ children }: { children: ReactNode }) {
+  const windowId = useWindowId();
+  const inSidebar = useBrowser((s) => addressBarInSidebar(s, windowId));
+  return createElement(AddressBarContext.Provider, { value: inSidebar }, children);
+}
+
 export function useAddressBarInSidebar(): boolean {
   const windowId = useWindowId();
-  return useBrowser((s) => addressBarInSidebar(s, windowId));
+  const scoped = useContext(AddressBarContext);
+  return useScopedBrowser(scoped, (s) => addressBarInSidebar(s, windowId));
 }
 
 const ARC_CARD = { top: 10, inset: 10, radius: 6 } as const;

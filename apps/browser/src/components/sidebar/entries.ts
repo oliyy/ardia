@@ -6,13 +6,47 @@ import { splitRowPanes } from "../../store/splits";
 import { ancestorIds } from "../../store/groups";
 import { splitIndex, stableList } from "../../store/structure";
 import { tileCells } from "../../store/tileFolders";
+import type { Tab } from "../../store/types";
 
 type SidebarEntries = { tiles: string[]; cells: string[]; pinned: string[]; list: string[] };
+
+const tabShapes = new WeakMap<BrowserState["tabs"], object>();
+let shapedTabs: BrowserState["tabs"] | null = null;
+let lastShape: object = {};
+
+const sameShape = (a: Tab | undefined, b: Tab | undefined) =>
+  a === b ||
+  (!!a &&
+    !!b &&
+    a.profileId === b.profileId &&
+    a.pinKey === b.pinKey &&
+    a.pinned === b.pinned &&
+    a.pinnedAsRow === b.pinnedAsRow &&
+    a.tileFolder === b.tileFolder &&
+    !a.liveItem === !b.liveItem &&
+    !a.url === !b.url &&
+    !a.navigation === !b.navigation &&
+    !a.adoptId === !b.adoptId);
+
+function sameTabShapes(was: BrowserState["tabs"], now: BrowserState["tabs"]): boolean {
+  const ids = Object.keys(now);
+  return ids.length === Object.keys(was).length && ids.every((id) => sameShape(was[id], now[id]));
+}
+
+export function tabsShape(tabs: BrowserState["tabs"]): object {
+  const known = tabShapes.get(tabs);
+  if (known) return known;
+  if (!shapedTabs || !sameTabShapes(shapedTabs, tabs)) lastShape = {};
+  shapedTabs = tabs;
+  tabShapes.set(tabs, lastShape);
+  return lastShape;
+}
 
 const memo = new Map<string, { inputs: unknown[]; result: SidebarEntries }>();
 
 export function sidebarEntries(s: BrowserState, windowId: string, profileId?: string): SidebarEntries {
-  const inputs = [s.tabs, s.windows, s.groups, s.splits, s.settings.newTabOpens, s.pinPlace, s.parkedPins];
+  const w = s.windows[windowId];
+  const inputs = [tabsShape(s.tabs), w?.tabIds, profileId ? null : w?.profileId, s.groups, s.splits, s.settings.newTabOpens, s.pinPlace, s.parkedPins];
   const key = profileId ? `${windowId}|${profileId}` : windowId;
   const cached = memo.get(key);
   if (cached && cached.inputs.every((v, i) => v === inputs[i])) return cached.result;
@@ -35,7 +69,7 @@ type Hierarchy = { tree: PinTree; tabs: Map<string, string>; groups: Map<string,
 const hierarchyMemo = new Map<string, { inputs: unknown[]; result: Hierarchy }>();
 
 export function windowHierarchy(s: BrowserState, windowId: string, profileId: string): Hierarchy {
-  const inputs = [s.tabs, s.windows, s.groups, s.pinPlace, s.parkedPins];
+  const inputs = [tabsShape(s.tabs), s.windows[windowId]?.tabIds, s.groups, s.pinPlace, s.parkedPins];
   const key = `${windowId}|${profileId}`;
   const cached = hierarchyMemo.get(key);
   if (cached && cached.inputs.every((v, i) => v === inputs[i])) return cached.result;
@@ -132,7 +166,7 @@ export function numberedTabs(s: BrowserState, windowId: string): string[] {
   return [...tiles, ...pinned.flatMap(rowTab), ...list.flatMap(rowTab)];
 }
 
-const groupMemo = new WeakMap<object, { tabs: BrowserState["tabs"]; splits: BrowserState["splits"]; groups: BrowserState["groups"]; places: BrowserState["pinPlace"]; result: string[] }>();
+const groupMemo = new WeakMap<object, { shape: object; windowTabs: string[] | undefined; parked: BrowserState["parkedPins"]; splits: BrowserState["splits"]; groups: BrowserState["groups"]; places: BrowserState["pinPlace"]; result: string[] }>();
 
 const childIndex = new WeakMap<object, Map<string, BrowserState["groups"][string][]>>();
 const NO_CHILDREN: BrowserState["groups"][string][] = [];
@@ -156,7 +190,9 @@ export function groupEntries(s: BrowserState, groupId: string): string[] {
   const g = s.groups[groupId];
   if (!g) return [];
   const cached = groupMemo.get(g);
-  if (cached && cached.tabs === s.tabs && cached.splits === s.splits && cached.groups === s.groups && cached.places === s.pinPlace) return cached.result;
+  const shape = tabsShape(s.tabs);
+  const windowTabs = s.windows[g.windowId]?.tabIds;
+  if (cached && cached.shape === shape && cached.windowTabs === windowTabs && cached.parked === s.parkedPins && cached.splits === s.splits && cached.groups === s.groups && cached.places === s.pinPlace) return cached.result;
   const splits = splitIndex(s.splits);
   let out: string[];
   const node = groupNode(pinKeyOf(g));
@@ -177,7 +213,7 @@ export function groupEntries(s: BrowserState, groupId: string): string[] {
     }
   }
   const result = stableList(cached?.result, out);
-  groupMemo.set(g, { tabs: s.tabs, splits: s.splits, groups: s.groups, places: s.pinPlace, result });
+  groupMemo.set(g, { shape, windowTabs, parked: s.parkedPins, splits: s.splits, groups: s.groups, places: s.pinPlace, result });
   return result;
 }
 

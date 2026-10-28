@@ -73,7 +73,6 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
     ),
   );
   const backToPin = useHover();
-  const closeControl = useTabCloseControl(tabId);
   const arcLayout = useAddressBarInSidebar();
   const region = useIconRegion(windowId, arcLayout && !dragging && !hidden, hovered, rowView);
   const rowLeave = useCallback(
@@ -197,7 +196,7 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
                     <HoverSlot
                       hovered={hovered && !renaming}
                       width={22}
-                      hover={<IconButton icon={closeControl.icon} size={10} weight="semibold" box={22} radius={6} onPress={() => pressTabClose(tab.id)} tooltip={closeControl.tooltip} />}
+                      hover={<TabCloseButton tabId={tab.id} />}
                     >
                       {loading && <ActivitySpinner style={{ width: 12, height: 12, marginRight: 2 }} />}
                     </HoverSlot>
@@ -211,6 +210,11 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
     </View>
   );
 });
+
+function TabCloseButton({ tabId }: { tabId: string }) {
+  const closeControl = useTabCloseControl(tabId);
+  return <IconButton icon={closeControl.icon} size={10} weight="semibold" box={22} radius={6} onPress={() => pressTabClose(tabId)} tooltip={closeControl.tooltip} />;
+}
 
 export function RenameField({
   initial,

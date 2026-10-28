@@ -1,8 +1,8 @@
 import { useBrowser, type BrowserState } from "../../store/browser";
-import { useTab } from "../../store/hooks";
 import { activeTabId } from "../../store/model";
 import { splitIndex } from "../../store/structure";
 import type { Tab } from "../../store/types";
+import { useShallow } from "zustand/react/shallow";
 
 export const ACTIVE = 1;
 export const SELECTED = 2;
@@ -24,7 +24,5 @@ function rowFlags(s: BrowserState, windowId: string, tabId: string): number {
 }
 
 export function useRowState(tabId: string, windowId: string): { tab: Tab | undefined; flags: number } {
-  const tab = useTab(tabId);
-  const flags = useBrowser((s) => rowFlags(s, windowId, tabId));
-  return { tab, flags };
+  return useBrowser(useShallow((s) => ({ tab: s.tabs[tabId], flags: rowFlags(s, windowId, tabId) })));
 }

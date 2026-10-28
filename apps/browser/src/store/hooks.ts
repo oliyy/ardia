@@ -1,7 +1,7 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { isBookmarked } from "./bookmarks";
-import { useBrowser } from "./browser";
+import { useBrowser, type BrowserState } from "./browser";
 import { activeTabId, bookmarkProfileId, IDLE_LIVE, profileFor } from "./model";
 import type { Settings } from "./settings";
 import type { BrowserWindow, FindState, Profile, Tab, TabLive } from "./types";
@@ -59,6 +59,12 @@ export const useIsActiveTab = (tabId: string) =>
   });
 
 export const useTab = (tabId: string | undefined): Tab | undefined => useBrowser((s) => (tabId ? s.tabs[tabId] : undefined));
+
+const unsubscribed = () => () => {};
+
+export function useScopedBrowser<T>(scoped: T | null, select: (s: BrowserState) => T): T {
+  return useSyncExternalStore(scoped === null ? useBrowser.subscribe : unsubscribed, () => (scoped === null ? select(useBrowser.getState()) : scoped));
+}
 
 export function useTabLive(tabId: string | undefined): TabLive;
 export function useTabLive<T>(tabId: string | undefined, select: (live: TabLive) => T): T;
