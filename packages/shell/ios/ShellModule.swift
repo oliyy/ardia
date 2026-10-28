@@ -966,7 +966,13 @@ private enum FadeLabelVisibleRectRepaint {
   private static let preLayoutPhase: Int32 = 0
   private static let appKitLayoutPhase: Int32 = 4
   private static let openTransactionStates: UInt32 = 3
+  private static let implicitTransactionState: UInt32 = 1
+  private static let explicitTransactionState: UInt32 = 2
   private static let committingState: UInt32 = 8
+  private static let recoveryDelay: CFAbsoluteTime = 0.1
+  private static let parkedDelay: CFAbsoluteTime = 1e9
+  private static let longestImplicitWait: CFTimeInterval = 1
+  private static let longestSuspension: CFTimeInterval = 32
 
   private static let changeSelector = NSSelectorFromString("NS_viewVisibleRectDidChange")
   private static let displaySelector = #selector(CALayer.display)
@@ -982,8 +988,11 @@ private enum FadeLabelVisibleRectRepaint {
   private static var subclassAttempted = false
   private static let pending = NSHashTable<CALayer>.weakObjects()
   private static var flushScheduled = false
-  private static var phaseChecked = false
   private static var disabled = false
+  private static var recoveryTimer: CFRunLoopTimer?
+  private static var scheduledAt: CFTimeInterval = 0
+  private static var suspendedUntil: CFTimeInterval = 0
+  private static var suspension: CFTimeInterval = 1
 
   static func adopt(_ layer: CALayer) {
     guard supported, let cls = object_getClass(layer), let adopted = subclass(of: cls) else { return }
@@ -1027,7 +1036,8 @@ private enum FadeLabelVisibleRectRepaint {
   }
 
   private static func visibleRectDidChange(_ layer: CALayer) {
-    if Thread.isMainThread, !disabled, inWindow(layer), flushScheduled || (deferrable() && scheduleFlush()) {
+    if Thread.isMainThread, !disabled, inWindow(layer), CACurrentMediaTime() >= suspendedUntil,
+       flushScheduled ? joinable() : deferrable() && scheduleFlush() {
       pending.add(layer)
     } else {
       callBase(layer, changeSelector)
@@ -1036,6 +1046,13 @@ private enum FadeLabelVisibleRectRepaint {
 
   private static func inWindow(_ layer: CALayer) -> Bool {
     (layer.delegate as AnyObject? as? FadeLabelText)?.window != nil
+  }
+
+  private static func joinable() -> Bool {
+    guard let currentPhase, let currentState else { return false }
+    let phase = currentPhase.call(CATransaction.self, currentPhase.selector)
+    if phase == preLayoutPhase || phase == appKitLayoutPhase { return true }
+    return phase == outsideCommitPhase && currentState.call(CATransaction.self, currentState.selector) & committingState == 0
   }
 
   private static func deferrable() -> Bool {
@@ -1053,14 +1070,55 @@ private enum FadeLabelVisibleRectRepaint {
   private static func scheduleFlush() -> Bool {
     guard let addCommitHandler else { return false }
     flushScheduled = addCommitHandler.call(CATransaction.self, addCommitHandler.selector, { flush() }, preLayoutPhase)
+    if flushScheduled {
+      scheduledAt = CACurrentMediaTime()
+      setRecoveryTimer(after: recoveryDelay)
+    }
     return flushScheduled
+  }
+
+  private static func setRecoveryTimer(after delay: CFAbsoluteTime) {
+    if recoveryTimer == nil {
+      let timer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + parkedDelay, parkedDelay, 0, 0) { _ in
+        recoverIfStillPending()
+      }
+      CFRunLoopAddTimer(CFRunLoopGetMain(), timer, .commonModes)
+      recoveryTimer = timer
+    }
+    if let recoveryTimer {
+      CFRunLoopTimerSetNextFireDate(recoveryTimer, CFAbsoluteTimeGetCurrent() + delay)
+    }
+  }
+
+  private static func recoverIfStillPending() {
+    guard flushScheduled, let currentState else { return }
+    if ownerMayStillCommit(currentState.call(CATransaction.self, currentState.selector)) {
+      setRecoveryTimer(after: recoveryDelay)
+      return
+    }
+    suspendedUntil = CACurrentMediaTime() + suspension
+    suspension = min(suspension * 2, longestSuspension)
+    flushScheduled = false
+    setRecoveryTimer(after: parkedDelay)
+    let layers = pending.allObjects
+    pending.removeAllObjects()
+    for layer in layers {
+      callBase(layer, changeSelector)
+    }
+  }
+
+  private static func ownerMayStillCommit(_ state: UInt32) -> Bool {
+    if state & (explicitTransactionState | committingState) != 0 { return true }
+    return state & implicitTransactionState != 0 && CACurrentMediaTime() - scheduledAt < longestImplicitWait
   }
 
   private static func flush() {
     flushScheduled = false
-    if !phaseChecked {
-      phaseChecked = true
-      disabled = !inPreLayoutPhase()
+    setRecoveryTimer(after: parkedDelay)
+    if inPreLayoutPhase() {
+      suspension = 1
+    } else {
+      disabled = true
     }
     let layers = pending.allObjects
     pending.removeAllObjects()
