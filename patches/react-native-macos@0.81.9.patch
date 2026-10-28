@@ -8638,7 +8638,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..7e63c301601ceb84cfad74e5e334ef4a
  
  #define RCT_SEND_SCROLL_EVENT(_eventName, _userData)                                    \
 diff --git a/React/Views/UIView+React.m b/React/Views/UIView+React.m
-index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0d678bded 100644
+index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..0512bc430667ed4816a0fcaa89b7a7de47877b12 100644
 --- a/React/Views/UIView+React.m
 +++ b/React/Views/UIView+React.m
 @@ -12,6 +12,7 @@
@@ -8659,7 +8659,23 @@ index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0
  }
  
  #pragma mark - Display
-@@ -191,9 +195,38 @@ - (void)setReactZIndex:(NSInteger)reactZIndex
+@@ -171,7 +175,8 @@ - (void)setReactZIndex:(NSInteger)reactZIndex
+ {
+   // Check if sorting is required - in most cases it won't be.
+   BOOL sortingRequired = NO;
+-  for (RCTUIView *subview in self.subviews) { // [macOS]
++  NSArray<RCTUIView *> *subviews = self.subviews;
++  for (RCTUIView *subview in subviews) { // [macOS]
+     if (subview.reactZIndex != 0) {
+       sortingRequired = YES;
+       break;
+@@ -186,14 +191,43 @@ - (void)setReactZIndex:(NSInteger)reactZIndex
+       return NSOrderedAscending;
+     }
+   }]
+-                         : self.subviews;
++                         : subviews;
+ }
  
  - (void)didUpdateReactSubviews
  {
@@ -8698,7 +8714,7 @@ index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0
  }
  
  - (void)didSetProps:(__unused NSArray<NSString *> *)changedProps
-@@ -277,6 +310,9 @@ - (void)setReactTransformOrigin:(RCTTransformOrigin)reactTransformOrigin
+@@ -277,6 +311,9 @@ - (void)setReactTransformOrigin:(RCTTransformOrigin)reactTransformOrigin
  
  static void updateTransform(RCTPlatformView *view) // [macOS]
  {
@@ -8708,7 +8724,7 @@ index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0
    CATransform3D transform;
    id rawTansformOrigin = objc_getAssociatedObject(view, @selector(reactTransformOrigin));
    if (rawTansformOrigin) {
-@@ -306,9 +342,22 @@ static void updateTransform(RCTPlatformView *view) // [macOS]
+@@ -306,9 +343,22 @@ static void updateTransform(RCTPlatformView *view) // [macOS]
      transform = view.reactTransform;
    }
  
@@ -8731,7 +8747,7 @@ index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0
  }
  
  - (UIViewController *)reactViewController
-@@ -366,6 +415,9 @@ - (void)reactViewDidMoveToWindow
+@@ -366,6 +416,9 @@ - (void)reactViewDidMoveToWindow
  
  - (void)reactFocus
  {
@@ -8741,7 +8757,7 @@ index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0
  #if !TARGET_OS_OSX // [macOS]
  	if (![self becomeFirstResponder]) {
  #else // [macOS
-@@ -377,11 +429,17 @@ - (void)reactFocus
+@@ -377,11 +430,17 @@ - (void)reactFocus
      _pendingFocusView = nil;
    }
  // macOS]
@@ -8759,7 +8775,7 @@ index 30c4f1e53e7b94016c8ed1b425587753fc80c2ce..13360d64d9d8df013e667c1fe042a3c0
  #if TARGET_OS_OSX // [macOS
  		if ([[self window] makeFirstResponder:self]) {
  #else
-@@ -389,6 +447,9 @@ - (void)reactFocusIfNeeded
+@@ -389,6 +448,9 @@ - (void)reactFocusIfNeeded
  #endif // macOS]
  			_pendingFocusView = nil; // [macOS] Github#1412
  		}
