@@ -883,12 +883,38 @@ private struct FadeLabelDrawingTraits: Equatable {
 private final class FadeLabelText: NSView {
   weak var field: NSTextField?
   private var drawnTraits: FadeLabelDrawingTraits?
+  private var shownVisibleRect: NSRect?
+  private var shownPixelPhase = NSPoint.zero
 
   override var isFlipped: Bool { true }
 
   override var visibleRect: NSRect {
     let host = superview.map { convert($0.bounds, from: $0) } ?? bounds
     return bounds.union(host).intersection(super.visibleRect)
+  }
+
+  override func makeBackingLayer() -> CALayer {
+    let layer = super.makeBackingLayer()
+    FadeLabelVisibleRectRepaint.adopt(layer)
+    return layer
+  }
+
+  func noteShownVisibleRect() {
+    let rect = visibleRect
+    shownVisibleRect = rect
+    shownPixelPhase = rect.isEmpty ? .zero : pixelPhase()
+  }
+
+  func showsSameVisibleRect() -> Bool {
+    let rect = visibleRect
+    guard let shown = shownVisibleRect, NSEqualRects(rect, shown) else { return false }
+    return rect.isEmpty || pixelPhase() == shownPixelPhase
+  }
+
+  private func pixelPhase() -> NSPoint {
+    let scale = window?.backingScaleFactor ?? 1
+    let origin = convert(NSPoint.zero, to: nil)
+    return NSPoint(x: origin.x * scale - (origin.x * scale).rounded(.down), y: origin.y * scale - (origin.y * scale).rounded(.down))
   }
 
   override var allowsVibrancy: Bool { field?.allowsVibrancy ?? false }
@@ -926,6 +952,127 @@ private final class FadeLabelText: NSView {
 
   override func accessibilityFrame() -> NSRect {
     NSAccessibility.screenRect(fromView: self, rect: bounds.insetBy(dx: 1, dy: -1))
+  }
+}
+
+private enum FadeLabelVisibleRectRepaint {
+  private typealias LayerMethod = @convention(c) (CALayer, Selector) -> Void
+  private typealias TransactionPhase = @convention(c) (AnyClass, Selector) -> Int32
+  private typealias TransactionState = @convention(c) (AnyClass, Selector) -> UInt32
+  private typealias TransactionActivate = @convention(c) (AnyClass, Selector) -> Void
+  private typealias TransactionCommitHandler = @convention(c) (AnyClass, Selector, @escaping @convention(block) () -> Void, Int32) -> Bool
+
+  private static let outsideCommitPhase: Int32 = -1
+  private static let preLayoutPhase: Int32 = 0
+  private static let appKitLayoutPhase: Int32 = 4
+  private static let openTransactionStates: UInt32 = 3
+  private static let committingState: UInt32 = 8
+
+  private static let changeSelector = NSSelectorFromString("NS_viewVisibleRectDidChange")
+  private static let displaySelector = #selector(CALayer.display)
+  private static let currentPhase = transactionMethod("currentPhase", "i16@0:8", TransactionPhase.self)
+  private static let currentState = transactionMethod("currentState", "I16@0:8", TransactionState.self)
+  private static let activate = transactionMethod("activate", "v16@0:8", TransactionActivate.self)
+  private static let addCommitHandler = transactionMethod("addCommitHandler:forPhase:", "B28@0:8@?16i24", TransactionCommitHandler.self)
+  private static let supported = ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0))
+    && currentPhase != nil && currentState != nil && activate != nil && addCommitHandler != nil
+
+  private static var base: AnyClass?
+  private static var adopted: AnyClass?
+  private static var subclassAttempted = false
+  private static let pending = NSHashTable<CALayer>.weakObjects()
+  private static var flushScheduled = false
+  private static var phaseChecked = false
+  private static var disabled = false
+
+  static func adopt(_ layer: CALayer) {
+    guard supported, let cls = object_getClass(layer), let adopted = subclass(of: cls) else { return }
+    object_setClass(layer, adopted)
+  }
+
+  private static func transactionMethod<Function>(_ name: String, _ types: String, _ type: Function.Type) -> (call: Function, selector: Selector)? {
+    let selector = NSSelectorFromString(name)
+    guard let method = class_getClassMethod(CATransaction.self, selector), let encoding = method_getTypeEncoding(method),
+          String(cString: encoding) == types
+    else { return nil }
+    return (unsafeBitCast(method_getImplementation(method), to: type), selector)
+  }
+
+  private static func subclass(of cls: AnyClass) -> AnyClass? {
+    if subclassAttempted {
+      guard let base, ObjectIdentifier(base) == ObjectIdentifier(cls) else { return nil }
+      return adopted
+    }
+    subclassAttempted = true
+    let takesNoArguments = { (method: Method?) in method.flatMap(method_getTypeEncoding).map { String(cString: $0) } == "v16@0:8" }
+    guard takesNoArguments(class_getInstanceMethod(cls, changeSelector)), takesNoArguments(class_getInstanceMethod(cls, displaySelector)),
+          let made = objc_allocateClassPair(cls, "ArdiaFadeLabelTextLayer", 0)
+    else { return nil }
+    let change: @convention(block) (CALayer) -> Void = { layer in visibleRectDidChange(layer) }
+    let display: @convention(block) (CALayer) -> Void = { layer in
+      callBase(layer, displaySelector)
+      (layer.delegate as AnyObject? as? FadeLabelText)?.noteShownVisibleRect()
+    }
+    class_addMethod(made, changeSelector, imp_implementationWithBlock(change), "v@:")
+    class_addMethod(made, displaySelector, imp_implementationWithBlock(display), "v@:")
+    objc_registerClassPair(made)
+    base = cls
+    adopted = made
+    return made
+  }
+
+  private static func callBase(_ layer: CALayer, _ selector: Selector) {
+    guard let base, let imp = class_getMethodImplementation(base, selector) else { return }
+    unsafeBitCast(imp, to: LayerMethod.self)(layer, selector)
+  }
+
+  private static func visibleRectDidChange(_ layer: CALayer) {
+    if Thread.isMainThread, !disabled, inWindow(layer), flushScheduled || (deferrable() && scheduleFlush()) {
+      pending.add(layer)
+    } else {
+      callBase(layer, changeSelector)
+    }
+  }
+
+  private static func inWindow(_ layer: CALayer) -> Bool {
+    (layer.delegate as AnyObject? as? FadeLabelText)?.window != nil
+  }
+
+  private static func deferrable() -> Bool {
+    guard let currentPhase, let currentState, let activate else { return false }
+    let phase = currentPhase.call(CATransaction.self, currentPhase.selector)
+    if phase == appKitLayoutPhase { return true }
+    let state = currentState.call(CATransaction.self, currentState.selector)
+    guard phase == outsideCommitPhase, state & committingState == 0 else { return false }
+    if state & openTransactionStates == 0 {
+      activate.call(CATransaction.self, activate.selector)
+    }
+    return true
+  }
+
+  private static func scheduleFlush() -> Bool {
+    guard let addCommitHandler else { return false }
+    flushScheduled = addCommitHandler.call(CATransaction.self, addCommitHandler.selector, { flush() }, preLayoutPhase)
+    return flushScheduled
+  }
+
+  private static func flush() {
+    flushScheduled = false
+    if !phaseChecked {
+      phaseChecked = true
+      disabled = !inPreLayoutPhase()
+    }
+    let layers = pending.allObjects
+    pending.removeAllObjects()
+    for layer in layers where disabled || !inWindow(layer) || (layer.delegate as AnyObject? as? FadeLabelText)?.showsSameVisibleRect() != true {
+      callBase(layer, changeSelector)
+    }
+  }
+
+  private static func inPreLayoutPhase() -> Bool {
+    guard let currentPhase, let currentState else { return false }
+    return currentPhase.call(CATransaction.self, currentPhase.selector) == preLayoutPhase
+      && currentState.call(CATransaction.self, currentState.selector) & committingState != 0
   }
 }
 
