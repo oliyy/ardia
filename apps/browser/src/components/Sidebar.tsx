@@ -593,6 +593,14 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
     [pinnedMotion.slideBelow, motion.slideBelow],
   );
   const scope = useMemo(() => ({ enabled: animated, slideBelow: motion.slideBelow, fold }), [animated, motion.slideBelow, fold]);
+  const tailShift = offScreen ? null : pinnedMotion.tail;
+  const tailStyle = useMemo(() => (tailShift ? { transform: [{ translateY: tailShift }] } : null), [tailShift]);
+  const listAt = useRef({ tail: 0, list: 0 }).current;
+  const placeList = (part: "tail" | "list", y: number) => {
+    listAt[part] = y;
+    origins.list = listAt.tail + listAt.list;
+    if (geometry) geometry.current.regions.list = origins.list;
+  };
   if (geometry) geometry.current.newTabAtTop = newTabsAtTop && inlineNewTab;
   return (
     <ListMotionContext.Provider value={scope}>
@@ -622,33 +630,31 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
               )}
           <Tail id="tail:pinned" section="pinned" />
         </View>
-        {pinnedMotion.tail && !offScreen ? <PinnedTail shift={pinnedMotion.tail} /> : null}
-        {divided ? <ClearDivider windowId={windowId} profileId={profileId} spaced={pinnedSection} clear={clearable} tidy={tidy} flush={addressBar} /> : null}
-        <View
-          ref={(v) => {
-            controller?.regions.set("list", v);
-          }}
-          onLayout={(e) => {
-            origins.list = e.nativeEvent.layout.y;
-            if (geometry) geometry.current.regions.list = e.nativeEvent.layout.y;
-          }}
-          style={{ marginTop: pinnedSection && !divided ? 7 : 0, gap: layout.rowGap }}
-        >
-          {newTabsAtTop && inlineNewTab ? <NewTabRow windowId={windowId} /> : null}
-          {motion.fading
-            ? motion.slots(list).map((slot) =>
-                "ghost" in slot ? (
-                  <GhostSlot key={slot.ghost.key} snapshot={slot.ghost.snapshot} top={slot.top} opacity={slot.ghost.opacity} />
-                ) : (
-                  <ListEntry key={slot.entry} entry={slot.entry} motion={motion.motion(slot.entry)} />
-                ),
-              )
-            : list.map((entry) => <ListEntry key={entry} entry={entry} motion={motion.motion(entry)} />)}
-          {pending ? <View style={{ height: pending }} /> : null}
-          <Tail id="tail:list" section="list" />
-          {!newTabsAtTop && inlineNewTab ? <NewTabRow windowId={windowId} shift={motion.tail} clip={motion.tailClip} /> : null}
-        </View>
-        {current ? <CleanUpUpsell windowId={windowId} shift={motion.tail} /> : null}
+        <Animated.View pointerEvents="box-none" style={tailStyle} onLayout={(e) => placeList("tail", e.nativeEvent.layout.y)}>
+          {divided ? <ClearDivider windowId={windowId} profileId={profileId} spaced={pinnedSection} clear={clearable} tidy={tidy} flush={addressBar} /> : null}
+          <View
+            ref={(v) => {
+              controller?.regions.set("list", v);
+            }}
+            onLayout={(e) => placeList("list", e.nativeEvent.layout.y)}
+            style={{ marginTop: pinnedSection && !divided ? 7 : 0, gap: layout.rowGap }}
+          >
+            {newTabsAtTop && inlineNewTab ? <NewTabRow windowId={windowId} /> : null}
+            {motion.fading
+              ? motion.slots(list).map((slot) =>
+                  "ghost" in slot ? (
+                    <GhostSlot key={slot.ghost.key} snapshot={slot.ghost.snapshot} top={slot.top} opacity={slot.ghost.opacity} />
+                  ) : (
+                    <ListEntry key={slot.entry} entry={slot.entry} motion={motion.motion(slot.entry)} />
+                  ),
+                )
+              : list.map((entry) => <ListEntry key={entry} entry={entry} motion={motion.motion(entry)} />)}
+            {pending ? <View style={{ height: pending }} /> : null}
+            <Tail id="tail:list" section="list" />
+            {!newTabsAtTop && inlineNewTab ? <NewTabRow windowId={windowId} shift={motion.tail} clip={motion.tailClip} /> : null}
+          </View>
+          {current ? <CleanUpUpsell windowId={windowId} shift={motion.tail} /> : null}
+        </Animated.View>
       </View>
     </ListMotionContext.Provider>
   );
@@ -700,10 +706,6 @@ const RootEntry = memo(function RootEntry({ entry, lift, motion }: { entry: stri
       <HierarchyEntry entry={entry} section="pinned" motion={motion} />
     </View>
   );
-});
-
-const PinnedTail = memo(function PinnedTail({ shift }: { shift: Animated.Value }) {
-  return <Animated.View style={{ marginTop: shift }} />;
 });
 
 const Tail = memo(function Tail({ id, section }: { id: string; section: Section }) {

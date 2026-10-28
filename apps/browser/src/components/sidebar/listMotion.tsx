@@ -23,7 +23,19 @@ const devScale = () => (__DEV__ ? ((globalThis as { sidebarMotionScale?: number 
 
 export type SlideTiming = { ms: number; easing: (t: number) => number };
 export type FoldSlideOptions = { timing: SlideTiming; tail: boolean };
-type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean; ms: number; easing: (t: number) => number };
+type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean; live: boolean; superseded: number; ms: number; easing: (t: number) => number };
+type SyncedValue = { __onAnimatedValueUpdateReceived: (value: number, offset?: number) => void };
+
+function newSlide(from: number, at: number, timing: SlideTiming): Slide {
+  const slide: Slide = { value: new Animated.Value(from), from, at, until: 0, landed: false, live: false, superseded: 0, ms: timing.ms, easing: timing.easing };
+  const value = slide.value as unknown as SyncedValue;
+  const receive = value.__onAnimatedValueUpdateReceived.bind(value);
+  value.__onAnimatedValueUpdateReceived = (next, offset) => {
+    if (slide.superseded > 0) return void (slide.superseded -= 1);
+    receive(next, offset);
+  };
+  return slide;
+}
 type Ghost = { key: string; anchor: string | null; y: number; snapshot: EntrySnapshot; opacity: Animated.Value; until: number };
 type ReorderIntent = { windowId: string; profileId: string; key: string };
 type Snapshot = { state: BrowserState; list: string[]; live: LiveData; heights: LiveHeights; intent?: ReorderIntent };
@@ -258,17 +270,22 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
     dev.sidebarMotion = { ...dev.sidebarMotion, [devKey]: { slides, ghosts, clipped } };
   }
 
+  const restart = (slide: Slide, to: number) => {
+    if (native && slide.live) slide.superseded += 1;
+    slide.value.setValue(to);
+  };
+
   const now = Date.now();
   for (const slide of slides.values()) {
     if (slide.until && now >= slide.until) {
       slide.until = 0;
-      if (!slide.landed) slide.value.setValue(0);
+      if (!slide.landed) restart(slide, 0);
     }
   }
   if (ghosts.current.some((g) => g.until && now >= g.until)) ghosts.current = ghosts.current.filter((g) => !g.until || now < g.until);
 
   const prepare = (plan: Plan, at: number) => {
-    for (const m of plan.moves) if (!slides.has(m.key)) slides.set(m.key, { value: new Animated.Value(m.from), from: m.from, at, until: 0, landed: false, ms: plan.timing?.ms ?? SLIDE_MS * devScale(), easing: plan.timing?.easing ?? SLIDE_EASING });
+    for (const m of plan.moves) if (!slides.has(m.key)) slides.set(m.key, newSlide(m.from, at, plan.timing ?? { ms: SLIDE_MS * devScale(), easing: SLIDE_EASING }));
     ghosts.current = [...ghosts.current, ...plan.ghosts];
     clipped.clear();
     for (const key of plan.clipped) clipped.add(key);
@@ -313,7 +330,7 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
     for (const [i, m] of plan.moves.entries()) {
       const slide = slides.get(m.key);
       if (!slide) continue;
-      slide.value.setValue(m.from);
+      restart(slide, m.from);
       slide.from = m.from;
       slide.at = at;
       slide.until = at + slideMs + FRAME_SLACK_MS;
@@ -322,9 +339,12 @@ function useMotion({ devKey, entries, from, planner, height, enabled, native, be
       slide.easing = easing;
       const timing = Animated.timing(slide.value, { toValue: 0, duration: slideMs, easing, useNativeDriver: native });
       const clips = i === 0 && token;
+      slide.live = true;
       timing.start(({ finished }) => {
+        if (slide.at === at) slide.live = false;
         if (!finished) return;
         slide.landed = true;
+        if (native && slide.at === at) slide.value.setValue(0);
         if (!clips) return;
         queueMicrotask(() => {
           if (clipping.current !== token) return;
@@ -446,7 +466,7 @@ export function usePinnedMotion(windowId: string, profileId: string, entries: st
     const i = entries.indexOf(e);
     return (i < 0 ? 0 : liftIn(s, entries, i)) + entryHeight(s, windowId, profileId, e);
   };
-  return useMotion({ devKey: `${windowId}:${profileId}:pinned`, entries, from, planner, height, enabled, native: false });
+  return useMotion({ devKey: `${windowId}:${profileId}:pinned`, entries, from, planner, height, enabled, native: true });
 }
 
 export function useGroupMotion(windowId: string, profileId: string, groupId: string, entries: string[], from: Capture, scope: ListMotionScope, enabled: boolean) {
