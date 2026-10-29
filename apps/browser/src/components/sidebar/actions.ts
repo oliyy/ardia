@@ -80,6 +80,7 @@ export function openPath(windowId: string, target: PathTarget) {
   const profileId = profileOf(windowId, target);
   if (!profileId) return;
   const s = store();
+  if (s.profiles[profileId]?.pinnedCollapsed) store().updateProfile(profileId, { pinnedCollapsed: false });
   for (const id of targetContainers(windowId, profileId, target)) if (s.groups[id]?.collapsed) store().updateGroup(id, { collapsed: false });
 }
 

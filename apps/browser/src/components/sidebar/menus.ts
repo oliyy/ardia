@@ -1,5 +1,5 @@
 import { showMenu, type MenuItem } from "@ardia/shell";
-import { closeGroup, closeTab, moveTabToProfile, moveTabToWindow, switchToTab, toggleMute } from "../../lib/actions";
+import { closeGroup, closeTab, moveTabToProfile, moveTabToWindow, switchProfile, switchToTab, toggleMute } from "../../lib/actions";
 import { folderChildren } from "../../store/bookmarks";
 import { useBrowser } from "../../store/browser";
 import { bookmarkProfileId, isIncognitoProfile, isPinnedRow, pinnedSectionTitle, pinSection, plural, tabLabel, togglePinTitle, viewTabIds, windowTitle } from "../../store/model";
@@ -437,10 +437,16 @@ export async function openSpaceMenu(windowId: string, profileId: string) {
     { id: "space:theme", title: "Edit Theme Color…" },
     ...(showsProfile() ? [sep, newFolderItem("space:folder"), newLiveFolderMenuItem()] : []),
     sep,
+    {
+      id: "space:switch",
+      title: "Switch Profile",
+      children: s.profileOrder.flatMap((id) => (s.profiles[id] ? [{ id: `space:switch:${id}`, title: s.profiles[id]!.name, checked: id === s.windows[windowId]?.profileId }] : [])),
+    },
     { id: "space:manage", title: "Manage Profiles…" },
   ]);
   if (!choice) return;
   if (choice === "space:manage") openSettings("profiles");
+  else if (choice.startsWith("space:switch:")) switchProfile(windowId, choice.slice("space:switch:".length), true);
   else if (!store().profiles[profileId]) return;
   else if (choice === "space:icon") void changeProfileIcon(profileId);
   else if (choice === "space:rename" || choice === "space:theme") openSettings("profiles", profileId);

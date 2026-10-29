@@ -43,6 +43,7 @@ export type Profile = {
   createdAt: number;
   dataId?: string;
   theme?: ProfileTheme | null;
+  pinnedCollapsed?: boolean;
 };
 
 export type BrowserWindow = {

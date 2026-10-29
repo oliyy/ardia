@@ -32,7 +32,7 @@ import { SidebarAddressRow, SidebarHeaderTools } from "./sidebar/AddressBar";
 import { canTidyPins } from "../store/tidyPins";
 import { ClearDivider, dividerHeight, useSidebarHoverProps } from "./sidebar/ClearDivider";
 import { DragGhost, DropLine } from "./sidebar/DragGhost";
-import { FOLD_TIMING } from "./sidebar/Fold";
+import { Fold, FOLD_TIMING, useFold } from "./sidebar/Fold";
 import { DragProvider, DragScope, useDragController, useDragging, useDragItem, usePinnedCount, type Ghost } from "./sidebar/dnd";
 import { SidebarDropArea } from "./sidebar/fileDrop";
 import { useClipped, useShift, type ClipSource, type EntryMotion } from "./sidebar/entryMotion";
@@ -47,7 +47,7 @@ import { pinColumnCap, pinGridHeight } from "./sidebar/pinZone";
 import { PlusButton } from "./sidebar/PlusMenu";
 import { ResizeHandle } from "./sidebar/ResizeHandle";
 import { SCROLL_EDGE, ScrollEdgeLine, useScrollEdge } from "./sidebar/ScrollEdge";
-import { entriesHeight, firstPaintEntries, rootLift, rootTrail, rowSpan, startsOffScreen, type Section } from "./sidebar/geometry";
+import { entriesHeight, entryHeight, firstPaintEntries, keptEntry, rootLift, rootTrail, rowSpan, startsOffScreen, type Section } from "./sidebar/geometry";
 import { usePinnedRoot } from "./sidebar/pinnedTree";
 import { measureRow, useSidebarUi } from "./sidebar/state";
 import { LibraryGlyph } from "./sidebar/LibraryGlyph";
@@ -574,6 +574,10 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
   const newTabsAtTopSetting = useSettings((s) => s.newTabPosition === "top");
   const newTabsAtTop = newTabsAtTopSetting;
   const spaceHeader = addressBar && !incognito;
+  const pinsCollapsed = useBrowser((s) => spaceHeader && !!s.profiles[profileId]?.pinnedCollapsed);
+  const pinsFold = useFold(pinsCollapsed);
+  const keptPin = useBrowser((s) => (pinsCollapsed || pinsFold.moving ? keptEntry(s, windowId, profileId, pinned) : null));
+  const pinHeight = (entry: string) => entryHeight(useBrowser.getState(), windowId, profileId, entry);
   const animated = current && !offScreen;
   const motion = useListMotion(windowId, profileId, all, captured, animated);
   const boundary = (list: string[]) => {
@@ -583,7 +587,7 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
       below: rootTrail(addressBar, list) + (divided ? dividerHeight(section, addressBar) : section ? 7 : 0),
     };
   };
-  const pinnedMotion = usePinnedMotion(windowId, profileId, pinned, pinnedCaptured, animated, boundary);
+  const pinnedMotion = usePinnedMotion(windowId, profileId, pinned, pinnedCaptured, animated && !pinsCollapsed, boundary);
   const liftOf = (entry: string) => rootLift(addressBar, pinned[pinned.indexOf(entry) - 1], entry);
   const fold = useMemo(
     () => ({
@@ -620,15 +624,24 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
           }}
           style={{ marginTop: spaceHeader ? (pinnedSection ? layout.rowGap : 0) : tiles.length ? 6 : 0, marginBottom: offScreen ? 0 : rootTrail(addressBar, pinned), gap: layout.rowGap }}
         >
-          {offScreen
-            ? null
-            : pinnedMotion.slots(pinned).map((slot) =>
-                "ghost" in slot ? (
-                  <GhostSlot key={slot.ghost.key} snapshot={slot.ghost.snapshot} top={slot.top} opacity={slot.ghost.opacity} />
-                ) : (
-                  <RootEntry key={slot.entry} entry={slot.entry} lift={liftOf(slot.entry)} motion={pinnedMotion.motion(slot.entry)} />
-                ),
+          {offScreen ? null : (
+            <Fold
+              fold={pinsFold}
+              collapsed={pinsCollapsed}
+              entries={pinnedMotion.slots(pinned).map((slot) =>
+                "ghost" in slot
+                  ? { key: slot.ghost.key, ghost: true, node: <GhostSlot snapshot={slot.ghost.snapshot} top={slot.top} opacity={slot.ghost.opacity} /> }
+                  : {
+                      key: slot.entry,
+                      node: <RootEntry entry={slot.entry} lift={liftOf(slot.entry)} motion={pinnedMotion.motion(slot.entry)} peek={pinsCollapsed && slot.entry === keptPin} />,
+                    },
               )}
+              keep={keptPin}
+              gap={layout.rowGap}
+              rowHeight={pinsFold.moving ? pinHeight : layout.rowHeight}
+              keepMounted
+            />
+          )}
           <Tail id="tail:pinned" section="pinned" />
         </View>
         <Animated.View pointerEvents="box-none" style={tailStyle} onLayout={(e) => placeList("tail", e.nativeEvent.layout.y)}>
@@ -701,10 +714,10 @@ const ListEntry = memo(function ListEntry({ entry, motion }: { entry: string; mo
   return <TabRowItem tabId={id} section="list" motion={motion} />;
 });
 
-const RootEntry = memo(function RootEntry({ entry, lift, motion }: { entry: string; lift: number; motion: EntryMotion | null }) {
+const RootEntry = memo(function RootEntry({ entry, lift, motion, peek }: { entry: string; lift: number; motion: EntryMotion | null; peek: boolean }) {
   return (
     <View presentationGate style={lift ? { marginTop: lift } : null}>
-      <HierarchyEntry entry={entry} section="pinned" motion={motion} />
+      <HierarchyEntry entry={entry} section="pinned" motion={motion} peek={peek} />
     </View>
   );
 });
@@ -750,7 +763,8 @@ function useRevealTabs(windowId: string, scroll: RefObject<ScrollView | null>, s
       const { regions, newTabAtTop } = geometry.current;
       const span = rowSpan(s, windowId, profileId, tabId, newTabAtTop);
       const pinnedHasLive = span?.section === "pinned" && live().folderOrder.some((id) => live().folders[id]?.profileId === profileId);
-      if (span && !pinnedHasLive) return show(scroller, geometry.current.pad + regions[span.section] + span.top, span.height);
+      const pinnedFolded = span?.section === "pinned" && !!s.profiles[profileId]?.pinnedCollapsed;
+      if (span && !pinnedHasLive && !pinnedFolded) return show(scroller, geometry.current.pad + regions[span.section] + span.top, span.height);
       const view = scroller as unknown as View;
       const split = splitOf(s, tabId);
       const inner = groupOf(s, tabId);

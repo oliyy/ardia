@@ -1,11 +1,10 @@
-import { ContextMenuArea } from "@ardia/shell";
+import { ContextMenuArea, Symbol } from "@ardia/shell";
 import { memo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { layout, useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { IconButton, useHover } from "../primitives";
-import { openProfileMenu } from "../ProfileIndicator";
 import { ProfileGlyph } from "../profiles/icons";
 import { openSpaceMenu } from "./menus";
 
@@ -14,6 +13,8 @@ const TEXT_GAP = layout.rowLabelGap + 2;
 const NAME_SIZE = 13;
 const NAME_OFFSET = 0.5;
 const DARK_NAME = "#FFFFFF76";
+const CHEVRON = 12;
+const DARK_CHEVRON = "#FFFFFF99";
 const MORE_BOX = 22;
 const MORE_GLYPH = 13;
 const MORE_RADIUS = 6;
@@ -24,9 +25,11 @@ const GLYPH_TINTS = [DARK_GLYPH_TINT, LIGHT_GLYPH_TINT];
 export const SpaceHeader = memo(function SpaceHeader({ windowId, profileId, top }: { windowId: string; profileId: string; top: number }) {
   const theme = useTheme();
   const profile = useBrowser(useShallow((s) => ({ name: s.profiles[profileId]?.name ?? "", icon: s.profiles[profileId]?.icon ?? null })));
+  const collapsed = useBrowser((s) => !!s.profiles[profileId]?.pinnedCollapsed);
   const { hovered, hoverProps } = useHover();
   const [pressed, setPressed] = useState(false);
   const openMenu = () => void openSpaceMenu(windowId, profileId);
+  const chevron = collapsed || hovered;
   return (
     <View {...hoverProps} style={{ marginTop: top }}>
       <ContextMenuArea onContextMenu={openMenu}>
@@ -43,14 +46,25 @@ export const SpaceHeader = memo(function SpaceHeader({ windowId, profileId, top 
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={profile.name}
-            tooltip="Switch between profiles"
-            onPress={() => void openProfileMenu(windowId)}
+            accessibilityState={{ expanded: !collapsed }}
+            onPress={() => useBrowser.getState().updateProfile(profileId, { pinnedCollapsed: !collapsed })}
             onPressIn={() => setPressed(true)}
             onPressOut={() => setPressed(false)}
             style={{ flex: 1, alignSelf: "stretch", flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding }}
           >
             <View style={{ width: ICON, height: ICON, alignItems: "center", justifyContent: "center" }}>
-              <ProfileGlyph profile={profile} glyph={ICON} imageSize={ICON} color={theme.dark ? DARK_GLYPH_TINT : LIGHT_GLYPH_TINT} tints={GLYPH_TINTS} />
+              <View style={{ opacity: chevron ? 0 : 1 }}>
+                <ProfileGlyph profile={profile} glyph={ICON} imageSize={ICON} color={theme.dark ? DARK_GLYPH_TINT : LIGHT_GLYPH_TINT} tints={GLYPH_TINTS} />
+              </View>
+              {chevron ? (
+                <Symbol
+                  name={collapsed ? "chevron.right" : "chevron.down"}
+                  size={CHEVRON}
+                  weight="bold"
+                  color={theme.dark ? DARK_CHEVRON : theme.icon}
+                  style={{ position: "absolute", left: 0, top: 0, width: ICON, height: ICON }}
+                />
+              ) : null}
             </View>
             <Text numberOfLines={1} style={{ flexShrink: 1, marginLeft: TEXT_GAP, fontSize: NAME_SIZE, fontWeight: "600", color: theme.dark ? DARK_NAME : theme.textSecondary, top: NAME_OFFSET }}>
               {profile.name}
