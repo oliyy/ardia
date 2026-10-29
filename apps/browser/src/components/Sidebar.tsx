@@ -430,7 +430,7 @@ const SidebarPage = memo(function SidebarPage({ profileId, slot, pageWidth, curr
       <Surface hidesAccessibility={!current} style={{ flex: 1 }}>
         <PageProfileContext.Provider value={profileId}>
           <ThemeScope>
-            <DragScope enabled={current}>
+            <DragScope page={profileId} enabled={current}>
               <PageContent>
                 {(controller) => (
                   <TilesPlacement

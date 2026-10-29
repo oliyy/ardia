@@ -1,5 +1,5 @@
 import { hapticTick, onAppEvent, setDragEscapeCapture } from "@ardia/shell";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { Animated, Easing, PanResponder, type ScrollView, type View } from "react-native";
 import { create, useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -118,8 +118,9 @@ type Marks = {
   folderAway: boolean;
   lifted: string | null;
   line: DropLine | null;
+  page: string | null;
 };
-const NO_MARKS: Marks = { sources: new Set(), dropInto: null, onto: null, landing: null, pins: false, pinCount: 0, pinBefore: null, folded: null, folderTarget: null, folderAway: false, lifted: null, line: null };
+const NO_MARKS: Marks = { sources: new Set(), dropInto: null, onto: null, landing: null, pins: false, pinCount: 0, pinBefore: null, folded: null, folderTarget: null, folderAway: false, lifted: null, line: null, page: null };
 const noMarks = create<Marks>()(() => NO_MARKS);
 const NO_DROP: Drop = { type: "none" };
 type Pointed = { cell: Item | null; index: number; gap: number; part: "gap" | "centre" | "before" | "after" };
@@ -167,10 +168,42 @@ class DragController {
   private inline: Inline | null = null;
   private unwatch: (() => void) | null = null;
   private settle: (() => void) | null = null;
+  private pages = new Map<string, Map<string, Item>>();
+  private page = "";
   landed: { key: string; x: number; y: number } | null = null;
 
   create(key: string): Item {
     return { key, kind: "row", tabIds: [], section: "list", ancestors: [], hidden: false, view: null, header: null, gap: new Animated.Value(0), size: new Animated.Value(0), frame: null, headerFrame: null };
+  }
+
+  register(page: string, key: string, item: Item) {
+    let items = this.pages.get(page);
+    if (!items) this.pages.set(page, (items = new Map()));
+    items.set(key, item);
+    if (this.live(page)) this.items.set(key, item);
+    return () => {
+      if (items.get(key) === item) items.delete(key);
+      if (!items.size && this.pages.get(page) === items) this.pages.delete(page);
+      if (this.items.get(key) === item) this.items.delete(key);
+    };
+  }
+
+  activate(page: string) {
+    if (page === this.page) return false;
+    const dragging = !!(this.sources.length || this.external);
+    if (dragging)
+      for (const i of this.pages.get(this.page)?.values() ?? []) {
+        i.gap.stopAnimation();
+        i.gap.setValue(0);
+      }
+    this.page = page;
+    this.items = new Map([...(this.pages.get("") ?? []), ...(dragging ? [] : (this.pages.get(page) ?? []))]);
+    this.marks.setState({ page });
+    return dragging;
+  }
+
+  live(page: string) {
+    return !page || page === this.page;
   }
 
   get active() {
@@ -840,6 +873,8 @@ class DragController {
 }
 
 const DragContext = createContext<DragController | null>(null);
+const ActiveDragContext = createContext<DragController | null>(null);
+const DragPageContext = createContext({ page: "", generation: 0 });
 
 export function DragProvider({ children }: { children: (ghost: Ghost | null, controller: DragController) => ReactNode }) {
   const controller = useMemo(() => new DragController(), []);
@@ -854,8 +889,10 @@ export function DragProvider({ children }: { children: (ghost: Ghost | null, con
   }, [controller]);
   return (
     <DragContext.Provider value={controller}>
-      {children(ghost, controller)}
-      <WindowDropHighlight />
+      <ActiveDragContext.Provider value={controller}>
+        {children(ghost, controller)}
+        <WindowDropHighlight />
+      </ActiveDragContext.Provider>
     </DragContext.Provider>
   );
 }
@@ -887,18 +924,32 @@ function WindowDropHighlight() {
   );
 }
 
-export function DragScope({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+export function DragScope({ page, enabled, children }: { page: string; enabled: boolean; children: ReactNode }) {
   const controller = useContext(DragContext);
-  return <DragContext.Provider value={enabled ? controller : null}>{children}</DragContext.Provider>;
+  const [generation, setGeneration] = useState(0);
+  useLayoutEffect(() => {
+    if (enabled && controller?.activate(page)) setGeneration((g) => g + 1);
+  }, [controller, enabled, page]);
+  const scope = useMemo(() => ({ page, generation }), [page, generation]);
+  return (
+    <DragPageContext.Provider value={scope}>
+      <ActiveDragContext.Provider value={enabled ? controller : null}>{children}</ActiveDragContext.Provider>
+    </DragPageContext.Provider>
+  );
 }
 
-export const useDragController = () => useContext(DragContext) ?? undefined;
-export const useDropInto = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.dropInto);
-export const useDropOnto = (key: string) => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.onto === key);
-export const useDropPins = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.pins);
+function useMarks<T>(pick: (m: Marks) => T): T {
+  const controller = useContext(DragContext);
+  const { page } = useContext(DragPageContext);
+  return useStore(controller?.marks ?? noMarks, (m) => pick(!page || m.page === page ? m : NO_MARKS));
+}
+
+export const useDragController = () => useContext(ActiveDragContext) ?? undefined;
+export const useDropInto = () => useMarks((m) => m.dropInto);
+export const useDropOnto = (key: string) => useMarks((m) => m.onto === key);
+export const useDropPins = () => useMarks((m) => m.pins);
 export const usePinSlots = (cells: string[]) =>
-  useStore(
-    useContext(DragContext)?.marks ?? noMarks,
+  useMarks(
     useShallow((m) => {
       let slot = 0;
       return cells.map((cell) => {
@@ -908,40 +959,36 @@ export const usePinSlots = (cells: string[]) =>
       });
     }),
   );
-export const usePinnedCount = (cells: string[]) =>
-  useStore(useContext(DragContext)?.marks ?? noMarks, (m) => cells.reduce((n, cell) => n + (m.sources.has(cellKey(cell)) ? 0 : 1), 0) + m.pinCount);
-export const useFolderTarget = (key: string) => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.folderTarget === key);
-export const useFolderAway = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.folderAway);
-export const useDragFolded = (key: string) => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.folded === key);
-export const useDragging = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.sources.size > 0);
-export const useDropLine = () => useStore(useContext(DragContext)?.marks ?? noMarks, (m) => m.line);
+export const usePinnedCount = (cells: string[]) => useMarks((m) => cells.reduce((n, cell) => n + (m.sources.has(cellKey(cell)) ? 0 : 1), 0) + m.pinCount);
+export const useFolderTarget = (key: string) => useMarks((m) => m.folderTarget === key);
+export const useFolderAway = () => useMarks((m) => m.folderAway);
+export const useDragFolded = (key: string) => useMarks((m) => m.folded === key);
+export const useDragging = () => useMarks((m) => m.sources.size > 0);
+export const useDropLine = () => useMarks((m) => m.line);
 
 export function useDragItem(key: string, spec: ItemSpec, selection: () => string[] = () => [], clip: ClipSource | null = null) {
   const controller = useContext(DragContext) ?? undefined;
+  const { page, generation } = useContext(DragPageContext);
   const scope = useContext(FolderScopeContext);
   const hidden = useFoldHidden();
-  const marks = controller?.marks ?? noMarks;
-  const item = useMemo(() => controller?.create(key), [controller, key]);
+  const item = useMemo(() => controller?.create(key), [controller, key, generation]);
   if (item) Object.assign(item, spec, { parentGroup: spec.parentGroup ?? scope.groupId ?? undefined, ancestors: scope.ancestors, hidden });
   useEffect(() => {
     if (!controller || !item) return;
-    controller.items.set(key, item);
-    return () => {
-      if (controller.items.get(key) === item) controller.items.delete(key);
-    };
-  }, [controller, item, key]);
+    return controller.register(page, key, item);
+  }, [controller, item, key, page]);
 
   const responder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, g) => spec.kind !== "tail" && Math.hypot(g.dx, g.dy) > 4,
-        onPanResponderGrant: (_, g) => void controller?.begin(key, g.x0, g.y0, selection()),
-        onPanResponderMove: (_, g) => controller?.move(g.moveX, g.moveY),
-        onPanResponderRelease: () => controller?.end(true),
-        onPanResponderTerminate: () => controller?.end(false),
+        onPanResponderGrant: (_, g) => void (controller?.live(page) && controller.begin(key, g.x0, g.y0, selection())),
+        onPanResponderMove: (_, g) => void (controller?.live(page) && controller.move(g.moveX, g.moveY)),
+        onPanResponderRelease: () => void (controller?.live(page) && controller.end(true)),
+        onPanResponderTerminate: () => void (controller?.live(page) && controller.end(false)),
         onPanResponderTerminationRequest: () => false,
       }),
-    [controller, key],
+    [controller, key, page],
   );
   const ref = useCallback(
     (view: View | null) => {
@@ -956,9 +1003,9 @@ export function useDragItem(key: string, spec: ItemSpec, selection: () => string
     [item],
   );
 
-  const source = useStore(marks, (m) => m.sources.has(key));
-  const lifted = useStore(marks, (m) => m.lifted === key);
-  const landing = useStore(marks, (m) => m.landing === key);
+  const source = useMarks((m) => m.sources.has(key));
+  const lifted = useMarks((m) => m.lifted === key);
+  const landing = useMarks((m) => m.landing === key);
   const clipped = useClipped(clip);
   const horizontal = spec.kind === "tile";
   const tailOffset = useMemo(() => item && Animated.add(item.gap, -ROW_GAP), [item]);
