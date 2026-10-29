@@ -178,6 +178,10 @@ export function dismissHover() {
   if (sidebarUi().hover) hideCard();
 }
 
+function passOver(windowId: string) {
+  if (sidebarUi().hover?.windowId === windowId) hoverLeave();
+}
+
 export function dismissHoverIn(windowId: string) {
   if (ownerWindow === windowId || sidebarUi().hover?.windowId === windowId) dismissHover();
 }
@@ -190,13 +194,13 @@ function releaseAnchor(windowId: string, id: string) {
   if (hover?.windowId === windowId && hover.id === id) hideCard();
 }
 
-export function useRowHover(windowId: string, target: Target | null) {
+export function useRowHover(windowId: string, target: Target | null, hasCard?: (id: string) => boolean) {
   const [hovered, setHovered] = useState(false);
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const page = useContext(PageProfileContext);
   const away = useFoldedAway();
-  const latest = useRef({ windowId, target, page, away });
-  latest.current = { windowId, target, page, away };
+  const latest = useRef({ windowId, target, hasCard, page, away });
+  latest.current = { windowId, target, hasCard, page, away };
   const inside = useRef<PointerEvent | null>(null);
   const onCurrentPage = () => {
     const { windowId, page } = latest.current;
@@ -204,7 +208,7 @@ export function useRowHover(windowId: string, target: Target | null) {
   };
   const [enterRow] = useState(() => (event?: PointerEvent) => {
     if (!onCurrentPage() || latest.current.away) return;
-    const { windowId, target } = latest.current;
+    const { windowId, target, hasCard } = latest.current;
     pointed(windowId, refresh, true);
     const at = pointerIn(windowId, event);
     if (onCard && at && cardFrame && !pointInRect(cardFrame, at)) onCard = false;
@@ -212,7 +216,8 @@ export function useRowHover(windowId: string, target: Target | null) {
       if (latest.current.away) return;
       setHovered(true);
       underPointer = target?.id ?? null;
-      if (target) hoverEnter(windowId, target);
+      if (target && (hasCard?.(target.id) ?? true)) hoverEnter(windowId, target);
+      else if (target) passOver(windowId);
     };
     const reach = cardHeldFor(windowId, target, event);
     if (!reach) return enter();

@@ -1,23 +1,25 @@
 import { Surface } from "@ardia/shell";
 import { hex, layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
+import { useBrowser, type BrowserState } from "../../store/browser";
 import { clickTab } from "../sidebar/actions";
 import { cardHoverProps, dismissHover } from "../sidebar/hover";
 import { hoverCardOrigin } from "../sidebar/hoverMotion";
 import { measureRow, setSidebarUi, type Anchor } from "../sidebar/state";
 import { useSidebarWidth } from "../sidebar/tokens";
 import { MINI_PLAYER_HEIGHT, MINI_PLAYER_WIDTH, MiniPlayer } from "./MiniPlayer";
-import { useMedia } from "./state";
+import { useMedia, type Session } from "./state";
 import { useMediaTokens } from "./tokens";
 
+const pinnedWithControls = (s: BrowserState, tabId: string | undefined) => !!tabId && !!s.tabs[tabId]?.pinned && s.settings.sidebarMediaControls;
+const playable = (session: Session | undefined) => !!session && session.controllable && session.playbackState !== "none" && !!(session.title || session.artwork);
+
 export function useShowsMiniPlayer(tabId: string | undefined): boolean {
-  const pinned = useBrowser((s) => !!tabId && !!s.tabs[tabId]?.pinned && s.settings.sidebarMediaControls);
-  const hasSession = useMedia((s) => {
-    const session = tabId ? s.sessions[tabId] : undefined;
-    return !!session && session.controllable && session.playbackState !== "none" && !!(session.title || session.artwork);
-  });
+  const pinned = useBrowser((s) => pinnedWithControls(s, tabId));
+  const hasSession = useMedia((s) => playable(tabId ? s.sessions[tabId] : undefined));
   return pinned && hasSession;
 }
+
+export const showsMiniPlayer = (tabId: string) => pinnedWithControls(useBrowser.getState(), tabId) && playable(useMedia.getState().sessions[tabId]);
 
 export function usePlayerEdge(windowId: string, anchor: Anchor | undefined): number {
   const sidebarWidth = useSidebarWidth(windowId);

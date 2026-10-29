@@ -22,6 +22,7 @@ import { pressTabClose, useTabCloseControl } from "./closeControl";
 import { PressFeedback } from "./PressFeedback";
 import { ACTIVE, LOADING, PLAYING, SELECTED, useRowState, VISIBLE } from "./rowState";
 import { registerRow, useSidebarUi } from "./state";
+import { tabHasCard } from "./tabCard";
 import { TabIcon } from "./TabIcon";
 import { TabBadges } from "../media/TabBadges";
 import { ARC_SELECTED_INACTIVE, arcSelectedLabel, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
@@ -66,7 +67,7 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
   keepSpinner.current ||= loading;
   const spinner = useMemo(() => <ActivitySpinner visible={loading} style={{ width: 12, height: 12, marginRight: 2 }} />, [loading]);
   const renaming = useSidebarUi((u) => u.renaming?.kind === "tab" && u.renaming.id === tabId);
-  const { hovered, hoverProps } = useRowHover(windowId, renaming ? null : { kind: "tab", id: tabId });
+  const { hovered, hoverProps } = useRowHover(windowId, renaming ? null : { kind: "tab", id: tabId }, tabHasCard);
   const hidden = useFoldHidden();
   const rowView = useRef<View | null>(null);
   const [moved, movedRef] = useShift(
@@ -345,7 +346,7 @@ function SplitPane({ tabId, windowId }: { tabId: string; windowId: string }) {
   const arcLabel = useArcLabel();
   const tab = useTab(tabId);
   const active = useIsActiveTab(tabId);
-  const { hovered, hoverProps } = useRowHover(windowId, { kind: "tab", id: tabId });
+  const { hovered, hoverProps } = useRowHover(windowId, { kind: "tab", id: tabId }, tabHasCard);
   if (!tab) return null;
   return (
     <View {...hoverProps} style={{ flex: 1, minWidth: 0 }}>

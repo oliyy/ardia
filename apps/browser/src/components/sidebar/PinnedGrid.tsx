@@ -8,13 +8,14 @@ import { useBrowser } from "../../store/browser";
 import { useIsActiveTab, useTab, useTabLive, useWindowId } from "../../store/hooks";
 import { activeTabId } from "../../store/model";
 import { NextMeetingBadge } from "../live/NextMeetingBadge";
-import { clickTab } from "./actions";
+import { clickTab, tabTitle } from "./actions";
 import { cellKey, PIN_SLOT, useDragController, useDragging, useDragItem, useDropPins, useFolderTarget, usePinnedCount, usePinSlots } from "./dnd";
 import { FolderTile } from "./FolderTile";
 import { dismissHover, useRowHover } from "./hover";
 import { openTabMenu } from "./menus";
 import { pinColumnCap, pinGrid, pinGridHeight } from "./pinZone";
 import { registerRow } from "./state";
+import { tabHasCard } from "./tabCard";
 import { clickMods } from "./TabRow";
 import { FolderDropRing, TileFace, useSlotPosition } from "./TileFace";
 import { folderIdOfCell } from "../../store/tileFolders";
@@ -156,7 +157,7 @@ const PinnedTile = memo(function PinnedTile({ tabId, grid, sliding, column, row 
   const active = useIsActiveTab(tabId);
   const selected = useBrowser((s) => (s.selection[windowId] ?? []).includes(tabId));
   const playing = useTabLive(tabId, (l) => l.playingAudio);
-  const { hovered, hoverProps } = useRowHover(windowId, { kind: "tab", id: tabId });
+  const { hovered, hoverProps } = useRowHover(windowId, { kind: "tab", id: tabId }, tabHasCard);
   const { wrapper, handle, dragging } = useDragItem(`t:${tabId}`, { kind: "tile", tabIds: [tabId], section: "tiles" }, () => useBrowser.getState().selection[windowId] ?? []);
   const target = useFolderTarget(`t:${tabId}`);
   const position = useSlotPosition(column, row, grid, sliding, dragging);
@@ -178,6 +179,7 @@ const PinnedTile = memo(function PinnedTile({ tabId, grid, sliding, column, row 
             }}
           >
             <Pressable
+              tooltip={tabTitle(tab)}
               onPress={(e) => {
                 dismissHover();
                 clickTab(windowId, tabId, clickMods(e));

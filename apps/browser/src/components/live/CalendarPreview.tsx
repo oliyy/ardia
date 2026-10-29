@@ -6,21 +6,25 @@ import { joinEvent } from "../../live/alerts";
 import { connectCalendar, refreshCalendar, useCalendar, useNow } from "../../live/calendar";
 import { isCalendarUrl, isMeeting, joinLink, joinTitle, relativeTime, timeRange, type CalendarEvent } from "../../live/meetings";
 import { useLive } from "../../live/store";
-import { useBrowser } from "../../store/browser";
+import { useBrowser, type BrowserState } from "../../store/browser";
 import { IconButton, useHover } from "../primitives";
 import { dismissHover } from "../sidebar/hover";
 import type { Anchor } from "../sidebar/state";
 import { Avatar, HoverSurface, SmallButton } from "./LiveItemCard";
 import { useLiveColors } from "./colors";
 
+function isPinnedCalendar(s: BrowserState, tabId: string | null) {
+  const t = tabId ? s.tabs[tabId] : undefined;
+  return !!t?.pinned && isCalendarUrl(t.pinnedUrl ?? t.url);
+}
+
 export function useIsCalendarTab(tabId: string | null): boolean {
-  const pinnedCalendar = useBrowser((s) => {
-    const t = tabId ? s.tabs[tabId] : undefined;
-    return !!t?.pinned && isCalendarUrl(t.pinnedUrl ?? t.url);
-  });
+  const pinnedCalendar = useBrowser((s) => isPinnedCalendar(s, tabId));
   const on = useLive((s) => s.calendar.showPreview);
   return pinnedCalendar && on;
 }
+
+export const isCalendarTab = (tabId: string) => isPinnedCalendar(useBrowser.getState(), tabId) && useLive.getState().calendar.showPreview;
 
 const JOINABLE_BEFORE_MS = 10 * 60_000;
 

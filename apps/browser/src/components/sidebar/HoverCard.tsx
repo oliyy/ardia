@@ -1,21 +1,15 @@
-import { FadeLabel, Surface, Symbol } from "@ardia/shell";
+import { FadeLabel, Surface } from "@ardia/shell";
 import { useLayoutEffect, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, type AccessibilityActionEvent, type GestureResponderEvent } from "react-native";
-import { displayUrl } from "@ardia/core";
+import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { hex, useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { useStoreWhile } from "../../store/tabWatch";
-import { useIsBookmarked } from "../../store/hooks";
-import { activeTabId, bookmarkProfileId, plural } from "../../store/model";
+import { plural } from "../../store/model";
 import { folderIn, folderLabel, folderMembers } from "../../store/tileFolders";
 import { useShallow } from "zustand/react/shallow";
 import { useFolderPanel } from "./tileFolderUi";
-import { awayFromPin } from "../../store/organize";
-import { openInSplit } from "../layout/splitActions";
 import { CalendarPreview, useIsCalendarTab } from "../live/CalendarPreview";
 import { LiveItemCard } from "../live/LiveItemCard";
-import { useIsSleeping } from "../../lib/tabLifecycle";
-import { useHover } from "../primitives";
 import { clickTab, tabTitle } from "./actions";
 import { GroupPanel } from "./GroupPanel";
 import { cardHoverProps, dismissHover, setHoverSpace } from "./hover";
@@ -23,7 +17,6 @@ import { hoverCardOrigin, useHoverCardMotion, useHoverCardPlacement } from "./ho
 import { useSidebarUi, type Anchor, type Hover } from "./state";
 import { TabIcon } from "./TabIcon";
 import { HoverPlayer, usePlayerEdge, useShowsMiniPlayer } from "../media/HoverPlayer";
-import { useMedia, usePictureInPicture } from "../media/state";
 
 const WIDTH = 264;
 
@@ -41,24 +34,30 @@ export function HoverCard({ windowId, width, height }: { windowId: string; width
   const target = orphaned ? null : hover;
   const { drawn, leaving, entering, motion } = useHoverCardMotion(windowId, target);
   const shown = drawn ?? target;
-  const player = useShowsMiniPlayer(shown?.kind === "tab" ? shown.id : undefined);
+  const tabId = shown?.kind === "tab" ? shown.id : undefined;
+  const player = useShowsMiniPlayer(tabId);
+  const calendar = useIsCalendarTab(tabId ?? null);
+  const blank = !!tabId && shown === hover && !player && !calendar;
+  useLayoutEffect(() => {
+    if (blank) dismissHover();
+  }, [blank]);
   const edge = usePlayerEdge(windowId, shown?.anchor);
   useHoverCardPlacement(motion, shown ? hoverCardOrigin(shown.anchor, player ? edge : undefined) : null, { width, height });
   if (!shown) return null;
   return (
     <Animated.View pointerEvents={leaving || entering ? "none" : "box-none"} style={[StyleSheet.absoluteFill, motion.style]}>
-      <HoverContent hover={shown} windowId={windowId} player={player} windowHeight={height} />
+      <HoverContent hover={shown} windowId={windowId} player={player} calendar={calendar} windowHeight={height} />
     </Animated.View>
   );
 }
 
-function HoverContent({ hover, windowId, player, windowHeight }: { hover: Hover; windowId: string; player: boolean; windowHeight: number }) {
-  const calendar = useIsCalendarTab(hover.kind === "tab" ? hover.id : null);
+function HoverContent({ hover, windowId, player, calendar, windowHeight }: { hover: Hover; windowId: string; player: boolean; calendar: boolean; windowHeight: number }) {
   if (hover.kind === "live") return <LiveItemCard id={hover.id} windowId={windowId} anchor={hover.anchor} />;
   if (hover.kind === "tab" && player) return <HoverPlayer tabId={hover.id} windowId={windowId} anchor={hover.anchor} />;
   if (hover.kind === "tab" && calendar) return <CalendarPreview tabId={hover.id} windowId={windowId} anchor={hover.anchor} />;
   if (hover.kind === "folder") return <FolderPeek folderId={hover.id} windowId={windowId} anchor={hover.anchor} />;
-  return hover.kind === "tab" ? <TabCard tabId={hover.id} windowId={windowId} anchor={hover.anchor} /> : <GroupPanel key={`${windowId}:${hover.id}`} groupId={hover.id} windowId={windowId} anchor={hover.anchor} windowHeight={windowHeight} />;
+  if (hover.kind === "group") return <GroupPanel key={`${windowId}:${hover.id}`} groupId={hover.id} windowId={windowId} anchor={hover.anchor} windowHeight={windowHeight} />;
+  return null;
 }
 
 function Card({ anchor, children }: { anchor: Anchor; children: React.ReactNode }) {
@@ -78,108 +77,6 @@ function Card({ anchor, children }: { anchor: Anchor; children: React.ReactNode 
     >
       {children}
     </Surface>
-  );
-}
-
-function TabCard({ tabId, windowId, anchor }: { tabId: string; windowId: string; anchor: Anchor }) {
-  const theme = useTheme();
-  const tab = useBrowser((s) => s.tabs[tabId]);
-  const isActive = useBrowser((s) => activeTabId(s, windowId) === tabId);
-  const bookmarked = useIsBookmarked(tab?.url ?? "");
-  const video = useMedia((m) => !!m.sessions[tabId]?.hasVideo || !!m.pipOpen[tabId]);
-  const [pip, togglePip] = usePictureInPicture(tabId);
-  const sleeping = useIsSleeping(tabId);
-  if (!tab) return null;
-  const s = () => useBrowser.getState();
-  const away = awayFromPin(tab);
-  return (
-    <Card anchor={anchor}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <TabIcon tabId={tabId} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} />
-        <FadeLabel text={tabTitle(tab)} fontSize={13} weight="medium" color={theme.textPrimary} style={{ flex: 1, height: 18 }} />
-      </View>
-      {tab.url ? (
-        <Text numberOfLines={2} style={{ marginTop: 4, fontSize: 11.5, lineHeight: 15, color: theme.textSecondary }}>
-          {displayUrl(tab.url)}
-        </Text>
-      ) : null}
-      {sleeping ? (
-        <View accessible accessibilityLabel="Web content has been discarded" style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
-          <Symbol name="moon.zzz" size={10} color={theme.textTertiary} style={{ width: 14, height: 14 }} />
-          <Text style={{ fontSize: 11.5, color: theme.textTertiary }}>This tab needs to reload</Text>
-        </View>
-      ) : null}
-      {away && tab.pinnedUrl ? (
-        <Text numberOfLines={1} style={{ marginTop: 2, fontSize: 11.5, color: theme.textTertiary }}>
-          Pinned: {displayUrl(tab.pinnedUrl)}
-        </Text>
-      ) : null}
-      <View style={{ flexDirection: "row", gap: 4, marginTop: 8 }}>
-        <Action icon={tab.pinned ? "pin.slash" : "pin"} label={tab.pinned ? "Unpin" : "Pin"} onPress={() => s().togglePin(tabId)} />
-        {tab.url ? (
-          <Action
-            icon={bookmarked ? "bookmark.fill" : "bookmark"}
-            label={bookmarked ? "Bookmarked" : "Bookmark"}
-            onPress={() => s().toggleBookmark(bookmarkProfileId(s(), s().windows[windowId]), { url: tab.url, title: tabTitle(tab), favicon: tab.favicon })}
-          />
-        ) : null}
-        {!isActive && !tab.pinned ? (
-          <Action
-            icon="rectangle.split.2x1"
-            label="Split"
-            onPress={() => {
-              dismissHover();
-              openInSplit(tabId);
-            }}
-          />
-        ) : null}
-        {video ? <Action icon={pip ? "pip.exit" : "pip.enter"} label={pip ? "Exit PiP" : "PiP"} onPress={togglePip} /> : null}
-        {away ? (
-          <Action
-            icon="arrow.uturn.backward"
-            label="Reset"
-            onPress={() => {
-              dismissHover();
-              s().returnToPinnedUrl(tabId);
-            }}
-          />
-        ) : null}
-      </View>
-    </Card>
-  );
-}
-
-const ACTIVATE = [{ name: "activate" }];
-
-function Action({ icon, label, onPress }: { icon: string; label: string; onPress(press: GestureResponderEvent | AccessibilityActionEvent): void }) {
-  const theme = useTheme();
-  const { hovered, hoverProps } = useHover();
-  return (
-    <View {...hoverProps} style={{ flex: 1 }}>
-      <Pressable
-        onPress={onPress}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityActions={ACTIVATE}
-        onAccessibilityAction={(event) => event.nativeEvent.actionName === "activate" && onPress(event)}
-      >
-        {({ pressed }) => (
-          <View
-            style={{
-              height: 44,
-              borderRadius: 8,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 3,
-              backgroundColor: pressed ? theme.toolbarPressed : hovered ? theme.toolbarHover : theme.urlPill,
-            }}
-          >
-            <Symbol name={icon} size={13} color={theme.icon} style={{ width: 18, height: 16 }} />
-            <Text style={{ fontSize: 10.5, color: theme.textSecondary }}>{label}</Text>
-          </View>
-        )}
-      </Pressable>
-    </View>
   );
 }
 
