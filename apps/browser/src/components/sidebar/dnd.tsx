@@ -118,10 +118,10 @@ type Marks = {
   folderAway: boolean;
   lifted: string | null;
   line: DropLine | null;
-  page: string | null;
 };
-const NO_MARKS: Marks = { sources: new Set(), dropInto: null, onto: null, landing: null, pins: false, pinCount: 0, pinBefore: null, folded: null, folderTarget: null, folderAway: false, lifted: null, line: null, page: null };
+const NO_MARKS: Marks = { sources: new Set(), dropInto: null, onto: null, landing: null, pins: false, pinCount: 0, pinBefore: null, folded: null, folderTarget: null, folderAway: false, lifted: null, line: null };
 const noMarks = create<Marks>()(() => NO_MARKS);
+const resting = (m: Marks) => !m.sources.size && (Object.keys(NO_MARKS) as (keyof Marks)[]).every((k) => k === "sources" || m[k] === NO_MARKS[k]);
 const NO_DROP: Drop = { type: "none" };
 type Pointed = { cell: Item | null; index: number; gap: number; part: "gap" | "centre" | "before" | "after" };
 
@@ -198,7 +198,7 @@ class DragController {
       }
     this.page = page;
     this.items = new Map([...(this.pages.get("") ?? []), ...(dragging ? [] : (this.pages.get(page) ?? []))]);
-    this.marks.setState({ page });
+    if (!resting(this.marks.getState())) this.marks.setState({});
     return dragging;
   }
 
@@ -941,7 +941,7 @@ export function DragScope({ page, enabled, children }: { page: string; enabled: 
 function useMarks<T>(pick: (m: Marks) => T): T {
   const controller = useContext(DragContext);
   const { page } = useContext(DragPageContext);
-  return useStore(controller?.marks ?? noMarks, (m) => pick(!page || m.page === page ? m : NO_MARKS));
+  return useStore(controller?.marks ?? noMarks, (m) => pick(!controller || controller.live(page) ? m : NO_MARKS));
 }
 
 export const useDragController = () => useContext(ActiveDragContext) ?? undefined;
