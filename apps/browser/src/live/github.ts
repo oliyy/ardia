@@ -1,4 +1,4 @@
-import { LiveError, type CheckState, type LiveItem, type PullRequestCheck, type PullRequestInfo, type PullRequestSection } from "./types";
+import { LiveError, type CheckState, type LiveFolder, type LiveItem, type PullRequestCheck, type PullRequestInfo, type PullRequestSection } from "./types";
 
 const PR_FIELDS = `
   ... on PullRequest {
@@ -134,12 +134,18 @@ function mapPR(raw: RawPR, section: PullRequestSection): LiveItem {
 }
 
 const isPR = (n: object): n is RawPR => "number" in n;
+const idOf = (n: object) => ("id" in n ? (n.id as string) : "");
 
-export function detailIds(json: GithubResponse, filters: { authored: boolean; reviewRequests: boolean }): string[] {
+const reviewSection = (direct: Set<string>, id: string): PullRequestSection => (direct.has(id) ? "review" : "team");
+const reviewListed = (filters: LiveFolder["filters"], section: PullRequestSection) => (section === "review" ? filters.reviewRequests : filters.teamReviewRequests);
+
+export function detailIds(json: GithubResponse, filters: LiveFolder["filters"]): string[] {
   const data = json.data;
   if (!data) return [];
-  const sections = [filters.authored && data.authored, filters.reviewRequests && data.review].filter((x) => !!x);
-  return [...new Set(sections.flatMap((section) => section.nodes.map((n) => ("id" in n ? n.id : "")).filter(Boolean)))];
+  const direct = new Set(data.direct.nodes.map(idOf));
+  const authored = filters.authored ? data.authored.nodes.map(idOf) : [];
+  const review = data.review.nodes.map(idOf).filter((id) => reviewListed(filters, reviewSection(direct, id)));
+  return [...new Set([...authored, ...review].filter(Boolean))];
 }
 
 type GraphqlError = { type?: string; message: string; path?: (string | number)[] };
@@ -169,17 +175,19 @@ export function withDetails(json: GithubResponse, details: (RawPR | null)[]): Gi
   return { ...json, data: { ...data, authored: { nodes: fill(data.authored.nodes) }, review: { nodes: fill(data.review.nodes) } } };
 }
 
-export function mapGithub(json: GithubResponse, filters: { authored: boolean; reviewRequests: boolean }): LiveItem[] {
+export function mapGithub(json: GithubResponse, filters: LiveFolder["filters"]): LiveItem[] {
   const data = json.data;
   if (!data) return [];
-  const direct = new Set(data.direct.nodes.map((n) => ("id" in n ? n.id : "")));
+  const direct = new Set(data.direct.nodes.map(idOf));
   const out: LiveItem[] = [];
   const seen = new Set<string>();
   if (filters.authored) {
     for (const n of data.authored.nodes) if (isPR(n) && !seen.has(n.id)) (seen.add(n.id), out.push(mapPR(n, "authored")));
   }
-  if (filters.reviewRequests) {
-    for (const n of data.review.nodes) if (isPR(n) && !seen.has(n.id)) (seen.add(n.id), out.push(mapPR(n, direct.has(n.id) ? "review" : "team")));
+  for (const n of data.review.nodes) {
+    if (!isPR(n) || seen.has(n.id)) continue;
+    const section = reviewSection(direct, n.id);
+    if (reviewListed(filters, section)) (seen.add(n.id), out.push(mapPR(n, section)));
   }
   return withStacks(out);
 }

@@ -77,13 +77,12 @@ function load(): Partial<LiveState> {
 
 const saved = load();
 
-const FOLDER_OPTION_DEFAULTS = { groupStacks: true, showCompleted: true } satisfies Partial<LiveFolder>;
+const FOLDER_OPTION_DEFAULTS: Pick<LiveFolder, "groupStacks" | "showCompleted" | "hiddenRepos"> = { groupStacks: true, showCompleted: true, hiddenRepos: [] };
 
-const withOptionDefaults = (folders: Record<string, LiveFolder> = {}) =>
-  Object.fromEntries(Object.entries(folders).map(([id, f]) => [id, { ...FOLDER_OPTION_DEFAULTS, ...f }]));
+const withOptionDefaults = (f: LiveFolder): LiveFolder => ({ ...FOLDER_OPTION_DEFAULTS, ...f, filters: { ...f.filters, teamReviewRequests: f.filters.teamReviewRequests ?? f.filters.reviewRequests } });
 
 export const useLive = create<LiveState>()(() => ({
-  folders: withOptionDefaults(saved.folders),
+  folders: Object.fromEntries(Object.entries(saved.folders ?? {}).map(([id, f]) => [id, withOptionDefaults(f)])),
   folderOrder: saved.folderOrder ?? [],
   items: saved.items ?? {},
   known: saved.known ?? {},
@@ -138,7 +137,7 @@ export function createFolder(profileId: string, kind: LiveFolderKind, sources?: 
     icon: null,
     collapsed: false,
     sources: sources ?? FOLDER_DEFAULTS[kind].sources,
-    filters: { authored: true, reviewRequests: true },
+    filters: { authored: true, reviewRequests: true, teamReviewRequests: true },
     ...FOLDER_OPTION_DEFAULTS,
     createdAt: Date.now(),
   };
@@ -186,6 +185,13 @@ export function updateFolder(id: string, patch: Partial<Omit<LiveFolder, "id" | 
   });
 }
 
+export function moveFolderToProfile(id: string, profileId: string) {
+  setLive((s) => {
+    const folder = s.folders[id];
+    return folder && folder.profileId !== profileId ? { folders: { ...s.folders, [id]: { ...folder, profileId } } } : {};
+  });
+}
+
 const without = <T>(record: Record<string, T>, key: string) => {
   const { [key]: _, ...rest } = record;
   return rest;
@@ -221,7 +227,7 @@ export function removeFolder(id: string): LiveFolderSnapshot | null {
 }
 
 export function restoreFolder(snapshot: LiveFolderSnapshot): string {
-  const folder = copyFolder(snapshot);
+  const folder = withOptionDefaults(copyFolder(snapshot));
   const { id } = folder;
   setLive((s) => ({
     folders: { ...s.folders, [id]: folder },

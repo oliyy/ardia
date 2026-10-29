@@ -634,6 +634,11 @@ public class ShellModule: Module {
       entry.state = item["checked"] as? Bool == true ? .on : .off
       if let symbol = item["symbol"] as? String {
         entry.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+      } else if let path = item["image"] as? String, let url = URL(string: path), let image = NSImage(contentsOf: url) {
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = true
+        entry.image = image
+        if #available(macOS 27.0, *) { entry.preferredImageVisibility = .visible }
       } else if let hex = item["swatch"] as? String, let light = NSColor(hex: hex) {
         let dark = (item["swatchDark"] as? String).flatMap { NSColor(hex: $0) } ?? light
         entry.image = swatch(NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })

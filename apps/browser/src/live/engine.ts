@@ -57,7 +57,7 @@ async function run(folderId: string, generation: number) {
   });
   if (!live().folders[folderId]) return;
   const fromFailedSource = (it: LiveItem) => failed.some((f) => f.source === it.source);
-  const listedByFilters = (it: LiveItem) => (it.section === "review" || it.section === "team" ? folder.filters.reviewRequests : folder.filters.authored);
+  const listedByFilters = (it: LiveItem) => (it.section === "review" ? folder.filters.reviewRequests : it.section === "team" ? folder.filters.teamReviewRequests : folder.filters.authored);
   const fetchWouldList = (it: LiveItem) => folder.sources.includes(it.source) && !fromFailedSource(it) && listedByFilters(it);
 
   const landed = live();
@@ -108,7 +108,7 @@ function fetchText(folderId: string, now: number): string {
   if (st.error) return errorText(st.error.kind, st.error.source);
   if (!st.lastFetch) return "Not updated yet";
   const min = Math.floor((now - st.lastFetch) / 60_000);
-  return min < 1 ? "Updated just now" : min < 60 ? `Updated ${min} min ago` : `Updated ${Math.floor(min / 60)} hr ago`;
+  return `Last fetch: ${min < 1 ? "just now" : min < 60 ? `${min}m ago` : `${Math.floor(min / 60)}h ago`}`;
 }
 
 export function errorText(kind: LiveError["kind"], source: LiveSourceId): string {

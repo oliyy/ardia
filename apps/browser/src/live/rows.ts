@@ -14,6 +14,17 @@ export const SECTION_TITLES: Record<PullRequestSection, string | null> = {
 
 export const PAGE_SIZE = 8;
 
+export const inHiddenRepo = (folder: Pick<LiveFolder, "hiddenRepos">, item: LiveItem) => !!item.pr && folder.hiddenRepos.includes(item.pr.repo);
+
+export const shownItems = (folder: Pick<LiveFolder, "hiddenRepos">, items: LiveItem[]) => (folder.hiddenRepos.length ? items.filter((it) => !inHiddenRepo(folder, it)) : items);
+
+export const hasShownUnread = (folder: Pick<LiveFolder, "hiddenRepos">, items: LiveItem[], unread: string[] = []) =>
+  unread.length > 0 && (!folder.hiddenRepos.length || items.some((it) => unread.includes(it.id) && !inHiddenRepo(folder, it)));
+
+export function folderRepos(folder: Pick<LiveFolder, "hiddenRepos">, items: LiveItem[]): string[] {
+  return [...new Set([...items.flatMap((it) => (it.pr ? [it.pr.repo] : [])), ...folder.hiddenRepos])].sort();
+}
+
 export type LiveTabPlace = "row" | "stray" | "hidden";
 
 export function liveTabPlace(itemId: string, shown: Set<string>, hidden: Set<string>): LiveTabPlace {

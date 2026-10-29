@@ -4,8 +4,7 @@ import { resolveFavicon, useFavicons } from "../../lib/favicons";
 import { bundledSiteIcon } from "../../lib/siteIcons";
 import { layout, useTheme } from "../../lib/theme";
 import { errorText } from "../../live/engine";
-import { folderRows, liveTabPlace, type FolderRow } from "../../live/rows";
-import { prBadge } from "../../live/github";
+import { folderRows, hasShownUnread, inHiddenRepo, liveTabPlace, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import type { live } from "../../live/store";
 import type { CompletedItem, LiveFolder, LiveItem } from "../../live/types";
@@ -20,7 +19,7 @@ import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_PAD, GROUP_RADIUS, groupFrame, k
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { pointerOnRow } from "./hover";
-import { ItemIcon, PositionChip, Trailing } from "./LiveFolderBlock";
+import { ItemIcon, liveSubtitle, Trailing } from "./LiveFolderBlock";
 import { folderChildrenWith } from "./pinnedTree";
 import { FaviconFallback, NewTabIcon } from "../primitives";
 import { HoverSlot } from "../HoverSlot";
@@ -121,13 +120,14 @@ function rowShot(data: LiveData, folderId: string, row: FolderRow): LiveRowShot 
 function liveShot(s: BrowserState, windowId: string, profileId: string, folderId: string, data: LiveData, peek: boolean): LiveShot | null {
   const folder = data.folders[folderId];
   if (!folder) return null;
-  const items = data.items[folderId] ?? [];
+  const fetched = data.items[folderId] ?? [];
+  const items = shownItems(folder, fetched);
   const rows = folderRows(folder, items, data.showAll);
   const itemIds = new Set(items.map((i) => i.id));
-  const hiddenIds = new Set((data.hidden[folderId] ?? []).map((item) => item.id));
+  const hiddenIds = new Set([...(data.hidden[folderId] ?? []), ...fetched.filter((it) => !itemIds.has(it.id))].map((item) => item.id));
   const strays = viewTabIds(s, windowId, profileId).filter((id) => s.tabs[id]?.liveItem?.folderId === folderId && liveTabPlace(s.tabs[id]!.liveItem!.itemId, itemIds, hiddenIds) === "stray");
   const completing = data.completing[folderId] ?? [];
-  const completed = folder.showCompleted ? (data.completed[folderId] ?? []).filter((c) => Date.now() - c.at < COMPLETED_SHOWN_MS && !completing.includes(c.item.id)).length : 0;
+  const completed = folder.showCompleted ? (data.completed[folderId] ?? []).filter((c) => Date.now() - c.at < COMPLETED_SHOWN_MS && !completing.includes(c.item.id) && !inHiddenRepo(folder, c.item)).length : 0;
   const all: LiveRowShot[] = rows.length ? rows.map((row) => rowShot(data, folderId, row)) : [{ kind: "note", key: "note", text: noteText(data, folder) }];
   for (const id of strays) {
     const tab = tabShot(s, id, false);
@@ -154,7 +154,7 @@ function liveShot(s: BrowserState, windowId: string, profileId: string, folderId
     githubMark: folder.sources[0] === "github" && !initialLoading,
     error: status?.error ? errorText(status.error.kind, status.error.source) : null,
     updating: status?.state === "updating" || status?.state === "initializing",
-    unread: (data.unread[folderId]?.length ?? 0) > 0,
+    unread: hasShownUnread(folder, fetched, data.unread[folderId]),
     count: items.length,
     collapsed,
     rows: collapsed ? all.filter((r) => r.key === keep) : all,
@@ -357,13 +357,12 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
   const arcTitle = useArcTitle();
   const { item, completion, unread, indent } = shot;
   const subtitle = item.pr?.author || item.subtitle;
-  const approved = flat && !completion && !!item.pr && prBadge(item.pr) === "approved";
-  const subtitleText = approved ? [subtitle, "Approved"].filter(Boolean).join(" · ") : subtitle;
+  const subtitleText = liveSubtitle(item, subtitle, completion);
   const color = completion ? theme.textSecondary : (arcTitle ?? label);
   return (
     <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}>
       {unread && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-      <ItemIcon item={item} completion={completion} colors={colors} flat={flat} approved={approved} animate={false} />
+      <ItemIcon item={item} completion={completion} colors={colors} flat={flat} animate={false} />
       {flat && subtitle ? (
         <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
           <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={color} style={{ height: 18 }} />
@@ -372,14 +371,13 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
       ) : (
         <FadeLabel text={item.title} fontSize={layout.rowFontSize} weight={unread && !flat ? "medium" : undefined} color={color} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
       )}
-      {indent > 0 && item.pr?.stack ? <PositionChip position={item.pr.stack.position} /> : null}
       <HoverSlot hovered={false} hover={null} width={22}>
         {unread && flat ? (
           <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
           </View>
         ) : null}
-        <Trailing item={item} completion={completion} colors={colors} approved={approved} />
+        <Trailing item={item} completion={completion} colors={colors} />
       </HoverSlot>
     </View>
   );

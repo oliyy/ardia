@@ -7,6 +7,7 @@ import { ago } from "../../lib/timeAgo";
 import { webviews } from "../../lib/webviews";
 import { useBrowser } from "../../store/browser";
 import { openLiveItem } from "../../live/engine";
+import { inHiddenRepo } from "../../live/rows";
 import { useLive } from "../../live/store";
 import type { LiveItem } from "../../live/types";
 import { displayedSubtree, groupNode, isLiveNode, isTabNode, keyOfNode, pinKeyOf } from "../../store/pinTree";
@@ -75,7 +76,7 @@ function useGroupRows(groupId: string, windowId: string): Row[] {
     for (const folderId of folderIds) {
       const folder = data.folders[folderId];
       if (!folder || folder.profileId !== group?.profileId) continue;
-      const hidden = new Set((data.hidden[folderId] ?? []).map((item) => item.id));
+      const hidden = new Set([...(data.hidden[folderId] ?? []), ...(data.items[folderId] ?? []).filter((item) => inHiddenRepo(folder, item))].map((item) => item.id));
       const items = (data.items[folderId] ?? []).filter((item) => !hidden.has(item.id));
       const loaded = new Map(tabs.filter((t) => !t.pinned && t.liveItem?.folderId === folderId).map((t) => [t.liveItem!.itemId, t]));
       for (const item of items) {

@@ -1,4 +1,4 @@
-import { ArcTabRowBackground, ContextMenuArea, FadeLabel, Surface, Symbol } from "@ardia/shell";
+import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, Surface, Symbol } from "@ardia/shell";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
@@ -6,7 +6,7 @@ import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { COMPLETION_MS, errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
 import { prBadge } from "../../live/github";
-import { folderRows, liveTabPlace, type FolderRow } from "../../live/rows";
+import { folderRows, hasShownUnread, inHiddenRepo, liveTabPlace, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import { setLive, updateFolder, useLive } from "../../live/store";
 import type { CompletedItem, LiveItem } from "../../live/types";
@@ -38,21 +38,21 @@ const EMPTY: LiveItem[] = [];
 const NONE: string[] = [];
 const NONE_COMPLETED: CompletedItem[] = [];
 
-const APPROVED_CUTOUT: [number, number, number] = [12.5, 12.5, 4.5];
 const liveRowKey = (folderId: string, itemId: string) => `live|${folderId}|${itemId}`;
 
 export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion = null, peek = false }: { folderId: string; motion?: EntryMotion | null; peek?: boolean }) {
   const windowId = useWindowId();
   const tokens = useSidebarTokens();
   const folder = useLive((s) => s.folders[folderId]);
-  const items = useLive((s) => s.items[folderId] ?? EMPTY);
+  const fetched = useLive((s) => s.items[folderId] ?? EMPTY);
+  const items = useMemo(() => (folder ? shownItems(folder, fetched) : fetched), [folder, fetched]);
   const showAll = useLive((s) => s.showAll);
   const folded = useDragFolded(`l:${folderId}`);
   const collapsed = folded || !!folder?.collapsed || peek;
   const rows = useMemo(() => (folder ? folderRows(folder, items, showAll) : []), [folder, items, showAll]);
   const itemIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
   const hiddenList = useLive((s) => s.hidden[folderId] ?? EMPTY);
-  const hiddenIds = useMemo(() => new Set(hiddenList.map((i) => i.id)), [hiddenList]);
+  const hiddenIds = useMemo(() => new Set([...hiddenList, ...fetched.filter((it) => !itemIds.has(it.id))].map((i) => i.id)), [hiddenList, fetched, itemIds]);
   const profileId = usePageProfileId();
   const strays = useBrowser(
     useShallow((s) =>
@@ -136,8 +136,8 @@ function FolderHeader({ folderId, windowId, collapsed, peek, flat }: { folderId:
   const hidden = useFoldHidden();
   const colors = useLiveColors();
   const folder = useLive((s) => s.folders[folderId]);
-  const count = useLive((s) => s.items[folderId]?.length ?? 0);
-  const unread = useLive((s) => (s.unread[folderId]?.length ?? 0) > 0);
+  const count = useLive((s) => (s.folders[folderId] ? shownItems(s.folders[folderId], s.items[folderId] ?? EMPTY).length : 0));
+  const unread = useLive((s) => !!s.folders[folderId] && hasShownUnread(s.folders[folderId], s.items[folderId] ?? EMPTY, s.unread[folderId]));
   const status = useLive((s) => s.status[folderId]);
   const { hovered, hoverProps } = useHover();
   const dragging = useDragging();
@@ -190,14 +190,13 @@ function FolderHeader({ folderId, windowId, collapsed, peek, flat }: { folderId:
                   <Symbol name="exclamationmark.triangle.fill" size={10} color={colors.pending} style={{ width: 18, height: 18 }} />
                 </Pressable>
               ) : null}
+              <ActivitySpinner visible={updating} style={{ position: "absolute", right: 8, top: (layout.rowHeight - 12) / 2, width: 12, height: 12 }} />
               <HoverSlot
                 hovered={hovered && !updating}
                 width={22}
-                hover={<RefreshButton spinning={false} tooltip={statusText(folderId)} onPress={() => void manualRefresh(folderId)} />}
+                hover={<IconButton icon="arrow.clockwise" size={10} weight="semibold" box={22} radius={6} onPress={() => void manualRefresh(folderId)} tooltip={statusText(folderId)} />}
               >
-                {updating ? (
-                  <RefreshButton spinning tooltip={statusText(folderId)} onPress={() => void manualRefresh(folderId)} />
-                ) : collapsed ? (
+                {collapsed && !updating ? (
                   <View style={{ flexDirection: "row", alignItems: "center", marginRight: 2, gap: 5 }}>
                     {unread ? <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.pip }} /> : null}
                     {flat ? null : (
@@ -212,26 +211,6 @@ function FolderHeader({ folderId, windowId, collapsed, peek, flat }: { folderId:
           )}
         </Pressable>
       </ContextMenuArea>
-    </View>
-  );
-}
-
-function RefreshButton({ spinning, tooltip, onPress }: { spinning: boolean; tooltip: string; onPress(): void }) {
-  const theme = useTheme();
-  const turn = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!spinning) return;
-    turn.setValue(0);
-    const loop = Animated.loop(Animated.timing(turn, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }));
-    loop.start();
-    return () => loop.stop();
-  }, [spinning]);
-  if (!spinning) return <IconButton icon="arrow.clockwise" size={10} weight="semibold" box={22} radius={6} onPress={onPress} tooltip={tooltip} />;
-  return (
-    <View tooltip={tooltip} style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
-      <Animated.View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }] }}>
-        <Symbol name="arrow.clockwise" size={10} weight="semibold" color={theme.textSecondary} style={{ width: 14, height: 14 }} />
-      </Animated.View>
     </View>
   );
 }
@@ -253,7 +232,11 @@ function NoteRow({ text, icon, spinner, onPress }: { text: string; icon?: string
   const { hovered, hoverProps } = useHover();
   const body = (
     <View style={{ height: 28, flexDirection: "row", alignItems: "center", paddingLeft: 9, paddingRight: 6, gap: 6, borderRadius: 8, backgroundColor: onPress && hovered ? theme.rowHover : undefined }}>
-      {spinner ? <Spinner /> : icon ? <Symbol name={icon} size={10} color={colors.pending} style={{ width: 16, height: 16 }} /> : null}
+      {spinner ? (
+        <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
+          <ActivitySpinner visible style={{ width: 12, height: 12 }} />
+        </View>
+      ) : icon ? <Symbol name={icon} size={10} color={colors.pending} style={{ width: 16, height: 16 }} /> : null}
       <Text numberOfLines={2} style={{ flex: 1, fontSize: 12, color: theme.textSecondary }}>
         {text}
       </Text>
@@ -263,21 +246,6 @@ function NoteRow({ text, icon, spinner, onPress }: { text: string; icon?: string
     <View {...hoverProps}>
       {onPress ? <Pressable onPress={onPress}>{body}</Pressable> : body}
     </View>
-  );
-}
-
-function Spinner() {
-  const theme = useTheme();
-  const turn = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.timing(turn, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }));
-    loop.start();
-    return () => loop.stop();
-  }, []);
-  return (
-    <Animated.View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center", transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }] }}>
-      <Symbol name="arrow.triangle.2.circlepath" size={10} color={theme.textSecondary} style={{ width: 14, height: 14 }} />
-    </Animated.View>
   );
 }
 
@@ -369,8 +337,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   }, [completion]);
   const fill = active ? tokens.selectedFill : hovered ? theme.tabHover : "rgba(0,0,0,0)";
   const label = (completion ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completion ? theme.textSecondary : (arcLabel ?? theme.textTab));
-  const approved = flat && !completion && !!item.pr && prBadge(item.pr) === "approved";
-  const subtitleText = approved ? [subtitle, "Approved"].filter(Boolean).join(" · ") : subtitle;
+  const subtitleText = liveSubtitle(item, subtitle, completion);
 
   return (
     <Animated.View presentationGate style={completion ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
@@ -401,7 +368,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
                 style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}
               >
                 {unread && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-                <ItemIcon item={item} completion={completion} colors={colors} flat={flat} approved={approved} />
+                <ItemIcon item={item} completion={completion} colors={colors} flat={flat} />
                 {flat && subtitle ? (
                   <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
                     <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} style={{ height: 18 }} />
@@ -416,7 +383,6 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
                     style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }}
                   />
                 )}
-                {inStack && item.pr?.stack ? <PositionChip position={item.pr.stack.position} /> : null}
                 <HoverSlot
                   hovered={hovered && !!tabId && !completion}
                   width={22}
@@ -427,7 +393,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
                     </View>
                   ) : null}
-                  <Trailing item={item} completion={completion} colors={colors} approved={approved} />
+                  <Trailing item={item} completion={completion} colors={colors} />
                 </HoverSlot>
               </Surface>
             )}
@@ -438,14 +404,9 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   );
 }
 
-export function PositionChip({ position }: { position: number }) {
-  const theme = useTheme();
-  const colors = useLiveColors();
-  return (
-    <View style={{ minWidth: 16, height: 16, borderRadius: 5, paddingHorizontal: 4, marginLeft: 4, backgroundColor: colors.chip, alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ fontSize: 10, fontWeight: "600", color: theme.textSecondary, fontVariant: ["tabular-nums"] }}>{position}</Text>
-    </View>
-  );
+export function liveSubtitle(item: LiveItem, subtitle: string, completion: CompletedItem["state"] | null): string {
+  const approved = !completion && !!item.pr && prBadge(item.pr) === "approved";
+  return [subtitle, approved && "Approved", item.pr && `#${item.pr.number}`].filter(Boolean).join(" · ");
 }
 
 const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: keyof LiveColors }> = {
@@ -459,14 +420,12 @@ export function ItemIcon({
   completion,
   colors,
   flat,
-  approved,
   animate = true,
 }: {
   item: LiveItem;
   completion: CompletedItem["state"] | null;
   colors: LiveColors;
   flat: boolean;
-  approved: boolean;
   animate?: boolean;
 }) {
   const pop = useRef(new Animated.Value(completion && animate ? 0 : 1)).current;
@@ -483,24 +442,7 @@ export function ItemIcon({
       </Animated.View>
     );
   }
-  if (item.pr && flat) {
-    return (
-      <View style={{ width: 16, height: 16 }}>
-        {approved ? (
-          <Surface cutout={APPROVED_CUTOUT} style={{ width: 16, height: 16 }}>
-            <TabIcon url={SOURCES[item.source].site} />
-          </Surface>
-        ) : (
-          <TabIcon url={SOURCES[item.source].site} />
-        )}
-        {approved ? (
-          <View style={{ position: "absolute", right: 0, bottom: 0, width: 8, height: 8, alignItems: "center", justifyContent: "center" }}>
-            <Symbol name="checkmark" size={7} weight="bold" color={colors.success} style={{ width: 8, height: 8 }} />
-          </View>
-        ) : null}
-      </View>
-    );
-  }
+  if (item.pr && flat) return <TabIcon url={SOURCES[item.source].site} />;
   if (item.pr) {
     return <Symbol name="arrow.triangle.pull" size={12} weight="semibold" color={item.pr.draft ? colors.draft : colors.success} style={{ width: 16, height: 16 }} />;
   }
@@ -513,16 +455,16 @@ const BADGES: Record<NonNullable<ReturnType<typeof prBadge>>, { symbol: string |
   failing: { symbol: "xmark.circle.fill", color: "failure", tip: "Checks are failing" },
   changesRequested: { symbol: "arrow.uturn.backward.circle.fill", color: "failure", tip: "Changes Requested" },
   pending: { symbol: null, color: "pending", tip: "Some checks haven't completed yet" },
-  approved: { symbol: "checkmark.circle.fill", color: "success", tip: "Approved" },
+  approved: { symbol: "checkmark.seal.fill", color: "success", tip: "Approved" },
   passed: { symbol: "checkmark", color: "success", tip: "All checks have passed" },
 };
 
-export function Trailing({ item, completion, colors, approved }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors; approved: boolean }): ReactNode {
+export function Trailing({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }): ReactNode {
   const theme = useTheme();
   if (completion) {
     return <Text style={{ fontSize: 11, fontWeight: "500", color: colors[COMPLETION_GLYPH[completion].color], marginRight: 4 }}>{completion === "merged" ? "Merged" : completion === "reviewed" ? "Reviewed" : "Closed"}</Text>;
   }
-  const badge = item.pr && !approved ? prBadge(item.pr) : null;
+  const badge = item.pr ? prBadge(item.pr) : null;
   if (!badge) return null;
   const spec = BADGES[badge];
   return (
@@ -539,9 +481,10 @@ export function Trailing({ item, completion, colors, approved }: { item: LiveIte
 function useCompletedShown(folderId: string): CompletedItem[] {
   return useLive(
     useShallow((s) => {
-      if (!s.folders[folderId]?.showCompleted) return NONE_COMPLETED;
+      const folder = s.folders[folderId];
+      if (!folder?.showCompleted) return NONE_COMPLETED;
       const completing = s.completing[folderId] ?? NONE;
-      return (s.completed[folderId] ?? []).filter((c) => Date.now() - c.at < 24 * 3_600_000 && !completing.includes(c.item.id));
+      return (s.completed[folderId] ?? []).filter((c) => Date.now() - c.at < 24 * 3_600_000 && !completing.includes(c.item.id) && !inHiddenRepo(folder, c.item));
     }),
   );
 }

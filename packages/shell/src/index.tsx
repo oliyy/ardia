@@ -158,6 +158,7 @@ export type MenuItem =
       id: string;
       title: string;
       symbol?: string;
+      image?: string;
       swatch?: string;
       swatchDark?: string;
       key?: string;

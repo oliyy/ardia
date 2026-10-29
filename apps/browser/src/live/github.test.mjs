@@ -6,7 +6,7 @@ import { LiveError } from "./types.ts";
 const fixture = JSON.parse(await import("node:fs").then((fs) => fs.readFileSync(new URL("./fixtures/github.json", import.meta.url), "utf8")));
 const all = [...fixture.data.authored.nodes, ...fixture.data.review.nodes];
 const pr = (id) => ({ ...all.find((n) => n.id === id), state: "OPEN" });
-const filters = { authored: true, reviewRequests: true };
+const filters = { authored: true, reviewRequests: true, teamReviewRequests: true };
 const kind = (fn) => {
   try {
     fn();

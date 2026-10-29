@@ -10,7 +10,6 @@ const DARK = {
   pip: "#4C8DF6",
   now: "#E5534B",
   ciTrack: "rgba(255,255,255,0.1)",
-  chip: "rgba(255,255,255,0.1)",
 };
 
 const LIGHT: typeof DARK = {
@@ -23,7 +22,6 @@ const LIGHT: typeof DARK = {
   pip: "#0969DA",
   now: "#D1242F",
   ciTrack: "rgba(0,0,0,0.08)",
-  chip: "rgba(0,0,0,0.06)",
 };
 
 export type LiveColors = typeof DARK;

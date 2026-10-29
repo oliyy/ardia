@@ -1,19 +1,20 @@
 import { cleanUrl, markdownLink } from "@ardia/core";
 import { copyText, prompt, showMenu, type MenuItem } from "@ardia/shell";
+import { Image } from "react-native";
 import { closeTab } from "../../lib/actions";
+import { bundledSiteIcon } from "../../lib/siteIcons";
 import { calendarConnected, connectCalendar, setCalendarHidden, useCalendar } from "../../live/calendar";
 import { deleteLiveFolder, manualRefresh, newLiveFolder, openLiveItem, refreshFolder, statusText } from "../../live/engine";
 import { ALERT_LEADS } from "../../live/meetings";
+import { folderRepos, shownItems } from "../../live/rows";
 import { SOURCES } from "../../live/sources";
-import { hideItems, live, markRead, setLive, updateCalendarSettings, updateFolder } from "../../live/store";
+import { hideItems, live, markRead, moveFolderToProfile, setLive, updateCalendarSettings, updateFolder } from "../../live/store";
 import type { LiveItem, LiveSourceId } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { liveNode } from "../../store/pinTree";
 import { addressBarInSidebar } from "../layout/windowLayout";
 import { openSettings } from "../settings/windows";
 import { openIconPicker } from "./actions";
-import { windowHierarchy } from "./entries";
-import { shownNodes } from "./pinnedTree";
 
 const sep = { separator: true } as const;
 
@@ -35,23 +36,17 @@ export function removeLiveFolder(folderId: string) {
   if (profileId) useBrowser.getState().dropPinned(profileId, [liveNode(folderId)]);
 }
 
-function livePlace(windowId: string, folderId: string) {
+function moveLiveFolderToProfile(folderId: string, profileId: string) {
+  const from = live().folders[folderId]?.profileId;
+  if (!from || from === profileId) return;
   const s = useBrowser.getState();
-  const profileId = live().folders[folderId]?.profileId;
-  if (!profileId) return null;
-  const node = liveNode(folderId);
-  const parent = windowHierarchy(s, windowId, profileId).tree.parent.get(node) ?? null;
-  const siblings = shownNodes(s, windowId, profileId, parent);
-  return { profileId, node, parent, siblings, index: siblings.indexOf(node) };
+  for (const t of Object.values(s.tabs)) if (t.liveItem?.folderId === folderId) s.updateTab(t.id, { liveItem: undefined });
+  s.dropPinned(from, [liveNode(folderId)]);
+  moveFolderToProfile(folderId, profileId);
+  useBrowser.getState().placePinned(profileId, [liveNode(folderId)], null);
 }
 
-function moveLiveFolder(windowId: string, folderId: string, delta: -1 | 1) {
-  const place = livePlace(windowId, folderId);
-  if (!place || place.index < 0) return;
-  const before = delta < 0 ? place.siblings[place.index - 1] : place.siblings[place.index + 2];
-  if (delta < 0 && !before) return;
-  useBrowser.getState().placePinned(place.profileId, [place.node], place.parent, before ?? null, place.siblings);
-}
+const githubMark = () => Image.resolveAssetSource(bundledSiteIcon(SOURCES.github.site, false)!).uri;
 
 export function runNewLiveFolder(windowId: string, choice: string): boolean {
   if (choice === "live:pullRequests") newLiveFolder(windowId, "pullRequests");
@@ -60,79 +55,92 @@ export function runNewLiveFolder(windowId: string, choice: string): boolean {
   return true;
 }
 
-const FOLDER_OPTIONS = ["groupStacks", "showCompleted"] as const;
-
 const SOURCE_GROUPS: Record<"pullRequests" | "documents", LiveSourceId[]> = {
   pullRequests: ["github", "bitbucket"],
   documents: ["notion", "confluence", "gdrive"],
 };
 
+const FILTERS = [
+  { key: "authored", title: "Created by Me" },
+  { key: "reviewRequests", title: "Review Requests" },
+  { key: "teamReviewRequests", title: "Team Review Requests" },
+] as const;
+
 export async function openLiveFolderMenu(windowId: string, folderId: string) {
   const s = live();
   const folder = s.folders[folderId];
   if (!folder) return;
-  const place = livePlace(windowId, folderId);
-  const index = place?.index ?? -1;
+  const browser = useBrowser.getState();
   const pr = folder.kind === "pullRequests";
   const status = s.status[folderId];
+  const repos = folderRepos(folder, [...(s.items[folderId] ?? []), ...(s.hidden[folderId] ?? [])]);
+  const sourceItems: MenuItem[] = SOURCE_GROUPS[folder.kind].map((id) => ({
+    id: `source:${id}`,
+    title: s.accounts[id] ? SOURCES[id].name : `${SOURCES[id].name} (Not Connected)`,
+    checked: folder.sources.includes(id),
+  }));
   const choice = await showMenu([
-    { id: "status", title: statusText(folderId), enabled: false },
-    { id: "refresh", title: "Refresh", symbol: "arrow.clockwise", enabled: status?.state !== "updating" },
-    sep,
-    ...(pr
-      ? [
-          { id: "filter:authored", title: "Created by Me", checked: folder.filters.authored },
-          { id: "filter:reviewRequests", title: "Awaiting My Review", checked: folder.filters.reviewRequests },
-          sep,
-          { id: "option:groupStacks", title: "Group Stacked Pull Requests", checked: folder.groupStacks },
-          { id: "option:showCompleted", title: "Show Completed", checked: folder.showCompleted },
-          sep,
-        ]
-      : []),
     {
-      id: "sources",
+      id: "fetch",
       title: pr ? "Pull Requests" : "Documents",
-      symbol: pr ? "arrow.triangle.pull" : "doc.text",
-      children: SOURCE_GROUPS[folder.kind].map((id) => ({
-        id: `source:${id}`,
-        title: s.accounts[id] ? SOURCES[id].name : `${SOURCES[id].name} (Not Connected)`,
-        checked: folder.sources.includes(id),
-      })),
+      ...(folder.sources[0] === "github" ? { image: githubMark() } : { symbol: pr ? "arrow.triangle.pull" : "doc.text" }),
+      children: [
+        { id: "status", title: statusText(folderId), enabled: false },
+        { id: "refresh", title: "Refresh", enabled: status?.state !== "updating" },
+        sep,
+        ...(pr
+          ? [
+              ...FILTERS.map((f) => ({ id: `filter:${f.key}`, title: f.title, checked: folder.filters[f.key] })),
+              sep,
+              {
+                id: "repos",
+                title: "Repositories",
+                children: [
+                  ...repos.map((repo) => ({ id: `repo:${repo}`, title: repo, checked: !folder.hiddenRepos.includes(repo) })),
+                  ...(repos.length ? [sep] : []),
+                  { id: "reposNote", title: "This list is generated based on your currently active pull requests.", enabled: false },
+                ],
+              },
+              ...(s.accounts.bitbucket ? [sep, ...sourceItems] : []),
+            ]
+          : sourceItems),
+      ],
     },
+    {
+      id: "moveTo",
+      title: "Move to",
+      children: browser.profileOrder.map((id) => ({ id: `profile:${id}`, title: browser.profiles[id]!.name, checked: id === folder.profileId, enabled: id !== folder.profileId })),
+    },
+    { id: "copy", title: "Copy All Links" },
     sep,
-    { id: "rename", title: "Rename…", symbol: "character.cursor.ibeam" },
-    { id: "icon", title: folder.icon || addressBarInSidebar(useBrowser.getState(), windowId) ? "Change Icon…" : "Add Icon…", symbol: "face.smiling" },
-    { id: "read", title: "Mark All as Read", symbol: "circle", enabled: (s.unread[folderId]?.length ?? 0) > 0 },
-    { id: "collapse", title: folder.collapsed ? "Expand" : "Collapse", symbol: folder.collapsed ? "chevron.down" : "chevron.up" },
-    { id: "up", title: "Move Up", enabled: index > 0 },
-    { id: "down", title: "Move Down", enabled: index >= 0 && index < (place?.siblings.length ?? 0) - 1 },
+    { id: "icon", title: folder.icon || addressBarInSidebar(browser, windowId) ? "Change Icon…" : "Add Icon…" },
+    { id: "rename", title: "Rename…" },
     sep,
-    { id: "settings", title: "Live Folder Settings…", symbol: "gearshape" },
-    { id: "delete", title: "Delete Live Folder", symbol: "trash" },
+    { id: "delete", title: "Delete Live Folder" },
   ]);
   if (!choice) return;
-  const option = FOLDER_OPTIONS.find((key) => choice === `option:${key}`);
+  const filter = FILTERS.find((f) => choice === `filter:${f.key}`);
   if (choice === "refresh") void manualRefresh(folderId);
-  else if (option) updateFolder(folderId, { [option]: !folder[option] });
-  else if (choice.startsWith("filter:")) {
-    const key = choice.slice(7) as "authored" | "reviewRequests";
-    updateFolder(folderId, { filters: { ...folder.filters, [key]: !folder.filters[key] } });
+  else if (filter) {
+    updateFolder(folderId, { filters: { ...folder.filters, [filter.key]: !folder.filters[filter.key] } });
     void refreshFolder(folderId);
+  } else if (choice.startsWith("repo:")) {
+    const repo = choice.slice(5);
+    updateFolder(folderId, { hiddenRepos: folder.hiddenRepos.includes(repo) ? folder.hiddenRepos.filter((r) => r !== repo) : [...folder.hiddenRepos, repo] });
   } else if (choice.startsWith("source:")) {
     const id = choice.slice(7) as LiveSourceId;
     if (!s.accounts[id]) return openSettings("liveFolders");
     const sources = folder.sources.includes(id) ? folder.sources.filter((x) => x !== id) : [...folder.sources, id];
     updateFolder(folderId, { sources: sources.length ? sources : folder.sources });
     void refreshFolder(folderId);
+  } else if (choice.startsWith("profile:")) moveLiveFolderToProfile(folderId, choice.slice(8));
+  else if (choice === "copy") {
+    const urls = shownItems(folder, live().items[folderId] ?? []).map((it) => cleanUrl(it.url));
+    if (urls.length) copyText(urls.join("\n"));
   } else if (choice === "rename") {
     const name = await prompt({ title: "Rename Live Folder", value: folder.name, placeholder: "Live folder name", confirmTitle: "Rename", windowId });
     if (name?.trim()) updateFolder(folderId, { name: name.trim() });
   } else if (choice === "icon") void openIconPicker(windowId, { kind: "live", id: `livefolder|${folderId}` });
-  else if (choice === "read") markRead(folderId);
-  else if (choice === "collapse") updateFolder(folderId, { collapsed: !folder.collapsed });
-  else if (choice === "up") moveLiveFolder(windowId, folderId, -1);
-  else if (choice === "down") moveLiveFolder(windowId, folderId, 1);
-  else if (choice === "settings") openSettings("liveFolders");
   else if (choice === "delete") removeLiveFolder(folderId);
 }
 
