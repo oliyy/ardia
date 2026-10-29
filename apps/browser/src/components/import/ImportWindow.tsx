@@ -12,9 +12,9 @@ import type { ProfileColor } from "../../store/types";
 import { useHover } from "../primitives";
 import { arcIconImage, arcSpaceIcon, isEmojiIcon } from "../profiles/icons";
 import { Button, Checkbox, PopUp, useFormColors } from "../settings/controls";
-import { useOnboarding } from "../onboarding/state";
 import { IMPORT_WINDOW_ID, takePreferredImportSource } from "../settings/windows";
 import { applyResult, applySafari, emptyCounts, importArcSpace, importBookmarks, importDiaProfile, openInWebStore, profileColorFor, type ImportCounts } from "./apply";
+import { clearExtensionInstalls, installImportedExtensions, useExtensionInstalls, type ExtensionInstall } from "./extensions";
 import { importModule } from "./module";
 
 const APP = "Ardia";
@@ -34,6 +34,8 @@ const KINDS: { kind: ImportKind; title: string; icon: string }[] = [
   { kind: "favorites", title: "Favorites", icon: "star" },
 ];
 const kindTitle = (k: ImportKind) => KINDS.find((x) => x.kind === k)?.title ?? k;
+const EXTENSIONS_ROW = { kind: "extensions" as const, title: "Extensions", icon: "puzzlepiece.extension" };
+const listsExtensions = (b: BrowserSource | null) => b?.family === "chromium" || b?.family === "arc";
 
 const ENCRYPTED: ImportKind[] = ["passwords", "cookies", "autofill"];
 
@@ -50,7 +52,7 @@ export function ImportWindow() {
   const [spaces, setSpaces] = useState<string[]>([]);
   const [kinds, setKinds] = useState<Set<ImportKind>>(new Set());
   const [target, setTarget] = useState(() => defaultTarget());
-  const [status, setStatus] = useState<Partial<Record<ImportKind, Status>>>({});
+  const [status, setStatus] = useState<Partial<Record<ImportKind | "extensions", Status>>>({});
   const [failures, setFailures] = useState<{ kind: ImportKind; profiles: string[] }[]>([]);
   const [counts, setCounts] = useState<ImportCounts>(emptyCounts());
   const [preparing, setPreparing] = useState(1);
@@ -61,8 +63,8 @@ export function ImportWindow() {
   const [notes, setNotes] = useState<string[]>([]);
   const bookmarks = useBrowser((s) => s.bookmarks);
   const arcHolders = useMemo(() => allArcHolders({ bookmarks }), [bookmarks]);
-  const [extensions, setExtensions] = useState<{ profileId: string; list: ImportedExtension[]; opened: boolean }>({ profileId: "", list: [], opened: false });
-  const onboarding = useOnboarding((s) => s.windowId !== null);
+  const [withExtensions, setWithExtensions] = useState(false);
+  const installs = useExtensionInstalls((s) => s.list);
   const [diaStatus, setDiaStatus] = useState<DiaAutomationStatus | "checking" | "reading">("checking");
   const [dia, setDia] = useState<DiaTabsResult | null>(null);
   const [asking, setAsking] = useState(false);
@@ -131,10 +133,10 @@ export function ImportWindow() {
       : b.family === "automation"
         ? ["tabs", "pinnedTabs"]
         : [...new Set(b.profiles.flatMap((p) => p.available))];
-    setKinds(new Set(available));
+    setKinds(new Set(b.sidebar ? available.filter((k) => k !== "spaces" && k !== "pinnedTabs") : available));
+    setWithExtensions(listsExtensions(b));
     if (b.family === "safari" && api) setFullDiskAccess(api.safariHasFullDiskAccess());
     setDia(null);
-    setExtensions({ profileId: "", list: [], opened: false });
     setNotes([]);
     setError(null);
   };
@@ -143,6 +145,7 @@ export function ImportWindow() {
   const bySpaces = !!source?.sidebar;
   const spaceless = (source?.profiles ?? []).filter((p) => !p.spaces?.length);
   const isDiaTabs = source?.family === "automation";
+  const extensionsOnly = withExtensions && listsExtensions(source) && kinds.size === 0;
 
   const next = () => {
     if (!source) return;
@@ -156,7 +159,7 @@ export function ImportWindow() {
     if (step === "choose") {
       if (source.needsFullDiskAccess) return setStep("access");
       if (source.requiresExport) return setStep("safari");
-      if (source.profiles.length > 1 || (bySpaces && allSpaces.length > 1)) return setStep("profiles");
+      if (!(extensionsOnly && bySpaces) && (source.profiles.length > 1 || (bySpaces && allSpaces.length > 1))) return setStep("profiles");
     }
     const encryptedTabs = kinds.has("tabs") && source.profiles.some((p) => sourceProfiles.includes(p.id) && p.tabsNeedKey);
     if ((step === "choose" || step === "profiles") && (encryptedTabs || ENCRYPTED.some((k) => kinds.has(k))) && source.needsKeychain && api && !api.isBrowserUnlocked(source.id)) {
@@ -206,22 +209,30 @@ export function ImportWindow() {
     const requested: ImportKind[] = [...wanted].filter((k) => k !== "tabs" || !selected.every(tabsLocked));
     if (bySpaces && requested.includes("tabs")) requested.push("spaces", "pinnedTabs");
     const order = KINDS.map((k) => k.kind).filter((k) => requested.includes(k));
-    setStatus(Object.fromEntries(order.map((k) => [k, "pending"])));
-    setPreparing(bySpaces ? Math.max(1, spaces.length) : selected.length);
+    const extensions = withExtensions && listsExtensions(source);
+    clearExtensionInstalls();
+    setStatus({ ...Object.fromEntries(order.map((k) => [k, "pending"])), ...(extensions ? { extensions: order.length ? "pending" : "active" } : {}) });
+    setPreparing(bySpaces && order.length ? Math.max(1, spaces.length) : selected.length);
     setStep("progress");
     abort.current = new AbortController();
     const total = emptyCounts();
     const failed = new Map<ImportKind, string[]>();
     const add = (c: ImportCounts) => (Object.keys(total) as (keyof ImportCounts)[]).forEach((k) => (total[k] += c[k]));
     let destinationIndex = 0;
-    const found = new Map<string, ImportedExtension>();
+    const found: { profileId: string; list: ImportedExtension[] }[] = [];
+    const takeExtensions = async (profile: BrowserProfile, profileId: string) => {
+      if (extensions) found.push({ profileId, list: await api.listExtensions(source.id, profile.id).catch(() => []) });
+    };
     const left: string[] = [];
-    let extensionsProfile = "";
     if (source.family === "firefox" && requested.includes("passwords") && !api.isBrowserUnlocked(source.id)) {
       await api.unlockBrowser(source.id).catch(() => {});
     }
 
     for (const profile of selected) {
+      if (!order.length) {
+        await takeExtensions(profile, target);
+        continue;
+      }
       let result: ImportResult;
       const profileKinds = tabsLocked(profile) ? order.filter((k) => k !== "tabs") : order;
       try {
@@ -260,17 +271,14 @@ export function ImportWindow() {
         }
         const dest = first ?? (await destination(destinationIndex++, result.profile?.name ?? profile.name, result.profile?.color));
         add(await applyResult(dest, result, source.name, profileKinds, refused));
-        extensionsProfile ||= dest;
+        await takeExtensions(profile, dest);
       } else {
         const dest = await destination(destinationIndex++, result.profile?.name ?? profile.name, result.profile?.color ?? profile.color);
         add(await applyResult(dest, result, source.name, profileKinds, refused));
-        extensionsProfile ||= dest;
-      }
-      if (source.family === "chromium" || source.family === "arc") {
-        for (const e of await api.listExtensions(source.id, profile.id).catch(() => [])) found.set(e.id, e);
+        await takeExtensions(profile, dest);
       }
     }
-    setExtensions({ profileId: extensionsProfile, list: [...found.values()], opened: false });
+    void installImportedExtensions(found);
     setNotes(left);
     setStatus((st) => Object.fromEntries(Object.entries(st).map(([k, v]) => [k, failed.has(k as ImportKind) ? "failed" : v === "failed" ? v : "done"])));
     setFailures([...failed].map(([kind, names]) => ({ kind, profiles: selected.length > 1 ? names : [] })));
@@ -441,7 +449,9 @@ export function ImportWindow() {
       setKinds: (list: ImportKind[]) => setKinds(new Set(list)),
       counts,
       failures,
-      extensions,
+      installs,
+      withExtensions,
+      setWithExtensions,
       notes,
       step,
       diaStatus,
@@ -504,6 +514,7 @@ export function ImportWindow() {
                   }
                 />
               ))}
+              {listsExtensions(source) && <Checkbox label={EXTENSIONS_ROW.title} value={withExtensions} onChange={setWithExtensions} />}
             </View>
             {isDiaTabs && (
               <Text style={{ fontSize: 12, lineHeight: 17, color: theme.textSecondary, marginTop: 10 }}>
@@ -521,7 +532,7 @@ export function ImportWindow() {
         <View style={{ flex: 1 }} />
         {targetPicker}
         <Button title="Cancel" onPress={close} />
-        <Button title="Continue" kind="primary" disabled={!source || (!source.requiresExport && !source.needsFullDiskAccess && kinds.size === 0)} onPress={next} />
+        <Button title="Continue" kind="primary" disabled={!source || (!source.requiresExport && !source.needsFullDiskAccess && kinds.size === 0 && !extensionsOnly)} onPress={next} />
       </>
     );
   } else if (step === "profiles" && source) {
@@ -559,7 +570,11 @@ export function ImportWindow() {
         ) : (
           <Title title="Unlock your data for import" subtitle="Select the profiles you want to import." />
         )}
-        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 10 }}>{`Customize which profiles to bring over to ${APP}. The first goes into your selected profile; the others become new profiles.`}</Text>
+        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 10 }}>
+          {extensionsOnly
+            ? `Choose whose extensions to bring over to ${APP}. They all go into your selected profile.`
+            : `Customize which profiles to bring over to ${APP}. The first goes into your selected profile; the others become new profiles.`}
+        </Text>
         <View style={{ gap: 6 }}>
           {source.profiles.map((p) => (
             <SelectRow
@@ -771,7 +786,7 @@ export function ImportWindow() {
         />
         <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 12 }}>Hold on while we fetch your data...</Text>
         <View style={{ gap: 6 }}>
-          {KINDS.filter((k) => status[k.kind]).map((k, i) => (
+          {[...KINDS, EXTENSIONS_ROW].filter((k) => status[k.kind]).map((k, i) => (
             <CategoryRow key={k.kind} title={k.title} icon={k.icon} status={status[k.kind]!} index={i} />
           ))}
         </View>
@@ -804,29 +819,13 @@ export function ImportWindow() {
         {notes.join(" ")}
       </Text>
     ) : null;
-    const extensionList = extensions.list.length ? (
-      <View style={{ alignSelf: "stretch", marginTop: 14, gap: 8 }}>
-        <Text style={{ fontSize: 12, color: theme.textSecondary, textAlign: "center" }}>
-          {`${source?.name ?? "Your browser"} has ${plural(extensions.list.length, "extension")} from the Chrome Web Store. Add the ones you want there:`}
-        </Text>
-        <Text style={{ fontSize: 12, color: theme.textPrimary, textAlign: "center" }} numberOfLines={3}>
-          {extensions.list.map((e) => e.name).join(", ")}
-        </Text>
-        {extensions.opened ? (
-          <Text style={{ fontSize: 12, color: theme.textSecondary, textAlign: "center" }}>
-            {`${extensions.list.length === 1 ? "Its page is" : "Their pages are"} open in your sidebar${onboarding ? ", ready when you finish setting up" : ""}. Click Add to ${APP} on each one you want.`}
-          </Text>
-        ) : (
-          <View style={{ alignItems: "center" }}>
-            <Button
-              title={extensions.list.length === 1 ? "Open in Chrome Web Store" : `Open ${extensions.list.length} in Chrome Web Store`}
-              onPress={() => {
-                openInWebStore(extensions.profileId || target, extensions.list.map((e) => e.webStoreUrl));
-                setExtensions((x) => ({ ...x, opened: true }));
-              }}
-            />
-          </View>
-        )}
+    const extensionList = installs.length ? (
+      <View style={{ alignSelf: "stretch", marginTop: 14, gap: 6 }}>
+        <Text style={{ fontSize: 12, fontWeight: "600", color: theme.textSecondary }}>{extensionsHeading(installs, source?.name ?? "your browser")}</Text>
+        {installs.map((e) => (
+          <ExtensionRow key={`${e.profileId}:${e.id}`} install={e} onOpen={() => openInWebStore(e.profileId, [e.webStoreUrl])} />
+        ))}
+        <Text style={{ fontSize: 12, lineHeight: 17, color: theme.textTertiary }}>Their settings don't come over: sign in to them again where needed.</Text>
       </View>
     ) : null;
     body = failures.length ? (
@@ -847,9 +846,11 @@ export function ImportWindow() {
       <View style={{ alignItems: "center", marginTop: 40, gap: 12 }}>
         <SuccessMark />
         <Text style={{ fontSize: 20, fontWeight: "600", color: theme.textPrimary }}>You're all set</Text>
-        <Text style={{ fontSize: 13, color: theme.textSecondary, textAlign: "center" }}>
-          {summary.length ? `Imported ${summary.join(", ")}.` : "There was nothing new to import."}
-        </Text>
+        {summary.length || !installs.length ? (
+          <Text style={{ fontSize: 13, color: theme.textSecondary, textAlign: "center" }}>
+            {summary.length ? `Imported ${summary.join(", ")}.` : "There was nothing new to import."}
+          </Text>
+        ) : null}
         {leftBehind}
         {extensionList}
         {arcHolders.length ? (
@@ -1089,6 +1090,64 @@ function CategoryRow({ title, icon, status, index }: { title: string; icon: stri
       )}
     </Animated.View>
   );
+}
+
+function ExtensionRow({ install, onOpen }: { install: ExtensionInstall; onOpen: () => void }) {
+  const theme = useTheme();
+  const colors = useFormColors();
+  const { state } = install;
+  const detail =
+    state === "installing"
+      ? "Installing..."
+      : state === "installed"
+        ? install.needsApproval
+          ? "Needs approval in Settings › Extensions"
+          : install.enabled
+            ? "Installed"
+            : "Installed, turned off as before"
+        : state === "present"
+          ? `Already in ${APP}`
+          : install.reason;
+  return (
+    <View
+      style={{
+        minHeight: 44,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        backgroundColor: colors.group,
+        borderWidth: StyleSheet.hairlineWidth * 2,
+        borderColor: colors.groupBorder,
+      }}
+    >
+      <Symbol name="puzzlepiece.extension" size={13} color={state === "unavailable" ? theme.textTertiary : theme.icon} style={{ width: 20, height: 20 }} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 13, color: state === "unavailable" ? theme.textSecondary : theme.textPrimary }} numberOfLines={1}>
+          {install.name}
+        </Text>
+        {detail ? <Text style={{ fontSize: 11.5, marginTop: 1, color: theme.textSecondary }}>{detail}</Text> : null}
+      </View>
+      {state === "failed" && install.storeLink ? <Button title="Open in Chrome Web Store" onPress={onOpen} /> : null}
+      {state === "installing" ? (
+        <ActivityIndicator size="small" />
+      ) : state === "unavailable" ? null : (
+        <Symbol
+          name={state === "failed" ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"}
+          size={15}
+          color={state === "failed" ? "#FF9F0A" : state === "present" ? theme.textTertiary : "#30D158"}
+          style={{ width: 20, height: 20 }}
+        />
+      )}
+    </View>
+  );
+}
+
+function extensionsHeading(installs: ExtensionInstall[], browser: string): string {
+  const installing = installs.filter((e) => e.state === "installing").length;
+  return installing ? `Installing ${plural(installing, "extension")} from ${browser}...` : `Extensions from ${browser}`;
 }
 
 function SuccessMark() {

@@ -35,7 +35,7 @@ async function stateOf(profile: string): Promise<LocalExtensions> {
   return { ready: !!state.ready, extensions: state.extensions ?? [], pending: state.pending ?? [], settling: state.settling ?? [], queued: state.queued ?? [] };
 }
 
-async function readLocal(profile: string): Promise<LocalExtensions | null> {
+export async function readLocal(profile: string): Promise<LocalExtensions | null> {
   try {
     return await stateOf(profile);
   } catch {

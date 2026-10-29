@@ -159,7 +159,16 @@ export type WrittenCounts = {
   error?: string;
 };
 
-export type ImportedExtension = { id: string; name: string; webStoreUrl: string };
+export type ImportedExtension = {
+  id: string;
+  name: string;
+  webStoreUrl: string;
+  source: "webStore" | "unpacked" | "policy" | "sideloaded";
+  enabled: boolean;
+  incognito: boolean;
+  pinned: boolean;
+  needsApproval: boolean;
+};
 
 export type ImportProgress = {
   kind: ImportKind;

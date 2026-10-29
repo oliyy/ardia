@@ -17,7 +17,7 @@ the file and its WAL before opening it.
 | passwords | `ChromiumSecrets.swift`: `Login Data`, `Login Data For Account` (key from `ChromiumCrypto.swift`) | same as Chromium | `FirefoxLogins.swift`: `key4.db` + `logins.db` (A256GCM JWE, key labelled `as-logins-key`) merged with `logins.json` |
 | cookies | `ChromiumSecrets.swift`: `Network/Cookies` (or `Cookies`) | same as Chromium | `Firefox.swift`: `cookies.sqlite` |
 | autofill (addresses, cards) | `ChromiumAutofill.swift`: `Web Data` | same as Chromium | none |
-| extensions (listed, never installed) | `ChromiumExtensions.swift`: `Preferences`, `Secure Preferences`, `Extensions/*/manifest.json` | same as Chromium | none |
+| extensions (Web Store ones installed by `apps/browser/src/components/import/extensions.ts` through `ac_extensions_sync_apply`; unpacked, policy and sideloaded ones listed with a reason) | `ChromiumExtensions.swift`: `Preferences`, `Secure Preferences` (source, enabled, incognito, `pinned_extensions`), `Extensions/*/manifest.json` | same as Chromium | none |
 | spaces, pinnedTabs, favorites | none | `ArcSidebar.swift`: `<Application Support>/Arc/StorableSidebar.json` | none |
 | favicons (for the imported tabs, favourites and bookmarks-bar links) | `ChromiumFavicons.swift`: `Favicons` (the page's own icon, else another page of the same site's; one PNG near 32 px, 16 KB each, up to 1,000 pages and 6 MB) | same as Chromium | none |
 
