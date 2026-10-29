@@ -6,7 +6,7 @@ vendor="$(cd "$(dirname "$0")/.." && pwd)/vendor"
 UBO_VERSION="1.75.0"
 UBO_SHA256="393cf95709d1074d4022970e9014e434395c53a822387f1e25f43be97cf4b582"
 UBO_KEY="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv1MPdIgJjIsN4Y0N/20GDNPfN4J//aknk5dsH8Y1LBxSnz3Jp/BT187Gub5cv6lee5CUVDmVBa3Yiqow8GMna5KwX+ZP+yc1pt/ewzyNxm2BzoQPgWz+1DgZaahz56/szi1EEtWVYxd3wNxFN4wPDqwV6aqlnV4R3RnxlF1ocw1kDgJ+8BxR1EY+MB+H8bymdef+xB3TNifBZIVmZt81cC3UMOG6KWRTU1wtIXsW+ZqSv5zaeFHLkjG4MPB7EfcMGrvO80ElJBZZLdrTmYOL4uUPsz2Wy6GiPWzpDmzzI9RfsZm11sLiJo63blcPF0Cz3sM0wQfxJPPcQuqkZDReswIDAQAB"
-UBO_PATCH="22"
+UBO_PATCH="23"
 ubo="$vendor/ubo"
 stamp="$UBO_VERSION-$UBO_PATCH"
 installed() { [ -f "$ubo/.version" ] && [ "$(cat "$ubo/.version")" = "$stamp" ]; }
@@ -145,6 +145,57 @@ patch("js/storage.js",
       "                .map(lang => (/^[a-z]+/.exec(lang) || [])[0]).filter(Boolean));\n"
       "            if ( langs.size !== 0 ) {\n"
       "                re = new RegExp('\\\\b(?:' + Array.from(langs).join('|') + ')\\\\b');")
+patch("js/cachestorage.js",
+      "let fastCache = 'indexedDB';\n",
+      "let fastCache = 'indexedDB';\n"
+      "\n"
+      "const ardiaLegacyCacheMarker = 'ardiaCacheInIndexedDB';\n"
+      "\n"
+      "const ardiaDropLegacyCacheCopies = async ( ) => {\n"
+      "    await Promise.resolve();\n"
+      "    if ( fastCache !== 'indexedDB' ) { return; }\n"
+      "    if ( typeof chrome.storage.local.getKeys !== 'function' ) { return; }\n"
+      "    const marker = await extensionStorage.get(ardiaLegacyCacheMarker).catch(( ) => undefined);\n"
+      "    if ( marker instanceof Object && marker[ardiaLegacyCacheMarker] === true ) { return; }\n"
+      "    const keys = await new Promise(resolve => {\n"
+      "        chrome.storage.local.getKeys(found => { resolve(Array.isArray(found) ? found : undefined); });\n"
+      "    });\n"
+      "    if ( keys === undefined ) { return; }\n"
+      "    const stale = keys.filter(key => key.startsWith('cache/'));\n"
+      "    if ( stale.length !== 0 ) { await extensionStorage.remove(stale); }\n"
+      "    await extensionStorage.set({ [ardiaLegacyCacheMarker]: true });\n"
+      "};\n")
+patch("js/cachestorage.js",
+      "                await Promise.all([\n"
+      "                    cacheAPIs[fastCache].set(rawbin, serializedbin),\n"
+      "                    extensionStorage.set(serializedbin),\n"
+      "                ]);\n",
+      "                const durable = {};\n"
+      "                const fastOnly = [];\n"
+      "                for ( const key of keys ) {\n"
+      "                    if ( fastCache === 'indexedDB' && key.startsWith('cache/') ) {\n"
+      "                        fastOnly.push(key);\n"
+      "                    } else {\n"
+      "                        durable[key] = serializedbin[key];\n"
+      "                    }\n"
+      "                }\n"
+      "                await Promise.all([\n"
+      "                    cacheAPIs[fastCache].set(rawbin, serializedbin),\n"
+      "                    Object.keys(durable).length !== 0 ? extensionStorage.set(durable) : undefined,\n"
+      "                    fastOnly.length !== 0 ? extensionStorage.remove(fastOnly) : undefined,\n"
+      "                ]);\n")
+patch("js/cachestorage.js",
+      "        select(api) {\n"
+      "            if ( Object.hasOwn(cacheAPIs, api) === false ) { return fastCache; }\n",
+      "        select(api) {\n"
+      "            ardiaDropLegacyCacheCopies().catch(reason => { ubolog(reason); });\n"
+      "            if ( Object.hasOwn(cacheAPIs, api) === false ) { return fastCache; }\n")
+patch("js/cachestorage.js",
+      "    const shouldCache = key => {\n"
+      "        if ( key.startsWith('cache/') === false ) { return true; }\n"
+      "        return /^cache\\/(compiled|selfie)\\//.test(key);\n"
+      "    };\n",
+      "    const shouldCache = key => true;\n")
 PY
   [ -d "$ubo/ext" ] && mv "$ubo/ext" "$ubo/ext.old"
   mv "$ubo/ext.new" "$ubo/ext"
