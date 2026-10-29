@@ -10,11 +10,10 @@ const DARK = {
   pip: "#4C8DF6",
   now: "#E5534B",
   ciTrack: "rgba(255,255,255,0.1)",
-  stateOpen: "#238636",
-  stateDraft: "#6E7681",
-  stateMerged: "#8957E5",
-  stateClosed: "#DA3633",
-  stateReviewed: "#1F6FEB",
+  stateOpen: "#3FB950",
+  stateDraft: "#B1BAC4",
+  stateMerged: "#BC8CFF",
+  stateClosed: "#FF7B72",
 };
 
 const LIGHT: typeof DARK = {
@@ -27,11 +26,10 @@ const LIGHT: typeof DARK = {
   pip: "#0969DA",
   now: "#D1242F",
   ciTrack: "rgba(0,0,0,0.08)",
-  stateOpen: "#1F883D",
-  stateDraft: "#6E7781",
+  stateOpen: "#1A7F37",
+  stateDraft: "#59636E",
   stateMerged: "#8250DF",
-  stateClosed: "#CF222E",
-  stateReviewed: "#0969DA",
+  stateClosed: "#D1242F",
 };
 
 export type LiveColors = typeof DARK;

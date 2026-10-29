@@ -1,15 +1,15 @@
-import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, PulseDot, Surface, Symbol } from "@ardia/shell";
+import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, PulseDot, Surface, Symbol, type FadeLabelGlyph } from "@ardia/shell";
 import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Animated, Easing, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { COMPLETION_MS, errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
-import { prBadge, summarizeChecks } from "../../live/github";
-import { folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
+import { githubAge, prBadge, summarizeChecks } from "../../live/github";
+import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import { setLive, updateFolder, useLive } from "../../live/store";
-import type { CompletedItem, CompletionState, LiveItem } from "../../live/types";
+import type { CompletedItem, CompletionState, LiveItem, PullRequestInfo } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { usePageProfileId, useWindowId } from "../../store/hooks";
 import { activeTabId, viewTabIds } from "../../store/model";
@@ -324,7 +324,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
   const unread = useLive((s) => !done && !!s.unread[folderId]?.includes(item.id));
   const completing = useLive((s) => (!done && s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
   const completion = completing ?? done ?? null;
-  const needsReview = item.section === "review" || item.section === "team";
+  const reviewDue = !completion && awaitsReview(item);
   const { hovered, hoverProps } = useRowHover(windowId, completion ? null : { kind: "live", id: key });
   const fold = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -366,12 +366,12 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
                 cornerRadius={layout.rowRadius}
                 style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}
               >
-                {unread && !flat ? <PulseDot color={colors.pip} pulsing={needsReview} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
-                <ItemIcon item={item} completion={flat && !completing ? null : completion} colors={colors} flat={flat} animate={!!completing} />
+                {(unread || reviewDue) && !flat ? <PulseDot color={colors.pip} pulsing={reviewDue} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
+                <ItemIcon item={item} completing={completing} done={done ?? null} colors={colors} />
                 {flat && subtitle ? (
                   <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
                     <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} style={{ height: 18 }} />
-                    <LiveSubtitle item={item} subtitle={subtitle} completion={completion} colors={colors} />
+                    <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} />
                   </View>
                 ) : (
                   <FadeLabel
@@ -387,9 +387,9 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
                   width={22}
                   hover={<IconButton icon="xmark" size={10} weight="semibold" box={22} radius={6} onPress={() => tabId && void closeTab(tabId)} tooltip="Close Tab (⌘W)" />}
                 >
-                  {unread && flat ? (
+                  {(unread || reviewDue) && flat ? (
                     <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
-                      <PulseDot color={theme.textPrimary} pulsing={needsReview} style={{ width: 6, height: 6, opacity: 0.9 }} />
+                      <PulseDot color={theme.textPrimary} pulsing={reviewDue} style={{ width: 6, height: 6, opacity: 0.9 }} />
                     </View>
                   ) : null}
                   <Trailing item={item} completion={completion} colors={colors} flat={flat} />
@@ -403,42 +403,59 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
   );
 }
 
-const PR_STATES: Record<"open" | "draft" | CompletionState, { title: string; icon: ImageSourcePropType; color: keyof LiveColors }> = {
-  open: { title: "Open", icon: require("../../../assets/octicons/git-pull-request.png"), color: "stateOpen" },
-  draft: { title: "Draft", icon: require("../../../assets/octicons/git-pull-request-draft.png"), color: "stateDraft" },
-  merged: { title: "Merged", icon: require("../../../assets/octicons/git-merge.png"), color: "stateMerged" },
-  closed: { title: "Closed", icon: require("../../../assets/octicons/git-pull-request-closed.png"), color: "stateClosed" },
-  reviewed: { title: "Reviewed", icon: require("../../../assets/octicons/eye.png"), color: "stateReviewed" },
+type PrState = "open" | "draft" | "merged" | "closed";
+
+const PR_STATES: Record<PrState, { icon: ImageSourcePropType; color: keyof LiveColors }> = {
+  open: { icon: require("../../../assets/octicons/git-pull-request.png"), color: "stateOpen" },
+  draft: { icon: require("../../../assets/octicons/git-pull-request-draft.png"), color: "stateDraft" },
+  merged: { icon: require("../../../assets/octicons/git-merge.png"), color: "stateMerged" },
+  closed: { icon: require("../../../assets/octicons/git-pull-request-closed.png"), color: "stateClosed" },
 };
 
-function StateChip({ state, colors }: { state: keyof typeof PR_STATES; colors: LiveColors }) {
-  const spec = PR_STATES[state];
-  return (
-    <Surface fill={colors[spec.color]} cornerRadius={7} style={{ height: 14, flexDirection: "row", alignItems: "center", paddingLeft: 4, paddingRight: 5, marginRight: 5 }}>
-      <Image source={spec.icon} style={{ width: 10, height: 10 }} />
-      <Text style={{ marginLeft: 2, fontSize: 9.5, fontWeight: "600", color: "#FFFFFF" }}>{spec.title}</Text>
-    </Surface>
-  );
+const prState = (pr: PullRequestInfo, done: CompletionState | null): PrState => (done === "merged" || done === "closed" ? done : pr.draft ? "draft" : "open");
+
+const STATE_WORDS: Record<CompletionState, string> = { merged: "Merged", closed: "Closed", reviewed: "Reviewed" };
+
+const glyphUri = (source: number) => Image.resolveAssetSource(source).uri;
+
+const META_GLYPHS = {
+  stack: glyphUri(require("../../../assets/octicons/stack.svg")),
+  success: glyphUri(require("../../../assets/octicons/check.svg")),
+  pending: glyphUri(require("../../../assets/octicons/dot-fill.svg")),
+  failure: glyphUri(require("../../../assets/octicons/x.svg")),
+};
+
+const CHECK_GLYPHS: Record<"success" | "pending" | "failure", { color: keyof LiveColors; label: string }> = {
+  success: { color: "success", label: "Checks passed" },
+  pending: { color: "pending", label: "Checks pending" },
+  failure: { color: "failure", label: "Checks failing" },
+};
+
+const GLYPH = "\uFFFC";
+
+function prMeta(pr: PullRequestInfo, done: CompletionState | null, colors: LiveColors): { text: string; glyphs: FadeLabelGlyph[] } {
+  const parts = [`#${pr.number}`, pr.author];
+  const glyphs: FadeLabelGlyph[] = [];
+  const age = githubAge(pr.createdAt);
+  if (age) parts.push(age);
+  if (pr.stack && !done) {
+    parts.push(`${GLYPH} ${pr.stack.position}/${pr.stack.size}`);
+    glyphs.push({ image: META_GLYPHS.stack, label: "Stack" });
+  }
+  const word = done ? STATE_WORDS[done] : pr.draft ? "Draft" : null;
+  if (word) parts.push(word);
+  const checks = summarizeChecks(pr.checks);
+  if (checks && checks.tone !== "neutral" && !(done && checks.tone === "pending")) {
+    parts.push(`${GLYPH} ${checks.counts.success}/${pr.checks.length}`);
+    glyphs.push({ image: META_GLYPHS[checks.tone], color: colors[CHECK_GLYPHS[checks.tone].color], label: CHECK_GLYPHS[checks.tone].label });
+  }
+  return { text: parts.join(" · "), glyphs };
 }
 
-export function LiveSubtitle({ item, subtitle, completion, colors }: { item: LiveItem; subtitle: string; completion: CompletionState | null; colors: LiveColors }) {
+export function LiveSubtitle({ item, subtitle, done, colors }: { item: LiveItem; subtitle: string; done: CompletionState | null; colors: LiveColors }) {
   const theme = useTheme();
-  if (!item.pr) return <FadeLabel text={subtitle} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />;
-  const passed = !completion && summarizeChecks(item.pr.checks)?.tone === "success";
-  const text = [subtitle, `#${item.pr.number}`].filter(Boolean).join(" · ");
-  return (
-    <View style={{ height: 14, flexDirection: "row", alignItems: "center" }}>
-      <StateChip state={completion ?? (item.pr.draft ? "draft" : "open")} colors={colors} />
-      <FadeLabel
-        text={passed ? `${text} · ` : text}
-        trailingSymbol={passed ? "checkmark" : undefined}
-        trailingSymbolColor={colors.success}
-        fontSize={12}
-        color={theme.textSecondary}
-        style={{ flex: 1, height: 14 }}
-      />
-    </View>
-  );
+  const meta = item.pr ? prMeta(item.pr, done, colors) : null;
+  return <FadeLabel text={meta?.text ?? subtitle} glyphs={meta?.glyphs} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />;
 }
 
 const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: keyof LiveColors }> = {
@@ -449,34 +466,34 @@ const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: 
 
 export function ItemIcon({
   item,
-  completion,
+  completing,
+  done = null,
   colors,
-  flat,
   animate = true,
 }: {
   item: LiveItem;
-  completion: CompletedItem["state"] | null;
+  completing: CompletionState | null;
+  done?: CompletionState | null;
   colors: LiveColors;
-  flat: boolean;
   animate?: boolean;
 }) {
-  const pop = useRef(new Animated.Value(completion && animate ? 0 : 1)).current;
+  const pop = useRef(new Animated.Value(completing && animate ? 0 : 1)).current;
   useEffect(() => {
-    if (!completion || !animate) return;
+    if (!completing || !animate) return;
     pop.setValue(0);
     Animated.spring(pop, { toValue: 1, speed: 14, bounciness: 14, useNativeDriver: true }).start();
-  }, [completion]);
-  if (completion) {
-    const glyph = COMPLETION_GLYPH[completion];
+  }, [completing]);
+  if (completing) {
+    const glyph = COMPLETION_GLYPH[completing];
     return (
       <Animated.View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center", transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] }}>
         <Symbol name={glyph.symbol} size={14} weight="semibold" color={colors[glyph.color]} style={{ width: 16, height: 16 }} />
       </Animated.View>
     );
   }
-  if (item.pr && flat) return <TabIcon url={SOURCES[item.source].site} />;
   if (item.pr) {
-    return <Symbol name="arrow.triangle.pull" size={12} weight="semibold" color={item.pr.draft ? colors.draft : colors.success} style={{ width: 16, height: 16 }} />;
+    const state = PR_STATES[prState(item.pr, done)];
+    return <Image key={colors[state.color]} source={state.icon} accessible={false} style={{ width: 16, height: 16, tintColor: colors[state.color] }} />;
   }
   if (item.icon && /^https?:/.test(item.icon)) return <TabIcon url={item.url} favicon={item.icon} direct />;
   return <TabIcon url={item.source === "confluence" && !item.icon ? SOURCES.confluence.site : item.url} icon={item.icon} />;

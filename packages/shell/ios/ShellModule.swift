@@ -685,8 +685,7 @@ public class FadeLabelModule: Module {
       Prop("color") { (view: FadeLabel, hex: String) in view.color = NSColor(hex: hex) ?? .labelColor }
       Prop("fadeWidth") { (view: FadeLabel, v: Double) in view.fadeWidth = v }
       Prop("letterSpacing") { (view: FadeLabel, v: Double?) in view.letterSpacing = v.flatMap { $0.isFinite ? $0 : nil } ?? 0 }
-      Prop("trailingSymbol") { (view: FadeLabel, v: String?) in view.trailingSymbol = v ?? "" }
-      Prop("trailingSymbolColor") { (view: FadeLabel, hex: String?) in view.trailingSymbolColor = hex.flatMap(NSColor.init(hex:)) }
+      Prop("glyphs") { (view: FadeLabel, v: [[String: Any]]?) in view.glyphs = (v ?? []).map(FadeLabelGlyph.init) }
     }
   }
 }
@@ -735,10 +734,9 @@ final class FadeLabel: ExpoView {
   }
   var fadeWidth: Double = 24 { didSet { relayout() } }
   var letterSpacing: Double = 0 { didSet { if letterSpacing != oldValue { update() } } }
-  var trailingSymbol = "" { didSet { if trailingSymbol != oldValue { update() } } }
-  var trailingSymbolColor: NSColor? { didSet { if trailingSymbolColor != oldValue, !trailingSymbol.isEmpty { update() } } }
+  var glyphs: [FadeLabelGlyph] = [] { didSet { if glyphs != oldValue { update() } } }
 
-  private var plainText: Bool { letterSpacing == 0 && trailingSymbol.isEmpty }
+  private var plainText: Bool { letterSpacing == 0 && glyphs.isEmpty }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -794,23 +792,25 @@ final class FadeLabel: ExpoView {
     if plainText {
       field.stringValue = text
       field.textColor = color
+      label.spokenText = text
     } else {
-      let attributed = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .kern: letterSpacing])
-      if let mark = trailingMark(font) { attributed.append(mark) }
+      let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .kern: letterSpacing]
+      let attributed = NSMutableAttributedString()
+      var spoken = ""
+      var pending = glyphs.makeIterator()
+      for (index, part) in text.components(separatedBy: FadeLabelGlyph.placeholder).enumerated() {
+        if index > 0, let glyph = pending.next() {
+          if let mark = glyph.attachment(centeredOn: font, tint: color) { attributed.append(mark) }
+          spoken += glyph.label
+        }
+        attributed.append(NSAttributedString(string: part, attributes: attributes))
+        spoken += part
+      }
       field.attributedStringValue = attributed
+      label.spokenText = spoken
     }
     label.needsDisplay = true
     measure()
-  }
-
-  private func trailingMark(_ font: NSFont) -> NSAttributedString? {
-    let configuration = NSImage.SymbolConfiguration(pointSize: font.pointSize * 0.8, weight: .bold)
-      .applying(NSImage.SymbolConfiguration(paletteColors: [trailingSymbolColor ?? color]))
-    guard let image = NSImage(systemSymbolName: trailingSymbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) else { return nil }
-    let attachment = NSTextAttachment()
-    attachment.image = image
-    attachment.bounds = NSRect(x: 0, y: ((font.capHeight - image.size.height) / 2).rounded(), width: image.size.width, height: image.size.height)
-    return NSAttributedString(attachment: attachment)
   }
 
   private func measure() {
@@ -878,6 +878,44 @@ final class FadeLabel: ExpoView {
   }
 }
 
+struct FadeLabelGlyph: Equatable {
+  static let placeholder = "\u{FFFC}"
+  private static var images: [String: NSImage] = [:]
+
+  let image: String
+  let color: NSColor?
+  let label: String
+
+  init(_ record: [String: Any]) {
+    image = record["image"] as? String ?? ""
+    color = (record["color"] as? String).flatMap(NSColor.init(hex:))
+    label = record["label"] as? String ?? ""
+  }
+
+  func attachment(centeredOn font: NSFont, tint fallback: NSColor) -> NSAttributedString? {
+    guard let base = Self.load(image) else { return nil }
+    let tint = color ?? fallback
+    let size = base.size
+    let tinted = NSImage(size: size, flipped: false) { rect in
+      base.draw(in: rect)
+      tint.set()
+      rect.fill(using: .sourceIn)
+      return true
+    }
+    let attachment = NSTextAttachment()
+    attachment.image = tinted
+    attachment.bounds = NSRect(x: 0, y: (font.capHeight - size.height).rounded() / 2, width: size.width, height: size.height)
+    return NSAttributedString(attachment: attachment)
+  }
+
+  private static func load(_ uri: String) -> NSImage? {
+    if let image = images[uri] { return image }
+    guard let url = URL(string: uri), let image = NSImage(contentsOf: url) else { return nil }
+    images[uri] = image
+    return image
+  }
+}
+
 private enum FadeLabelSystemStyle {
   static var generation = 0
   static let watched: Void = {
@@ -905,6 +943,7 @@ private struct FadeLabelDrawingTraits: Equatable {
 
 private final class FadeLabelText: NSView {
   weak var field: NSTextField?
+  var spokenText = ""
   private var drawnTraits: FadeLabelDrawingTraits?
   private var shownVisibleRect: NSRect?
   private var shownPixelPhase = NSPoint.zero
@@ -971,7 +1010,7 @@ private final class FadeLabelText: NSView {
 
   override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
 
-  override func accessibilityValue() -> Any? { field?.stringValue.replacingOccurrences(of: "\u{FFFC}", with: "✓") }
+  override func accessibilityValue() -> Any? { spokenText }
 
   override func accessibilityFrame() -> NSRect {
     NSAccessibility.screenRect(fromView: self, rect: bounds.insetBy(dx: 1, dy: -1))

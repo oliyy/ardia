@@ -4,7 +4,7 @@ import { resolveFavicon, useFavicons } from "../../lib/favicons";
 import { bundledSiteIcon } from "../../lib/siteIcons";
 import { layout, useTheme } from "../../lib/theme";
 import { errorText } from "../../live/engine";
-import { folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
+import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import type { live } from "../../live/store";
 import type { CompletedItem, CompletionState, LiveFolder, LiveItem } from "../../live/types";
@@ -28,7 +28,7 @@ import { GROUP_COLORS, useArcTitle, useSidebarTokens, withAlpha } from "./tokens
 
 type TabShot = { kind: "tab"; key: string; title: string; url: string; favicon?: string | null; icon?: string | null; profileId: string; uri: string | null; template: boolean; sound: "muted" | "playing" | null; hovered: boolean };
 type SplitShot = { kind: "split"; key: string; panes: TabShot[] };
-type LiveItemShot = { key: string; item: LiveItem; indent: number; completion: CompletedItem["state"] | null; done: CompletionState | null; unread: boolean };
+type LiveItemShot = { key: string; item: LiveItem; indent: number; completing: CompletedItem["state"] | null; done: CompletionState | null; dot: boolean; unread: boolean };
 type LiveRowShot =
   | { kind: "title"; key: string; title: string }
   | { kind: "more"; key: string; count: number }
@@ -89,14 +89,11 @@ function splitShot(s: BrowserState, splitId: string): SplitShot {
   return { kind: "split", key: `s:${splitId}`, panes: panes.flatMap((id) => tabShot(s, id, false) ?? []) };
 }
 
-const itemShot = (data: LiveData, folderId: string, item: LiveItem, indent: number, done: CompletionState | null = null): LiveItemShot => ({
-  key: item.id,
-  item,
-  indent,
-  completion: !done && data.completing[folderId]?.includes(item.id) ? (data.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null,
-  done,
-  unread: !done && !!data.unread[folderId]?.includes(item.id),
-});
+function itemShot(data: LiveData, folderId: string, item: LiveItem, indent: number, done: CompletionState | null = null): LiveItemShot {
+  const completing = !done && data.completing[folderId]?.includes(item.id) ? (data.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null;
+  const unread = !done && !!data.unread[folderId]?.includes(item.id);
+  return { key: item.id, item, indent, completing, done, dot: unread || (!done && !completing && awaitsReview(item)), unread };
+}
 
 function noteText(data: LiveData, folder: LiveFolder): string {
   const status = data.status[folder.id];
@@ -351,24 +348,24 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
   const theme = useTheme();
   const colors = useLiveColors();
   const arcTitle = useArcTitle();
-  const { item, completion: completing, done, unread, indent } = shot;
+  const { item, completing, done, dot, unread, indent } = shot;
   const completion = completing ?? done;
   const subtitle = item.pr?.author || item.subtitle;
   const color = completing ? theme.textSecondary : (arcTitle ?? label);
   return (
     <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}>
-      {unread && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-      <ItemIcon item={item} completion={flat && !completing ? null : completion} colors={colors} flat={flat} animate={false} />
+      {dot && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
+      <ItemIcon item={item} completing={completing} done={done} colors={colors} animate={false} />
       {flat && subtitle ? (
         <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
           <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={color} style={{ height: 18 }} />
-          <LiveSubtitle item={item} subtitle={subtitle} completion={completion} colors={colors} />
+          <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} />
         </View>
       ) : (
         <FadeLabel text={item.title} fontSize={layout.rowFontSize} weight={unread && !flat ? "medium" : undefined} color={color} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
       )}
       <HoverSlot hovered={false} hover={null} width={22}>
-        {unread && flat ? (
+        {dot && flat ? (
           <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
           </View>

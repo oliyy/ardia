@@ -53,6 +53,7 @@ export type RawPR = {
   url: string;
   isDraft: boolean;
   updatedAt: string;
+  createdAt: string;
   headRefName: string;
   baseRefName: string;
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
@@ -109,6 +110,7 @@ function mapPR(raw: RawPR, section: PullRequestSection): LiveItem {
     author: raw.author?.login ?? "ghost",
     authorAvatar: raw.author?.avatarUrl ?? null,
     draft: raw.isDraft,
+    createdAt: Date.parse(raw.createdAt) || 0,
     headRef: raw.headRefName,
     baseRef: raw.baseRefName,
     review: raw.reviewDecision === "APPROVED" ? "approved" : raw.reviewDecision === "CHANGES_REQUESTED" ? "changesRequested" : raw.reviewDecision === "REVIEW_REQUIRED" ? "required" : null,
@@ -242,6 +244,30 @@ export function summarizeChecks(checks: PullRequestCheck[]): CheckSummary | null
   if (queued && queued === pending && !checks.some((c) => c.state === "success")) return { text: "Checks are queued", tone: "pending", counts };
   if (pending) return { text: "Some checks haven't completed yet", tone: "pending", counts };
   return { text: "All checks have passed", tone: "success", counts };
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const AGE_DATE_AFTER_MS = 30 * 86_400_000;
+
+const unitsAgo = (n: number, unit: string) => (n === 1 ? `1 ${unit} ago` : `${n} ${unit}s ago`);
+
+export function githubAge(at: number, now = Date.now()): string | null {
+  if (!at) return null;
+  if (now - at > AGE_DATE_AFTER_MS) {
+    const date = new Date(at);
+    const year = date.getFullYear() === new Date(now).getFullYear() ? "" : `, ${date.getFullYear()}`;
+    return `on ${MONTHS[date.getMonth()]} ${date.getDate()}${year}`;
+  }
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  const minutes = Math.floor(seconds / 60) + (seconds % 60 >= 55 ? 1 : 0);
+  const hours = Math.floor(minutes / 60) + (minutes % 60 >= 55 ? 1 : 0);
+  const days = Math.floor(hours / 24) + (hours % 24 >= 21 ? 1 : 0);
+  const weeks = Math.round(days / 7);
+  if (!minutes) return seconds < 10 ? "now" : unitsAgo(seconds, "second");
+  if (!hours) return unitsAgo(minutes, "minute");
+  if (!days) return unitsAgo(hours, "hour");
+  if (days < 6) return days === 1 ? "yesterday" : unitsAgo(days, "day");
+  return weeks === 1 ? "last week" : unitsAgo(weeks, "week");
 }
 
 export function prBadge(pr: PullRequestInfo): "conflict" | "failing" | "changesRequested" | "pending" | "approved" | "passed" | null {

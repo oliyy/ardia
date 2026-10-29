@@ -29,6 +29,7 @@ export type PullRequestInfo = {
   author: string;
   authorAvatar: string | null;
   draft: boolean;
+  createdAt: number;
   headRef: string;
   baseRef: string;
   review: "approved" | "changesRequested" | "required" | null;

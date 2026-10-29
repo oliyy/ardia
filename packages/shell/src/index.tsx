@@ -455,9 +455,10 @@ export type FadeLabelProps = ViewProps & {
   color?: string;
   fadeWidth?: number;
   letterSpacing?: number;
-  trailingSymbol?: string;
-  trailingSymbolColor?: string;
+  glyphs?: FadeLabelGlyph[];
 };
+
+export type FadeLabelGlyph = { image: string; color?: string; label?: string };
 
 export const FadeLabel = requireNativeViewManager<FadeLabelProps>("ArdiaFadeLabel");
 

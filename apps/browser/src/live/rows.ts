@@ -16,6 +16,8 @@ export const PAGE_SIZE = 8;
 
 export const COMPLETED_SHOWN_MS = 24 * 3_600_000;
 
+export const awaitsReview = (item: LiveItem) => item.section === "review" || item.section === "team";
+
 export const inHiddenRepo = (folder: Pick<LiveFolder, "hiddenRepos">, item: LiveItem) => !!item.pr && folder.hiddenRepos.includes(item.pr.repo);
 
 export const shownItems = (folder: Pick<LiveFolder, "hiddenRepos">, items: LiveItem[]) => (folder.hiddenRepos.length ? items.filter((it) => !inHiddenRepo(folder, it)) : items);

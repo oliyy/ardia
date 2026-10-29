@@ -116,6 +116,7 @@ export type BitbucketPR = {
   id: number;
   title: string;
   draft?: boolean;
+  created_on: string;
   updated_on: string;
   comment_count: number;
   author: { display_name: string; links?: { avatar?: { href: string } } };
@@ -145,6 +146,7 @@ export function mapBitbucket(pr: BitbucketPR, statuses: BitbucketStatuses | null
       author: pr.author.display_name,
       authorAvatar: pr.author.links?.avatar?.href ?? null,
       draft: !!pr.draft,
+      createdAt: Date.parse(pr.created_on) || 0,
       headRef: pr.source.branch.name,
       baseRef: pr.destination.branch.name,
       review: reviewers.some((p) => p.state === "changes_requested") ? "changesRequested" : reviewers.some((p) => p.state === "approved") ? "approved" : reviewers.length ? "required" : null,

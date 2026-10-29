@@ -1,12 +1,18 @@
 GitHub Octicons 19.41.0 artwork, MIT License, Copyright (c) 2026 GitHub Inc. Full license text: LICENSE in this folder.
 Upstream package: npm @primer/octicons@19.41.0, files build/svg/<name>-16.svg, fetched from https://unpkg.com/@primer/octicons@19.41.0.
 
-Pull request state -> asset -> upstream source -> sha256 of the upstream file
+Row icon (pull request state) -> asset -> upstream source -> sha256 of the upstream file
 open -> git-pull-request.png, git-pull-request@2x.png -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/git-pull-request-16.svg -> d9363b57e81ae8444a934b20453169239af3a4836bb603f28f0997aecd61bdda
 draft -> git-pull-request-draft.png, git-pull-request-draft@2x.png -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/git-pull-request-draft-16.svg -> f9b529fdf8a554bd45b11bce0238db55289536255718adf0e0285ec48393a32d
 merged -> git-merge.png, git-merge@2x.png -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/git-merge-16.svg -> c0970443ad1cf4e1801d2c7536f016ed922892debbee837def01d2f6a47ac419
 closed -> git-pull-request-closed.png, git-pull-request-closed@2x.png -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/git-pull-request-closed-16.svg -> 63973e09c713aba40601107978e636cf8027958b0588923ef7f31cb8138af95a
-reviewed -> eye.png, eye@2x.png -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/eye-16.svg -> 8bc58c21926b5ce4a5679314f4288e5f1304299cd3a02785b4f8e4938ab5dea8
+
+Subtitle glyph -> asset -> upstream source -> sha256 of the upstream file
+stack position -> stack.svg -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/stack-16.svg -> 251397e43ee48de86e7fd1b00e27a747419f924ed03597cdf0585bc521d3e442
+checks passed -> check.svg -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/check-16.svg -> 03c83ce9419c3098e1056902f05f8c22336a51c7c8fcf90b66156b48c429fbef
+checks pending -> dot-fill.svg -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/dot-fill-16.svg -> a78731cbd7803e25a2b59ad3eabc409b2f105f810114ef38d112d871ae570bb4
+checks failing -> x.svg -> https://unpkg.com/@primer/octicons@19.41.0/build/svg/x-16.svg -> d48518fbcd53f6c3162de358192d295fde4a4b5df80fbe458d23c8cab7b97f1e
 LICENSE -> https://unpkg.com/@primer/octicons@19.41.0/LICENSE -> da259c8bd0de62713ccdcf88910aebca810644f98c2c912bad814fc79ea778df
 
-Each PNG is the 16px SVG drawn with macOS NSImage into a transparent 10x10 allocation at 1x and 20x20 at 2x, with the coverage kept as alpha and RGB set to white. Each PNG carries Copyright, License (the full MIT text) and Source (upstream URL and sha256) tEXt chunks so the notice travels with the distributed file.
+Each PNG is the 16px SVG drawn with macOS NSImage into a transparent 16x16 allocation at 1x and 32x32 at 2x, with the coverage kept as alpha and RGB set to white. Each PNG carries Copyright, License (the full MIT text) and Source (upstream URL and sha256) tEXt chunks so the notice travels with the distributed file.
+Each SVG is the upstream file with only its width, height and viewBox changed to crop the 16px canvas to the artwork (stack drawn at 14px, the others at 16px), plus a header comment carrying the notice.
