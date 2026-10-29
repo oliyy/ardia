@@ -93,6 +93,7 @@ constexpr NSUInteger kOlderEmitsKept = 256;
 NSString *gLayoutPath;
 NSString *gDirectory;
 BOOL gRecordQueued;
+NSUInteger gRecordGeneration;
 NSData *gScheduled;
 NSMutableDictionary<NSString *, NSDictionary *> *gLayouts;
 os_unfair_lock gPrefetchLock = OS_UNFAIR_LOCK_INIT;
@@ -550,12 +551,12 @@ void DropPictureFile(NSString *windowId) {
   dispatch_async(Writer(), ^{ [NSFileManager.defaultManager removeItemAtPath:path error:nil]; });
 }
 
-NSDictionary *WindowLayout(ArdiaCoreWindowController *controller, NSDictionary *session) {
+NSDictionary *WindowLayout(ArdiaCoreWindowController *controller, NSDictionary *facts) {
   NSWindow *window = controller.coreWindow.window;
   NSView *host = controller.coreWindow.hostView;
   if (!window.visible || !host || !controller.root || (window.styleMask & NSWindowStyleMaskFullScreen)) return nil;
   if ([window.identifier isEqualToString:@"ardia.window.small"] || ShownForWindow(window)) return nil;
-  NSString *state = StateOf(session, controller.appWindowId);
+  NSString *state = facts[@"state"];
   if (!state) return nil;
   NSMutableArray<NSView *> *pending = [NSMutableArray arrayWithObject:controller.root];
   NSMutableArray<ArdiaCoreWebView *> *shown = [NSMutableArray array];
@@ -585,7 +586,7 @@ NSDictionary *WindowLayout(ArdiaCoreWindowController *controller, NSDictionary *
     @"curve" : clip.layer.cornerCurve ?: kCACornerCurveCircular,
     @"size" : @[ @(NSWidth(window.frame)), @(NSHeight(window.frame)) ],
     @"state" : state,
-    @"content" : ContentOf(session, controller.appWindowId) ?: @"",
+    @"content" : facts[@"content"],
   } mutableCopy];
   if (web.transferKey.length) layout[@"tab"] = web.transferKey;
   if (NSValue *lights = ACTrafficLightsCenter(window)) layout[@"lights"] = @[ @(lights.pointValue.x), @(lights.pointValue.y) ];
@@ -619,18 +620,46 @@ void Write(NSData *data) {
   });
 }
 
-void RecordLayouts(NSDictionary *session, BOOL wait);
+void RecordLayouts(NSDictionary *facts, BOOL wait);
 NSString *ActiveTabOf(NSDictionary *session, NSString *windowId);
+
+NSDictionary *FactsOf(NSDictionary *session, NSArray<NSString *> *windowIds) {
+  if (!session) return nil;
+  if ([session[@"settings"] isKindOfClass:NSDictionary.class] && [session[@"settings"][@"restoreSession"] isEqual:@NO]) return @{@"forget" : @YES};
+  NSMutableSet *saved = [NSMutableSet set];
+  for (NSDictionary *w in [session[@"windows"] isKindOfClass:NSArray.class] ? session[@"windows"] : @[])
+    if ([w isKindOfClass:NSDictionary.class] && [w[@"id"] isKindOfClass:NSString.class]) [saved addObject:w[@"id"]];
+  NSMutableDictionary *windows = [NSMutableDictionary dictionary];
+  for (NSString *windowId in windowIds)
+    if (NSString *state = StateOf(session, windowId))
+      windows[windowId] = @{@"state" : state, @"content" : ContentOf(session, windowId) ?: @"", @"active" : ActiveTabOf(session, windowId) ?: NSNull.null};
+  return @{@"saved" : saved, @"windows" : windows};
+}
+
+void ApplyFacts(NSDictionary *facts, BOOL wait) {
+  if ([facts[@"forget"] boolValue]) [ArdiaCoreEarlyWindow forgetPictures];
+  else if (gLayoutPath && facts) RecordLayouts(facts, wait);
+}
 
 void Record(BOOL wait) {
   gRecordQueued = NO;
   if (!gDirectory.length) return;
-  NSDictionary *session = SessionAt(gDirectory);
-  if ([session[@"settings"] isKindOfClass:NSDictionary.class] && [session[@"settings"][@"restoreSession"] isEqual:@NO])
-    [ArdiaCoreEarlyWindow forgetPictures];
-  else if (gLayoutPath && session)
-    RecordLayouts(session, wait);
-  if (wait) dispatch_sync(Writer(), ^{});
+  const NSUInteger generation = ++gRecordGeneration;
+  NSMutableArray<NSString *> *windowIds = [NSMutableArray array];
+  for (ArdiaCoreWindowController *controller in ArdiaCoreWindowController.all)
+    if (controller.appWindowId.length && !controller.stray && !controller.standalone) [windowIds addObject:controller.appWindowId];
+  if (wait) {
+    ApplyFacts(FactsOf(SessionAt(gDirectory), windowIds), YES);
+    dispatch_sync(Writer(), ^{});
+    return;
+  }
+  NSString *directory = gDirectory;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    NSDictionary *facts = FactsOf(SessionAt(directory), windowIds);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (generation == gRecordGeneration) ApplyFacts(facts, NO);
+    });
+  });
 }
 
 NSString *ActiveTabOf(NSDictionary *session, NSString *windowId) {
@@ -643,21 +672,19 @@ NSString *ActiveTabOf(NSDictionary *session, NSString *windowId) {
   return nil;
 }
 
-void RecordLayouts(NSDictionary *session, BOOL wait) {
+void RecordLayouts(NSDictionary *facts, BOOL wait) {
   LoadLayouts();
-  NSMutableSet *saved = [NSMutableSet set];
-  for (NSDictionary *w in [session[@"windows"] isKindOfClass:NSArray.class] ? session[@"windows"] : @[])
-    if ([w isKindOfClass:NSDictionary.class] && [w[@"id"] isKindOfClass:NSString.class]) [saved addObject:w[@"id"]];
+  NSSet *saved = facts[@"saved"];
+  NSDictionary *windows = facts[@"windows"];
   NSMutableSet *live = [NSMutableSet set];
   for (ArdiaCoreWindowController *controller in ArdiaCoreWindowController.all) {
     NSString *windowId = controller.appWindowId;
     if (!windowId.length || controller.stray || controller.standalone) continue;
     [live addObject:windowId];
-    NSMutableDictionary *layout = [WindowLayout(controller, session) mutableCopy];
+    NSMutableDictionary *layout = [WindowLayout(controller, windows[windowId]) mutableCopy];
     if (!layout) continue;
     if (wait) {
-      NSString *active = ActiveTabOf(session, windowId);
-      if (active && [layout[@"tab"] isEqual:active] && CapturePicture(controller, windowId, layout)) layout[@"pictureContent"] = layout[@"content"];
+      if ([layout[@"tab"] isEqual:windows[windowId][@"active"]] && CapturePicture(controller, windowId, layout)) layout[@"pictureContent"] = layout[@"content"];
       else DropPictureFile(windowId);
     } else if ([gLayouts[windowId][@"pictureContent"] isKindOfClass:NSString.class]) {
       layout[@"pictureContent"] = gLayouts[windowId][@"pictureContent"];
@@ -1111,9 +1138,11 @@ CGImageRef TakePrefetched(NSString *windowId) {
 }
 
 + (void)noteLayoutChangeIn:(NSWindow *)window {
-  if (!gLayoutPath || gRecordQueued || !window) return;
+  if (!gLayoutPath || !window) return;
   ArdiaCoreWindowController *controller = [ArdiaCoreWindowController forNSWindow:window];
   if (!controller.appWindowId.length || controller.stray || controller.standalone) return;
+  gRecordGeneration++;
+  if (gRecordQueued) return;
   gRecordQueued = YES;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRecordDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ Record(NO); });
 }
@@ -1179,6 +1208,7 @@ CGImageRef TakePrefetched(NSString *windowId) {
 }
 
 + (void)forgetPictures {
+  gRecordGeneration++;
   NSString *directory = gDirectory;
   if (!directory.length) return;
   gLayouts = [NSMutableDictionary dictionary];
