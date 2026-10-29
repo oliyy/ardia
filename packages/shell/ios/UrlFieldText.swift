@@ -69,35 +69,43 @@ final class UrlFieldTextContent: NSView {
   private static let opaque = NSColor.white.cgColor
   private static let transparent = NSColor.white.withAlphaComponent(0).cgColor
   private static let maskAnimationKey = "hoverButtons"
+  private static let textFadeKey = "textFade"
   private static let maskDuration: CFTimeInterval = 0.15
 
   private let wrapper = NSView(frame: .zero)
   private let field = NSTextField(frame: .zero)
+  private let previousField = NSTextField(frame: .zero)
   private let gradient = CAGradientLayer()
   private var alignment = Alignment.leading
   private var hoverButtonsWidth: CGFloat = 0
   private var animatesNextMask = false
   private var maskGeneration = 0
+  private var pendingTextFade: NSAttributedString?
+  private var textGeneration = 0
   private var displayedText: String?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
     clipsToBounds = true
-    field.maximumNumberOfLines = 1
-    field.isEditable = false
-    field.isSelectable = false
-    field.isBordered = false
-    field.backgroundColor = .clear
-    field.drawsBackground = false
-    field.lineBreakMode = .byClipping
-    field.usesSingleLineMode = true
-    field.focusRingType = .none
-    field.refusesFirstResponder = true
-    field.setAccessibilityElement(false)
-    field.font = Self.loadedFont
+    for label in [field, previousField] {
+      label.maximumNumberOfLines = 1
+      label.isEditable = false
+      label.isSelectable = false
+      label.isBordered = false
+      label.backgroundColor = .clear
+      label.drawsBackground = false
+      label.lineBreakMode = .byClipping
+      label.usesSingleLineMode = true
+      label.focusRingType = .none
+      label.refusesFirstResponder = true
+      label.setAccessibilityElement(false)
+      label.font = Self.loadedFont
+    }
+    previousField.isHidden = true
     addSubview(wrapper)
     wrapper.addSubview(field)
+    wrapper.addSubview(previousField)
 
     gradient.startPoint = CGPoint(x: 0, y: 0.5)
     gradient.endPoint = CGPoint(x: 1, y: 0.5)
@@ -106,6 +114,16 @@ final class UrlFieldTextContent: NSView {
   required init?(coder: NSCoder) { nil }
 
   func commit(text: String, placeholder: String?, alignment: Alignment, color: NSColor, hoverButtonsWidth: CGFloat) {
+    let shown = pendingTextFade ?? field.attributedStringValue
+    if shown.string == text {
+      pendingTextFade = nil
+    } else if window != nil, Self.fades(from: shown.string, to: text) {
+      pendingTextFade = shown
+      animatesNextMask = true
+    } else {
+      pendingTextFade = nil
+      cancelTextFade()
+    }
     field.attributedStringValue = NSAttributedString(string: text, attributes: [.font: Self.loadedFont, .foregroundColor: color])
     field.placeholderAttributedString = placeholder.map { NSAttributedString(string: $0, attributes: [.foregroundColor: color, .font: Self.placeholderFont]) }
     displayedText = text.isEmpty ? placeholder.flatMap { $0.isEmpty ? nil : $0 } : text
@@ -135,7 +153,12 @@ final class UrlFieldTextContent: NSView {
   override func layout() {
     super.layout()
     layoutField()
+    startTextFade()
     applyMask()
+  }
+
+  private static func fades(from shown: String, to text: String) -> Bool {
+    !shown.isEmpty && !text.isEmpty && shown != text && (text.hasPrefix(shown) || shown.hasPrefix(text))
   }
 
   private func layoutField() {
@@ -143,9 +166,83 @@ final class UrlFieldTextContent: NSView {
     let height = size.height.isFinite ? max(0, size.height) : 0
     let wrapperWidth = max(0, bounds.width - Self.wrapperTrailingInset)
     wrapper.frame = backingAlignedRect(NSRect(x: 0, y: (bounds.height - height) / 2, width: wrapperWidth, height: height), options: .alignAllEdgesNearest)
-    let fieldWidth = max(wrapper.bounds.width, size.width.isFinite ? size.width : 0)
-    let x = alignment == .trailing ? wrapper.bounds.width - fieldWidth : 0
-    field.frame = wrapper.backingAlignedRect(field.frame(forAlignmentRect: NSRect(x: x, y: 0, width: fieldWidth, height: wrapper.bounds.height)), options: .alignAllEdgesNearest)
+    place(field)
+    if !previousField.isHidden { place(previousField) }
+  }
+
+  private func place(_ label: NSTextField) {
+    let width = label.intrinsicContentSize.width
+    let labelWidth = max(wrapper.bounds.width, width.isFinite ? width : 0)
+    let x = alignment == .trailing ? wrapper.bounds.width - labelWidth : 0
+    label.frame = wrapper.backingAlignedRect(label.frame(forAlignmentRect: NSRect(x: x, y: 0, width: labelWidth, height: wrapper.bounds.height)), options: .alignAllEdgesNearest)
+  }
+
+  private func startTextFade() {
+    guard let previous = pendingTextFade else { return }
+    pendingTextFade = nil
+    guard let fieldLayer = field.layer, let previousLayer = previousField.layer else { return }
+    let text = field.attributedStringValue.string
+    let reversing = !previousField.isHidden && previousField.attributedStringValue.string == text
+    let fieldShown = CGFloat(fieldLayer.presentation()?.opacity ?? fieldLayer.opacity)
+    let previousShown = previousField.isHidden ? 0 : CGFloat(previousLayer.presentation()?.opacity ?? previousLayer.opacity)
+    previousField.isHidden = false
+    previousField.attributedStringValue = previous
+    place(previousField)
+    previousField.displayIfNeeded()
+    let aligned = previousField.frame.minX == field.frame.minX
+    let grows = aligned && text.hasPrefix(previous.string)
+    let shrinks = aligned && previous.string.hasPrefix(text)
+    if (wrapper.subviews.first === previousField) != grows {
+      wrapper.addSubview(previousField, positioned: grows ? .below : .above, relativeTo: field)
+    }
+    textGeneration += 1
+    let generation = textGeneration
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    CATransaction.setCompletionBlock { [weak self] in
+      guard let self, self.textGeneration == generation else { return }
+      self.endTextFade()
+    }
+    fieldLayer.mask = grows ? suffixMask(of: field, after: previous) : nil
+    previousLayer.mask = shrinks ? suffixMask(of: previousField, after: field.attributedStringValue) : nil
+    fade(field, from: reversing ? previousShown : shrinks ? 1 : 0, to: 1)
+    fade(previousField, from: fieldShown, to: grows ? fieldShown : 0)
+    CATransaction.commit()
+  }
+
+  private func suffixMask(of label: NSTextField, after prefix: NSAttributedString) -> CALayer {
+    let start = (label.cell?.titleRect(forBounds: label.bounds).minX ?? 0) + prefix.size().width
+    let mask = CALayer()
+    mask.backgroundColor = Self.opaque
+    mask.frame = CGRect(x: start, y: -label.bounds.height, width: max(0, label.bounds.width - start) + label.bounds.height, height: 3 * label.bounds.height)
+    return mask
+  }
+
+  private func endTextFade() {
+    previousField.isHidden = true
+    field.layer?.mask = nil
+    previousField.layer?.mask = nil
+  }
+
+  private func cancelTextFade() {
+    textGeneration += 1
+    endTextFade()
+    for label in [field, previousField] { label.layer?.removeAnimation(forKey: Self.textFadeKey) }
+    field.alphaValue = 1
+  }
+
+  private func fade(_ label: NSTextField, from: CGFloat, to: CGFloat) {
+    label.alphaValue = to
+    guard from != to else {
+      label.layer?.removeAnimation(forKey: Self.textFadeKey)
+      return
+    }
+    let animation = CABasicAnimation(keyPath: "opacity")
+    animation.fromValue = from
+    animation.toValue = to
+    animation.duration = Self.maskDuration
+    animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    label.layer?.add(animation, forKey: Self.textFadeKey)
   }
 
   private func applyMask() {
