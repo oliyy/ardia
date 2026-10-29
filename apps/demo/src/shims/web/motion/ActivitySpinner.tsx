@@ -18,7 +18,7 @@ function ensureKeyframes() {
   document.head.append(style);
 }
 
-export function ActivitySpinner({ style, ...props }: ViewProps) {
+export function ActivitySpinner({ style, visible = true, ...props }: ViewProps & { visible?: boolean }) {
   const dark = useBrowser((s) => s.ui.appDark);
   const host = useRef<HTMLElement | null>(null);
   const [size, setSize] = useState(0);
@@ -36,7 +36,7 @@ export function ActivitySpinner({ style, ...props }: ViewProps) {
   const radius = Math.max(0, size / 2 - 1.25);
   const circumference = 2 * Math.PI * radius;
   return (
-    <View {...props} pointerEvents="none" ref={(view) => void (host.current = view as unknown as HTMLElement | null)} style={style}>
+    <View {...props} pointerEvents="none" ref={(view) => void (host.current = view as unknown as HTMLElement | null)} style={[style, { opacity: visible ? 1 : 0 }]}>
       {size > 0 ? (
         <svg width={size} height={size} style={{ position: "absolute", left: 0, top: 0, overflow: "visible" }}>
           <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={SECONDARY_TRACK[tone]} strokeWidth={LINE_WIDTH} />

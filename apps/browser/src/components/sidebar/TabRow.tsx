@@ -1,5 +1,5 @@
 import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, MouseArea, Surface, Symbol } from "@ardia/shell";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, PlatformColor, Pressable, StyleSheet, TextInput, View, type GestureResponderEvent } from "react-native";
 import { toggleMute } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
@@ -58,6 +58,9 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
   const selected = !!(flags & SELECTED);
   const playingAudio = !!(flags & PLAYING);
   const loading = !!(flags & LOADING);
+  const keepSpinner = useRef(loading);
+  keepSpinner.current ||= loading;
+  const spinner = useMemo(() => <ActivitySpinner visible={loading} style={{ width: 12, height: 12, marginRight: 2 }} />, [loading]);
   const renaming = useSidebarUi((u) => u.renaming?.kind === "tab" && u.renaming.id === tabId);
   const { hovered, hoverProps } = useRowHover(windowId, renaming ? null : { kind: "tab", id: tabId });
   const hidden = useFoldHidden();
@@ -198,7 +201,7 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
                       width={22}
                       hover={<TabCloseButton tabId={tab.id} />}
                     >
-                      {loading && <ActivitySpinner style={{ width: 12, height: 12, marginRight: 2 }} />}
+                      {keepSpinner.current && spinner}
                     </HoverSlot>
                   </AnimatedSurface>
                 )}
