@@ -3035,7 +3035,7 @@ index 152e76da136756ebc962ece4cc84e84df7cfce0e..3ca579b52ea91186f62abcbd435d2a25
 +RCT_EXTERN NSDictionary<NSNumber *, NSDictionary<NSNumber *, NSNumber *> *> *ArdiaPresentationFreezePostedGenerations(void);
 +#endif
 diff --git a/React/Views/RCTView.m b/React/Views/RCTView.m
-index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd42695903 100644
+index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..c8080c54431ba186618b27bf47d860d1ce01a279 100644
 --- a/React/Views/RCTView.m
 +++ b/React/Views/RCTView.m
 @@ -12,6 +12,7 @@
@@ -3054,7 +3054,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
  #endif // macOS]
  
  RCT_MOCK_DEF(RCTView, RCTContentInsets);
-@@ -136,1661 +138,4368 @@ - (RCTPlatformView *)react_findClipView // [macOS]
+@@ -136,1661 +138,4476 @@ - (RCTPlatformView *)react_findClipView // [macOS]
    return str;
  }
  
@@ -3111,6 +3111,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +static NSInteger ArdiaPresentationMounting;
 +static BOOL ArdiaPresentationEvaluating;
 +static BOOL ArdiaPresentationStale;
++static BOOL ArdiaPresentationUnsettled;
++static BOOL ArdiaPresentationGateTransformed;
++static NSPointerArray *ArdiaPresentationResponders;
++static NSUInteger ArdiaPresentationRespondersHeld;
 +static BOOL ArdiaPresentationLatched;
 +static NSInteger ArdiaPresentationHolds;
 +static NSHashTable<RCTView *> *ArdiaMountReceiptViews;
@@ -3278,6 +3282,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +static BOOL ArdiaPresentationPageSettlePending;
 +static BOOL ArdiaHoverAfterPages;
 +static const CFTimeInterval ArdiaPresentationPageSettle = 0.05;
++static const NSUInteger ArdiaPresentationTransformReach = 64;
 +
 +@interface RCTView ()
 +@property (nonatomic, assign) BOOL presentationDraining;
@@ -3355,6 +3360,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  dispatch_block_t finish = ^{
 +    ArdiaPresentationHolds--;
 +    ArdiaPresentationStale = YES;
++    ArdiaPresentationUnsettled = YES;
 +    dispatch_async(dispatch_get_main_queue(), ^{
 +      ArdiaPresentationGateGeometryDidChange();
 +    });
@@ -3412,6 +3418,12 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +                                forKeyPath:@"voiceOverEnabled"
 +                                   options:0
 +                                   context:NULL];
++  [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidChangeBackingPropertiesNotification
++                                                  object:nil
++                                                   queue:nil
++                                              usingBlock:^(__unused NSNotification *note) {
++                                                ArdiaPresentationUnsettled = YES;
++                                              }];
 +  [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown |
 +                                                NSEventMaskOtherMouseDown | NSEventMaskLeftMouseUp |
 +                                                NSEventMaskRightMouseUp | NSEventMaskOtherMouseUp
@@ -3425,6 +3437,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +                                              NSView *frame = content.superview ?: content;
 +                                              NSView *target = [frame hitTest:event.locationInWindow];
 +                                              ArdiaPresentationPressTokens[button] = [NSObject new];
++                                              ArdiaPresentationUnsettled = YES;
 +                                              if (target != nil) {
 +                                                [ArdiaPresentationPressedViews setObject:target forKey:button];
 +                                              } else {
@@ -4119,13 +4132,11 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 -    id max = self.accessibilityValueInternal[@"max"];
 -    if ([max isKindOfClass:[NSNumber class]]) {
 -      accessibilityMaxValue = max;
--    }
 +static void ArdiaPresentationFreezeScheduleThaw(ArdiaPresentationFreezeState *state, RCTView *gate)
 +{
 +  if ([state.deferred containsObject:gate]) {
 +    return;
-   }
--  return accessibilityMaxValue;
++  }
 +  [state.wanted addObject:gate];
 +  if (ArdiaPresentationFreezeThawScheduled) {
 +    return;
@@ -4137,14 +4148,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPresentationFreezeThawPass();
 +  });
 +  CFRunLoopWakeUp(mainRunLoop);
- }
- 
--#endif // macOS]
--
--- (RCTPlatformView *)reactAccessibilityElement // [macOS]
++}
++
 +static BOOL ArdiaPresentationFreezeKeepsClosed(RCTView *gate)
- {
--  return self;
++{
 +  if (![ArdiaPresentationClosedGates containsObject:gate]) {
 +    return NO;
 +  }
@@ -4154,18 +4161,14 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
 +  ArdiaPresentationFreezeScheduleThaw(state, gate);
 +  return YES;
- }
- 
--- (BOOL)isAccessibilityElement
++}
++
 +static BOOL ArdiaPresentationPointerPressed(void)
- {
--  if (self.reactAccessibilityElement == self) {
--    return [super isAccessibilityElement];
++{
 +#if DEBUG
 +  if (ArdiaButtonsOverride != nil) {
 +    return ArdiaButtonsOverride.boolValue;
-   }
--
++  }
 +#endif
 +  if (ArdiaPresentationPressTokens.count == 0) {
 +    return NO;
@@ -4175,10 +4178,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
 +  [ArdiaPresentationPressTokens removeAllObjects];
 +  [ArdiaPresentationPressedViews removeAllObjects];
-   return NO;
- }
- 
--- (BOOL)performAccessibilityAction:(NSString *)name
++  ArdiaPresentationUnsettled = YES;
++  return NO;
++}
++
 +static NSInteger ArdiaPointerWindowNumber;
 +static NSPoint ArdiaPointerWindowPoint;
 +static CFTimeInterval ArdiaPointerWindowAskedAt;
@@ -4188,10 +4191,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +static const CFTimeInterval ArdiaPointerWindowLife = 0.1;
 +
 +static void ArdiaPointerWindowForget(void)
- {
--  if (_onAccessibilityAction && accessibilityActionsNameMap[name]) {
--    _onAccessibilityAction(@{@"actionName" : name, @"actionTarget" : self.reactTag});
--    return YES;
++{
 +  ArdiaPointerWindowKnown = NO;
 +  ArdiaPointerWindowForgottenAt = CACurrentMediaTime();
 +}
@@ -4208,33 +4208,16 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +          (event.phase == NSEventPhaseNone && event.momentumPhase == NSEventPhaseNone);
 +    default:
 +      return NO;
-   }
--  return NO;
- }
- 
--#if !TARGET_OS_OSX // [macOS]
--- (BOOL)accessibilityActivate
--#else // [macOS
--- (BOOL)accessibilityPerformPress
--#endif // macOS]
++  }
++}
++
 +static void ArdiaPointerWindowSeed(NSEvent *event)
- {
--#if TARGET_OS_OSX // [macOS
--  if ([self isAccessibilityEnabled] == NO) {
--    return NO;
++{
 +  CGEventRef source = event.CGEvent;
 +  if (source == NULL || event.window == nil || event.window.windowNumber != event.windowNumber ||
 +      CGEventGetIntegerValueField(source, kCGEventSourceUnixProcessID) == getpid()) {
 +    return;
-   }
--#endif // macOS]
--  if ([self performAccessibilityAction:@"activate"]) {
--    return YES;
--  } else if (_onAccessibilityTap) {
--    _onAccessibilityTap(nil);
--    return YES;
--  } else {
--    return NO;
++  }
 +  const CGPoint global = CGEventGetLocation(source);
 +  const NSPoint screen = NSMakePoint(global.x, NSMaxY(NSScreen.screens.firstObject.frame) - global.y);
 +  const CFTimeInterval at = MIN(event.timestamp, CACurrentMediaTime());
@@ -4243,24 +4226,15 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  if ((!sameAnswer && !ArdiaPointerEventRoutedByLocation(event)) || at < ArdiaPointerWindowForgottenAt ||
 +      (ArdiaPointerWindowKnown && at < ArdiaPointerWindowAskedAt)) {
 +    return;
-   }
++  }
 +  ArdiaPointerWindowNumber = event.windowNumber;
 +  ArdiaPointerWindowPoint = screen;
 +  ArdiaPointerWindowAskedAt = at;
 +  ArdiaPointerWindowKnown = YES;
- }
- 
--#if !TARGET_OS_OSX // [macOS]
--- (BOOL)accessibilityPerformMagicTap
++}
++
 +static void ArdiaPointerWindowWatch(void)
- {
--  if ([self performAccessibilityAction:@"magicTap"]) {
--    return YES;
--  } else if (_onMagicTap) {
--    _onMagicTap(nil);
--    return YES;
--  } else {
--    return NO;
++{
 +  static dispatch_once_t once;
 +  dispatch_once(&once, ^{
 +    NSArray<NSNotificationName> *local = @[
@@ -4279,7 +4253,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +                                                  usingBlock:^(__unused NSNotification *note) {
 +                                                    ArdiaPointerWindowForget();
 +                                                  }];
-+    }
+     }
 +    NSArray<NSNotificationName> *workspace = @[
 +      NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
 +      NSWorkspaceDidDeactivateApplicationNotification, NSWorkspaceDidHideApplicationNotification,
@@ -4309,6 +4283,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  if (ArdiaPointerWindowRecheckScheduled) {
 +    return;
    }
+-  return accessibilityMaxValue;
 +  ArdiaPointerWindowRecheckScheduled = YES;
 +  const CFTimeInterval delay = MAX(0, ArdiaPointerWindowAskedAt + ArdiaPointerWindowLife - CACurrentMediaTime());
 +  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -4321,16 +4296,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    [RCTView ardia_markHoverDirty];
 +  });
  }
--#endif // [macOS]
  
--- (BOOL)accessibilityPerformEscape
+-#endif // macOS]
 +static NSInteger ArdiaPointerWindowNumberAt(NSPoint screen)
- {
--  if ([self performAccessibilityAction:@"escape"]) {
--    return YES;
--  } else if (_onAccessibilityEscape) {
--    _onAccessibilityEscape(nil);
--    return YES;
++{
 +  ArdiaPointerWindowWatch();
 +  const CFTimeInterval now = CACurrentMediaTime();
 +  if (!ArdiaPointerWindowKnown || !NSEqualPoints(screen, ArdiaPointerWindowPoint) ||
@@ -4339,18 +4308,16 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPointerWindowPoint = screen;
 +    ArdiaPointerWindowAskedAt = now;
 +    ArdiaPointerWindowKnown = YES;
-   } else {
--    return NO;
++  } else {
 +    ArdiaPointerWindowScheduleRecheck();
-   }
++  }
 +  return ArdiaPointerWindowNumber;
- }
++}
  
--#if !TARGET_OS_OSX // [macOS]
--- (void)accessibilityIncrement
+-- (RCTPlatformView *)reactAccessibilityElement // [macOS]
 +static RCTView *ArdiaPresentationDrainOwner(RCTView *gate)
  {
--  [self performAccessibilityAction:@"increment"];
+-  return self;
 +  if (gate == nil || gate.window == nil || gate.presentationPersistent ||
 +      ![ArdiaPresentationClosedGates containsObject:gate] || ArdiaPresentationUnderRetiring(gate)) {
 +    return nil;
@@ -4358,21 +4325,17 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  RCTView *owner = ArdiaPresentationSessionOf(gate);
 +  return (owner.presentationDraining || owner.presentationArmed) && owner.window != nil ? owner : nil;
  }
--#else // [macOS
--- (BOOL)accessibilityPerformIncrement
-+
+ 
+-- (BOOL)isAccessibilityElement
 +static CGFloat ArdiaPresentationRestBand(RCTView *owner)
  {
--  return [self performAccessibilityAction:@"increment"];
+-  if (self.reactAccessibilityElement == self) {
+-    return [super isAccessibilityElement];
 +  return owner.presentationArmed ? ArdiaPresentationMargin : CGFLOAT_MAX;
- }
--#endif // macOS]
- 
--#if !TARGET_OS_OSX // [macOS]
--- (void)accessibilityDecrement
++}
++
 +static void ArdiaPresentationDrainQueue(NSMutableArray<ArdiaPresentationDrainUnit *> *queue, RCTView *gate, CGFloat gap, BOOL nearestFirst)
- {
--  [self performAccessibilityAction:@"decrement"];
++{
 +  ArdiaPresentationDrainUnit *unit = [ArdiaPresentationDrainUnit new];
 +  unit.gate = gate;
 +  unit.gap = gap;
@@ -4386,13 +4349,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +                          }];
 +  [queue insertObject:unit atIndex:index];
 +  [ArdiaPresentationDrainQueued addObject:gate];
- }
--#else // [macOS
--- (BOOL)accessibilityPerformDecrement
++}
 +
 +static CGFloat ArdiaPresentationDrainGap(RCTView *gate, RCTView *owner)
- {
--  return [self performAccessibilityAction:@"decrement"];
++{
 +  CALayer *layer = gate.layer;
 +  if (layer == nil || gate.isHiddenOrHasHiddenAncestor) {
 +    return CGFLOAT_MAX;
@@ -4416,18 +4376,15 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      CGFloat along = MAX(CGRectGetMinY(rect) - CGRectGetMaxY(limit), CGRectGetMinY(limit) - CGRectGetMaxY(rect));
 +      gap = MAX(gap, MAX(across, along));
 +    }
-+  }
+   }
 +  return gap;
- }
--#endif // macOS]
++}
  
--#if TARGET_OS_OSX // [macOS
--- (BOOL)accessibilityPerformShowMenu
+-  return NO;
 +static void ArdiaPresentationDrainAddWithin(NSView *view);
 +
 +static void ArdiaPresentationDrainAdd(RCTView *gate)
- {
--  return [self performAccessibilityAction:@"showMenu"];
++{
 +  RCTView *owner = ArdiaPresentationDrainOwner(gate);
 +  if (owner == nil) {
 +    return;
@@ -4449,19 +4406,18 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
 +  ArdiaPresentationDrainQueue(ArdiaPresentationDrainUnits, gate, gap, YES);
  }
--#endif // macOS]
  
--- (NSString *)description
+-- (BOOL)performAccessibilityAction:(NSString *)name
 +static RCTView *ArdiaPresentationArmOwner(RCTView *gate)
  {
--  return [[super description] stringByAppendingFormat:@" reactTag: %@; frame = %@; layer = %@",
--                                                      self.reactTag,
--                                                      NSStringFromCGRect(self.frame),
--                                                      self.layer];
+-  if (_onAccessibilityAction && accessibilityActionsNameMap[name]) {
+-    _onAccessibilityAction(@{@"actionName" : name, @"actionTarget" : self.reactTag});
+-    return YES;
 +  if (gate == nil || gate.window == nil || gate.presentationPersistent ||
 +      [ArdiaPresentationClosedGates containsObject:gate] || ArdiaPresentationFailsOpen()) {
 +    return nil;
-+  }
+   }
+-  return NO;
 +  RCTView *owner = ArdiaPresentationSessionOf(gate);
 +  if (!owner.presentationArmed || owner.window == nil || ArdiaPresentationExposed(gate, owner) ||
 +      ArdiaPresentationProtected(gate)) {
@@ -4470,15 +4426,15 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  return owner;
  }
  
--#if TARGET_OS_OSX // [macOS
--- (void)setShadowColor:(CGColorRef)shadowColor
+-#if !TARGET_OS_OSX // [macOS]
+-- (BOOL)accessibilityActivate
+-#else // [macOS
+-- (BOOL)accessibilityPerformPress
+-#endif // macOS]
 +static void ArdiaPresentationArmAdd(RCTView *gate)
  {
--    if (_shadowColor != shadowColor)
--    {
--        _shadowColor = shadowColor;
--        [self didUpdateShadow];
--    }
+-#if TARGET_OS_OSX // [macOS
+-  if ([self isAccessibilityEnabled] == NO) {
 +  RCTView *owner = ArdiaPresentationArmOwner(gate);
 +  if (owner == nil || [ArdiaPresentationDrainQueued containsObject:gate]) {
 +    return;
@@ -4488,31 +4444,21 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    return;
 +  }
 +  ArdiaPresentationDrainQueue(ArdiaPresentationArmUnits, gate, gap, NO);
- }
- 
--- (void)setShadowOffset:(CGSize)shadowOffset
++}
++
 +static void ArdiaPresentationDrainAddWithin(NSView *view)
- {
--    if (!CGSizeEqualToSize(_shadowOffset, shadowOffset))
--    {
--        _shadowOffset = shadowOffset;
--        [self didUpdateShadow];
++{
 +  for (NSView *child in view.reactSubviews) {
 +    if ([ArdiaPresentationClosedGates containsObject:(RCTView *)child]) {
 +      ArdiaPresentationDrainAdd((RCTView *)child);
 +    } else {
 +      ArdiaPresentationDrainAddWithin(child);
-     }
++    }
 +  }
- }
- 
--- (void)setShadowOpacity:(CGFloat)shadowOpacity
++}
++
 +static void ArdiaPresentationDrainCollect(void)
- {
--    if (_shadowOpacity != shadowOpacity)
--    {
--        _shadowOpacity = shadowOpacity;
--        [self didUpdateShadow];
++{
 +  ArdiaPresentationDrainUnits = [NSMutableArray new];
 +  ArdiaPresentationArmUnits = [NSMutableArray new];
 +  ArdiaPresentationDrainQueued = [NSHashTable weakObjectsHashTable];
@@ -4523,19 +4469,14 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  if (ArdiaPresentationAnyArmed()) {
 +    for (RCTView *gate in ArdiaPresentationGates.allObjects) {
 +      ArdiaPresentationArmAdd(gate);
-     }
++    }
 +  }
 +  ArdiaPresentationDrainMoved = NO;
 +  ArdiaPresentationDrainSortedAt = CACurrentMediaTime();
- }
- 
--- (void)setShadowRadius:(CGFloat)shadowRadius
++}
++
 +static void ArdiaPresentationDrainSchedule(void)
- {
--    if (_shadowRadius != shadowRadius)
--    {
--        _shadowRadius = shadowRadius;
--        [self didUpdateShadow];
++{
 +  ArdiaPresentationDrainCollected = NO;
 +  ArdiaPresentationDrainWaits = YES;
 +  ArdiaPresentationDrainLastAt = CACurrentMediaTime();
@@ -4546,7 +4487,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    if (ArdiaPresentationDrainTimer != NULL) {
 +      CFRunLoopTimerSetNextFireDate(
 +          ArdiaPresentationDrainTimer, CFAbsoluteTimeGetCurrent() + ArdiaPresentationDrainStallInterval);
-     }
++    }
 +    return;
 +  }
 +  ArdiaPresentationDrainTimer = CFRunLoopTimerCreateWithHandler(
@@ -4570,20 +4511,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +        [RCTView ardia_drainPresentation];
 +      });
 +  CFRunLoopAddObserver(CFRunLoopGetMain(), ArdiaPresentationDrainObserver, kCFRunLoopCommonModes);
- }
- 
---(void)didUpdateShadow
++}
++
 +static void ArdiaPresentationDrainEnd(void)
- {
--    NSShadow *shadow = [NSShadow new];
--    NSColor *baseShadowColor = nil;
--    if (_shadowColor != NULL) {
--      baseShadowColor = [NSColor colorWithCGColor:_shadowColor];
--    }
--    shadow.shadowColor = [baseShadowColor colorWithAlphaComponent:[self shadowOpacity]];
--    shadow.shadowOffset = [self shadowOffset];
--    shadow.shadowBlurRadius = [self shadowRadius];
--    [self setShadow:shadow];
++{
 +  for (RCTView *owner in ArdiaPresentationSessions.allObjects) {
 +    owner.presentationDraining = NO;
 +  }
@@ -4608,19 +4539,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  ArdiaPresentationStale = YES;
 +  ArdiaPresentationGateGeometryDidChange();
 +  [RCTView ardia_markHoverDirty];
- }
- 
--- (void)viewDidMoveToWindow
++}
++
 +static void ArdiaPresentationDrainSettle(NSUInteger changesBefore, BOOL working)
- {
--  // Subscribe to view bounds changed notification so that the view can be notified when a
--  // scroll event occurs either due to trackpad/gesture based scrolling or a scrollwheel event
--  // both of which would not cause the mouseExited to be invoked.
--
--  if ([self window] == nil) {
--    [[NSNotificationCenter defaultCenter] removeObserver:self
--                                                    name:NSViewBoundsDidChangeNotification
--                                                  object:nil];
++{
 +  const CFTimeInterval now = CACurrentMediaTime();
 +  if (ArdiaPresentationDrainChanges != changesBefore) {
 +    ArdiaPresentationDrainProgressAt = now;
@@ -4633,15 +4555,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    }
 +    ArdiaPresentationDrainForced = YES;
 +    working = YES;
-   }
--  else if ([[self enclosingScrollView] contentView] != nil) {
--    [[NSNotificationCenter defaultCenter] addObserver:self
--                                             selector:@selector(viewBoundsChanged:)
--                                                 name:NSViewBoundsDidChangeNotification
--                                               object:[[self enclosingScrollView] contentView]];
++  }
 +  if (working) {
 +    CFRunLoopWakeUp(CFRunLoopGetMain());
-   }
++  }
 +  if (ArdiaPresentationDrainTimer == NULL) {
 +    return;
 +  }
@@ -4658,8 +4575,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  CFRunLoopTimerSetNextFireDate(
 +      ArdiaPresentationDrainTimer, CFAbsoluteTimeGetCurrent() + MAX(delay, ArdiaPresentationDrainStallInterval));
 +}
- 
--  [self reactViewDidMoveToWindow]; // [macOS] Github#1412
++
 +static void ArdiaPresentationBeginDrain(RCTView *owner)
 +{
 +  if (owner == nil || owner.presentationSession || owner.presentationDraining || owner.presentationArmed ||
@@ -4670,8 +4586,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  ArdiaPresentationStale = YES;
 +  ArdiaPresentationDrainSchedule();
 +}
- 
--  [super viewDidMoveToWindow];
++
 +static void ArdiaPresentationRetireCollect(NSView *view, RCTView *page, NSInteger depth, CGFloat pageGap)
 +{
 +  for (NSView *child in view.reactSubviews) {
@@ -4692,15 +4607,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      ArdiaPresentationRetireCollect(child, page, depth, pageGap);
 +    }
 +  }
- }
- 
--- (void)viewBoundsChanged:(NSNotification*)__unused inNotif
++}
++
 +static void ArdiaPresentationRetire(RCTView *page, RCTView *owner)
- {
--  // When an enclosing scrollview is scrolled using the scrollWheel or trackpad,
--  // the mouseExited: event does not get called on the view where mouseEntered: was previously called.
--  // This creates an unnatural pairing of mouse enter and exit events and can cause problems.
--  // We therefore explicitly check for this here and handle them by calling the appropriate callbacks.
++{
 +  if ([ArdiaPresentationRetiring containsObject:page]) {
 +    return;
 +  }
@@ -4727,11 +4637,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPresentationDrainSchedule();
 +  }
 +}
- 
--  if (!_hasMouseOver && self.onMouseEnter)
--  {
--    NSPoint locationInWindow = [[self window] mouseLocationOutsideOfEventStream];
--    NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
++
 +static void ArdiaPresentationUnretire(RCTView *page)
 +{
 +  if (![ArdiaPresentationRetiring containsObject:page]) {
@@ -4744,62 +4650,67 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      }];
 +  [ArdiaPresentationRetireUnits removeObjectsAtIndexes:dropped];
 +}
- 
--    if (NSPointInRect(locationInView, [self bounds]))
--    {
--      _hasMouseOver = YES;
++
 +static void ArdiaPresentationCancelRetirement(void)
 +{
 +  [ArdiaPresentationRetiring removeAllObjects];
 +  [ArdiaPresentationRetireUnits removeAllObjects];
 +}
- 
--      [self sendMouseEventWithBlock:self.onMouseEnter
--                       locationInfo:[self locationInfoFromDraggingLocation:locationInWindow]
--                      modifierFlags:0
--                     additionalData:nil];
--    }
++
 +static BOOL ArdiaPresentationRetireStillDue(ArdiaPresentationRetireUnit *unit)
 +{
 +  RCTView *gate = unit.gate;
 +  RCTView *page = unit.page;
 +  if (gate == nil || page == nil || ![ArdiaPresentationRetiring containsObject:page] ||
 +      [ArdiaPresentationClosedGates containsObject:gate] || gate.window == nil) {
-+    return NO;
+     return NO;
    }
--  else if (_hasMouseOver && self.onMouseLeave)
--  {
--    NSPoint locationInWindow = [[self window] mouseLocationOutsideOfEventStream];
--    NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
+-#endif // macOS]
+-  if ([self performAccessibilityAction:@"activate"]) {
+-    return YES;
+-  } else if (_onAccessibilityTap) {
+-    _onAccessibilityTap(nil);
+-    return YES;
+-  } else {
 +  RCTView *owner = ArdiaPresentationSessionOf(page);
 +  if (owner == nil || owner.window == nil || owner.presentationSession || ArdiaPresentationExposedWithin(page, owner, 0) ||
 +      ArdiaPresentationProtected(page) ||
 +      (gate != page && (ArdiaPresentationExposedWithin(gate, owner, 0) || ArdiaPresentationProtected(gate)))) {
 +    ArdiaPresentationUnretire(page);
-+    return NO;
-+  }
+     return NO;
+   }
 +  return YES;
-+}
+ }
  
--    if (!NSPointInRect(locationInView, [self bounds]))
--    {
--      _hasMouseOver = NO;
+-#if !TARGET_OS_OSX // [macOS]
+-- (BOOL)accessibilityPerformMagicTap
 +static BOOL ArdiaPresentationExposedGateClosed(void)
-+{
+ {
+-  if ([self performAccessibilityAction:@"magicTap"]) {
+-    return YES;
+-  } else if (_onMagicTap) {
+-    _onMagicTap(nil);
+-    return YES;
+-  } else {
+-    return NO;
 +  for (RCTView *gate in ArdiaPresentationClosedGates.allObjects) {
 +    if (gate.window != nil && ArdiaPresentationExposedWithin(gate, ArdiaPresentationSessionOf(gate), 0)) {
 +      return YES;
 +    }
-+  }
+   }
 +  return NO;
-+}
+ }
+-#endif // [macOS]
  
--      [self sendMouseEventWithBlock:self.onMouseLeave
--                       locationInfo:[self locationInfoFromDraggingLocation:locationInWindow]
--                      modifierFlags:0
--                     additionalData:nil];
+-- (BOOL)accessibilityPerformEscape
 +static BOOL ArdiaPresentationCommitBarrier(void)
-+{
+ {
+-  if ([self performAccessibilityAction:@"escape"]) {
+-    return YES;
+-  } else if (_onAccessibilityEscape) {
+-    _onAccessibilityEscape(nil);
+-    return YES;
+-  } else {
 +  if (!NSThread.isMainThread || ArdiaPresentationMounting > 0 || ArdiaPresentationEvaluating || ArdiaPresentationDrainSlicing) {
 +#if DEBUG
 +    static BOOL reportedInside;
@@ -4808,8 +4719,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      NSLog(@"Ardia presentation barrier skipped inside a mount, evaluate or drain slice");
 +    }
 +#endif
-+    return NO;
-+  }
+     return NO;
+   }
 +  if (ArdiaPresentationCommitPending || ArdiaPresentationStale) {
 +    ArdiaPresentationCommitPending = NO;
 +    ArdiaPresentationGateGeometryDidChange();
@@ -4818,8 +4729,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPresentationFreezeThawPass();
 +    if (ArdiaPresentationStale) {
 +      ArdiaPresentationGateGeometryDidChange();
-     }
-   }
++    }
++  }
 +  const BOOL clear = !ArdiaPresentationExposedGateClosed();
 +#if DEBUG
 +  static BOOL reportedClosed;
@@ -4830,53 +4741,38 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +#endif
 +  return clear;
  }
--#endif // macOS]
- 
--#pragma mark - Statics for dealing with layoutGuides
-+static CGFloat ArdiaPresentationFreezeBound(RCTView *owner)
-+{
-+  const CGFloat bound = owner.presentationShiftBound;
-+  return isfinite(bound) && bound > 0 ? bound : 0;
-+}
- 
--+ (void)autoAdjustInsetsForView:(RCTUIView<RCTAutoInsetsProtocol> *)parentView // [macOS]
--                 withScrollView:(RCTUIScrollView *)scrollView // [macOS]
--                   updateOffset:(BOOL)updateOffset
-+static CGFloat ArdiaPresentationFreezePad(RCTView *owner)
- {
--  UIEdgeInsets baseInset = parentView.contentInset;
--  CGFloat previousInsetTop = scrollView.contentInset.top;
--  CGPoint contentOffset = scrollView.contentOffset;
-+  return ArdiaPresentationMargin + ArdiaPresentationFreezeBound(owner);
-+}
  
 -#if !TARGET_OS_OSX // [macOS]
--  if (parentView.automaticallyAdjustContentInsets) {
--    UIEdgeInsets autoInset = RCTContentInsets(parentView);
--    baseInset.top += autoInset.top;
--    baseInset.bottom += autoInset.bottom;
--    baseInset.left += autoInset.left;
--    baseInset.right += autoInset.right;
--  }
--#endif // [macOS]
--  scrollView.contentInset = baseInset;
--  scrollView.scrollIndicatorInsets = baseInset;
-+static CGFloat ArdiaPresentationFreezePostPad(RCTView *owner)
-+{
-+  return ArdiaPresentationFreezePad(owner) + ArdiaPresentationFreezeBound(owner) + ArdiaPresentationFreezeHysteresis;
-+}
+-- (void)accessibilityIncrement
++static CGFloat ArdiaPresentationFreezeBound(RCTView *owner)
+ {
+-  [self performAccessibilityAction:@"increment"];
++  const CGFloat bound = owner.presentationShiftBound;
++  return isfinite(bound) && bound > 0 ? bound : 0;
+ }
+-#else // [macOS
+-- (BOOL)accessibilityPerformIncrement
++
++static CGFloat ArdiaPresentationFreezePad(RCTView *owner)
+ {
+-  return [self performAccessibilityAction:@"increment"];
++  return ArdiaPresentationMargin + ArdiaPresentationFreezeBound(owner);
+ }
+-#endif // macOS]
  
--  if (updateOffset) {
--    // If we're adjusting the top inset, then let's also adjust the contentOffset so that the view
--    // elements above the top guide do not cover the content.
--    // This is generally only needed when your views are initially laid out, for
--    // manual changes to contentOffset, you can optionally disable this step
--    CGFloat currentInsetTop = scrollView.contentInset.top;
--    if (currentInsetTop != previousInsetTop) {
--      contentOffset.y -= (currentInsetTop - previousInsetTop);
--      scrollView.contentOffset = contentOffset;
+-#if !TARGET_OS_OSX // [macOS]
+-- (void)accessibilityDecrement
++static CGFloat ArdiaPresentationFreezePostPad(RCTView *owner)
+ {
+-  [self performAccessibilityAction:@"decrement"];
++  return ArdiaPresentationFreezePad(owner) + ArdiaPresentationFreezeBound(owner) + ArdiaPresentationFreezeHysteresis;
+ }
+-#else // [macOS
+-- (BOOL)accessibilityPerformDecrement
++
 +static void ArdiaPresentationFinishResets(void)
-+{
+ {
+-  return [self performAccessibilityAction:@"decrement"];
 +  for (RCTView *gate in ArdiaPresentationPendingResets.allObjects) {
 +    if (gate.presentationGate) {
 +      [ArdiaPresentationPendingResets removeObject:gate];
@@ -4884,20 +4780,19 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      [ArdiaPresentationPendingResets removeObject:gate];
 +      [gate ardia_resetPresentation];
 +      ArdiaPresentationStale = YES;
-     }
-   }
++    }
++  }
  }
+-#endif // macOS]
  
--#pragma mark - View Unmounting
--
--- (void)react_remountAllSubviews
+-#if TARGET_OS_OSX // [macOS
+-- (BOOL)accessibilityPerformShowMenu
+-{
+-  return [self performAccessibilityAction:@"showMenu"];
+-}
+-#endif // macOS]
 +static void ArdiaPresentationFreezeKeepFrontier(void)
- {
--  if (_removeClippedSubviews) {
--    for (RCTUIView *view in self.reactSubviews) { // [macOS]
--      if (view.superview != self) {
--        [self addSubview:view];
--        [view react_remountAllSubviews];
++{
 +  for (RCTView *owner in ArdiaPresentationFreezeStates.keyEnumerator.allObjects) {
 +    ArdiaPresentationFreezeState *state = [ArdiaPresentationFreezeStates objectForKey:owner];
 +    if (state == nil || state.disabled || owner.window == nil) {
@@ -4912,11 +4807,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      }
 +      if (ArdiaPresentationExposedWithin(gate, owner, pad)) {
 +        [near addObject:gate];
-       }
-     }
--  } else {
--    // If _removeClippedSubviews is false, we must already be showing all subviews
--    [super react_remountAllSubviews];
++      }
++    }
 +    if (near.count == 0) {
 +      continue;
 +    }
@@ -4924,56 +4816,21 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      [state.frontier addObject:gate];
 +    }
 +    ArdiaPresentationFreezeRequestThaw(state.rootTag, state.serial, [state generationsOf:near], @"frontier");
-   }
- }
- 
--- (void)react_updateClippedSubviewsWithClipRect:(CGRect)clipRect relativeToView:(RCTPlatformView *)clipView // [macOS]
++  }
++}
++
 +static void ArdiaPresentationFreezePost(void)
- {
--  // TODO (#5906496): for scrollviews (the primary use-case) we could
--  // optimize this by only doing a range check along the scroll axis,
--  // instead of comparing the whole frame
--
--  if (!_removeClippedSubviews) {
--    // Use default behavior if unmounting is disabled
--    return [super react_updateClippedSubviewsWithClipRect:clipRect relativeToView:clipView];
--  }
--
--  if (self.reactSubviews.count == 0) {
--    // Do nothing if we have no subviews
--    return;
++{
 +  for (RCTView *owner in ArdiaPresentationFreezeStates.keyEnumerator.allObjects) {
 +    ArdiaPresentationFreezeState *state = [ArdiaPresentationFreezeStates objectForKey:owner];
 +    NSNumber *serial = state.rootTag != nil ? ArdiaPresentationFreezeSerials[state.rootTag] : nil;
 +    if (!owner.presentationSession || serial == nil || serial.unsignedIntegerValue != state.serial) {
 +      [ArdiaPresentationFreezeStates removeObjectForKey:owner];
 +    }
-   }
--
--  if (CGSizeEqualToSize(self.bounds.size, CGSizeZero)) {
--    // Do nothing if layout hasn't happened yet
++  }
 +  if (ArdiaPresentationFreezeStates == nil || !ArdiaPresentationAnySession() || ArdiaPresentationFailsOpen()) {
-     return;
-   }
--
--  // Convert clipping rect to local coordinates
--  clipRect = [clipView convertRect:clipRect toView:self];
--  clipRect = CGRectIntersection(clipRect, self.bounds);
--  clipView = self;
--
--  // Mount / unmount views
--  for (RCTUIView *view in self.reactSubviews) { // [macOS]
--    if (!CGSizeEqualToSize(CGRectIntersection(clipRect, view.frame).size, CGSizeZero)) {
--      // View is at least partially visible, so remount it if unmounted
--      [self addSubview:view];
--
--      // Then test its subviews
--      if (CGRectContainsRect(clipRect, view.frame)) {
--        // View is fully visible, so remount all subviews
--        [view react_remountAllSubviews];
--      } else {
--        // View is partially visible, so update clipped subviews
--        [view react_updateClippedSubviewsWithClipRect:clipRect relativeToView:clipView];
++    return;
++  }
 +  ArdiaPresentationFreezeKeepFrontier();
 +  NSMapTable<ArdiaPresentationFreezeState *, NSArray<NSMutableDictionary<NSNumber *, NSNumber *> *> *> *posts = nil;
 +  for (RCTView *gate in ArdiaPresentationClosedGates.allObjects) {
@@ -4991,11 +4848,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      NSNumber *serial = rootTag != nil ? ArdiaPresentationFreezeSerials[rootTag] : nil;
 +      if (serial == nil) {
 +        continue;
-       }
--
--    } else if (view.superview) {
--      // View is completely outside the clipRect, so unmount it
--      [view removeFromSuperview];
++      }
 +      state = [ArdiaPresentationFreezeState new];
 +      state.rootTag = rootTag;
 +      state.serial = serial.unsignedIntegerValue;
@@ -5013,7 +4866,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    state.bound = owner.presentationShiftBound;
 +    if (posts == nil) {
 +      posts = [NSMapTable strongToStrongObjectsMapTable];
-     }
++    }
 +    NSArray<NSMutableDictionary<NSNumber *, NSNumber *> *> *lists = [posts objectForKey:state];
 +    if (lists == nil) {
 +      lists = @[ [NSMutableDictionary new], [NSMutableDictionary new] ];
@@ -5024,10 +4877,9 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  for (ArdiaPresentationFreezeState *state in posts) {
 +    NSArray<NSMutableDictionary<NSNumber *, NSNumber *> *> *lists = [posts objectForKey:state];
 +    ArdiaPresentationFreezePin(state.rootTag, state.serial, state.bound, lists[0], lists[1]);
-   }
- }
- 
--- (void)setRemoveClippedSubviews:(BOOL)removeClippedSubviews
++  }
++}
++
 +typedef struct {
 +  NSInteger depth;
 +  NSInteger owner;
@@ -5043,32 +4895,17 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +} ArdiaPresentationEntry;
 +
 +static NSInteger ArdiaPresentationLookup(NSMapTable *table, id key)
- {
--  if (!removeClippedSubviews && _removeClippedSubviews) {
--    [self react_remountAllSubviews];
--  }
--  _removeClippedSubviews = removeClippedSubviews;
++{
 +  return (NSInteger)(uintptr_t)NSMapGet(table, (__bridge const void *)key) - 1;
- }
- 
--- (void)didUpdateReactSubviews
++}
++
 +static void ArdiaPresentationStore(NSMapTable *table, id key, NSUInteger index)
- {
--  if (_removeClippedSubviews) {
--    [self updateClippedSubviews];
--  } else {
--    [super didUpdateReactSubviews];
--  }
++{
 +  NSMapInsert(table, (__bridge const void *)key, (const void *)(uintptr_t)(index + 1));
- }
- 
--- (void)updateClippedSubviews
++}
++
 +static BOOL ArdiaPresentationReserve(void **buffer, NSUInteger *capacity, NSUInteger count, size_t size)
- {
--  // Find a suitable view to use for clipping
--  RCTPlatformView *clipView = [self react_findClipView]; // [macOS]
--  if (clipView) {
--    [self react_updateClippedSubviewsWithClipRect:clipView.bounds relativeToView:clipView];
++{
 +  if (count < *capacity) {
 +    return YES;
 +  }
@@ -5082,30 +4919,63 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  void *next = realloc(*buffer, grown * size);
 +  if (next == NULL) {
 +    return NO;
-   }
++  }
 +  *buffer = next;
 +  *capacity = grown;
 +  return YES;
- }
- 
--- (void)layoutSubviews
++}
++
++static NSPointerArray *ArdiaPresentationCurrentResponders(void)
++{
++  NSPointerArray *responders = [NSPointerArray weakObjectsPointerArray];
++  for (NSWindow *window in NSApp.windows) {
++    id responder = window.firstResponder;
++    if ([responder isKindOfClass:[NSText class]] && [[(NSText *)responder delegate] isKindOfClass:[NSView class]]) {
++      responder = [(NSText *)responder delegate];
++    }
++    [responders addPointer:(__bridge void *)window];
++    [responders addPointer:(__bridge void *)responder];
++  }
++  return responders;
++}
++
++static NSUInteger ArdiaPresentationHeldCount(NSPointerArray *pointers)
++{
++  NSUInteger held = 0;
++  for (NSUInteger index = 0; index < pointers.count; index++) {
++    held += [pointers pointerAtIndex:index] != NULL;
++  }
++  return held;
++}
++
++static BOOL ArdiaPresentationRespondersMoved(void)
++{
++  NSPointerArray *current = ArdiaPresentationCurrentResponders();
++  if (current.count != ArdiaPresentationResponders.count ||
++      ArdiaPresentationHeldCount(ArdiaPresentationResponders) != ArdiaPresentationRespondersHeld) {
++    return YES;
++  }
++  for (NSUInteger index = 0; index < current.count; index++) {
++    if ([current pointerAtIndex:index] != [ArdiaPresentationResponders pointerAtIndex:index]) {
++      return YES;
++    }
++  }
++  return NO;
++}
++
 +static void ArdiaPresentationEvaluate(void)
- {
--  // TODO (#5906496): this a nasty performance drain, but necessary
--  // to prevent gaps appearing when the loading spinner disappears.
--  // We might be able to fix this another way by triggering a call
--  // to updateClippedSubviews manually after loading
--
--  [super layoutSubviews];
--
--  if (_removeClippedSubviews) {
--    [self updateClippedSubviews];
++{
 +  if (ArdiaPresentationEvaluating) {
 +    ArdiaPresentationStale = YES;
 +    return;
 +  }
 +  ArdiaPresentationEvaluating = YES;
++  ArdiaPresentationUnsettled = NO;
++  ArdiaPresentationGateTransformed = NO;
++  BOOL completed = NO;
 +  @try {
++    ArdiaPresentationResponders = ArdiaPresentationCurrentResponders();
++    ArdiaPresentationRespondersHeld = ArdiaPresentationHeldCount(ArdiaPresentationResponders);
 +    ArdiaPresentationFinishResets();
 +    for (NSInteger pass = 0; pass < 3; pass++) {
 +      ArdiaPresentationStale = NO;
@@ -5115,45 +4985,33 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      }
 +    }
 +    ArdiaPresentationFreezePost();
++    completed = YES;
 +  } @finally {
 +    ArdiaPresentationEvaluating = NO;
-   }
- }
++    if (!completed || ArdiaPresentationStale) {
++      ArdiaPresentationUnsettled = YES;
++    }
++  }
++}
 +#endif // macOS]
- 
--// [macOS
--- (BOOL)becomeFirstResponder
++
 +#if TARGET_OS_OSX
 +static BOOL ArdiaUsesAutoLayout(NSView *view)
- {
--  if (![super becomeFirstResponder]) {
--    return NO;
++{
 +  Class translated = NSClassFromString(@"NSAutoresizingMaskLayoutConstraint");
 +  for (NSLayoutConstraint *constraint in view.constraints) {
 +    if (![constraint isKindOfClass:translated]) {
 +      return YES;
 +    }
-   }
--
--  // If we've gained focus, notify listeners
--  [_eventDispatcher sendEvent:[RCTFocusChangeEvent focusEventWithReactTag:self.reactTag]];
--
--  return YES;
++  }
 +  return NO;
- }
- 
--- (BOOL)resignFirstResponder
++}
++
 +static BOOL ArdiaChildNeedsNativeLayout(NSView *child)
- {
--  if (![super resignFirstResponder]) {
++{
 +  if (child.reactTag != nil) {
-     return NO;
-   }
--
--  // If we've lost focus, notify listeners
--  [_eventDispatcher sendEvent:[RCTFocusChangeEvent blurEventWithReactTag:self.reactTag]];
--
--  return YES;
++    return NO;
++  }
 +  if (child.autoresizingMask != NSViewNotSizable) {
 +    return YES;
 +  }
@@ -5169,17 +5027,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    }
 +  }
 +  return NO;
- }
- 
--#if !TARGET_OS_OSX // [macOS]
--- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
++}
++
 +static NSSet<Class> *ArdiaRNFramedClasses(void)
- {
--  [super traitCollectionDidChange:previousTraitCollection];
--
--  if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
--    [self.layer setNeedsDisplay];
--  }
++{
 +  static NSSet<Class> *classes;
 +  static dispatch_once_t once;
 +  dispatch_once(&once, ^{
@@ -5202,15 +5053,9 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    classes = found;
 +  });
 +  return classes;
- }
--#endif // [macOS]
--
--#pragma mark - Borders
++}
 +#endif
- 
--- (RCTUIColor *)backgroundColor // [macOS] RCTUIColor
--{
--  return _backgroundColor;
++
 +@implementation RCTView {
 +  RCTUIColor *_backgroundColor; // [macOS]
 +  id<RCTEventDispatcherProtocol> _eventDispatcher; // [macOS]
@@ -5232,29 +5077,20 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  BOOL _intendedClipsToBounds;
 +  BOOL _displayingLayer;
 +#endif
- }
- 
--- (void)setBackgroundColor:(RCTUIColor *)backgroundColor // macOS RCTUIColor
++}
++
 +// [macOS
 +- (instancetype)initWithEventDispatcher:(id<RCTEventDispatcherProtocol>)eventDispatcher
- {
--  if ([_backgroundColor isEqual:backgroundColor]) {
--    return;
++{
 +  if ((self = [self initWithFrame:CGRectZero])) {
 +    _eventDispatcher = eventDispatcher;
-   }
--
--  _backgroundColor = backgroundColor;
--  [self.layer setNeedsDisplay];
++  }
 +  return self;
- }
++}
 +// macOS]
- 
--static CGFloat RCTDefaultIfNegativeTo(CGFloat defaultValue, CGFloat x)
++
 +- (instancetype)initWithFrame:(CGRect)frame
- {
--  return x >= 0 ? x : defaultValue;
--};
++{
 +  if ((self = [super initWithFrame:frame])) {
 +    _borderWidth = -1;
 +    _borderTopWidth = -1;
@@ -5284,38 +5120,22 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    _mouseDownCanMoveWindow = YES;
 +    self.postsFrameChangedNotifications = NO;
 +#endif // macOS]
- 
--- (UIEdgeInsets)bordersAsInsets
--{
--  const CGFloat borderWidth = MAX(0, _borderWidth);
--  const BOOL isRTL = _reactLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
++
 +    _backgroundColor = super.backgroundColor;
 +  }
- 
--  if ([[RCTI18nUtil sharedInstance] doLeftAndRightSwapInRTL]) {
--    const CGFloat borderStartWidth = RCTDefaultIfNegativeTo(_borderLeftWidth, _borderStartWidth);
--    const CGFloat borderEndWidth = RCTDefaultIfNegativeTo(_borderRightWidth, _borderEndWidth);
++
 +  return self;
 +}
- 
--    const CGFloat directionAwareBorderLeftWidth = isRTL ? borderEndWidth : borderStartWidth;
--    const CGFloat directionAwareBorderRightWidth = isRTL ? borderStartWidth : borderEndWidth;
++
 +RCT_NOT_IMPLEMENTED(-(instancetype)initWithCoder : unused)
- 
--    return (UIEdgeInsets){
--        RCTDefaultIfNegativeTo(borderWidth, _borderTopWidth),
--        RCTDefaultIfNegativeTo(borderWidth, directionAwareBorderLeftWidth),
--        RCTDefaultIfNegativeTo(borderWidth, _borderBottomWidth),
--        RCTDefaultIfNegativeTo(borderWidth, directionAwareBorderRightWidth),
--    };
++
 +- (void)setReactLayoutDirection:(UIUserInterfaceLayoutDirection)layoutDirection
 +{
 +  if (_reactLayoutDirection != layoutDirection) {
 +    _reactLayoutDirection = layoutDirection;
 +    [self.layer setNeedsDisplay];
-   }
- 
--  const CGFloat directionAwareBorderLeftWidth = isRTL ? _borderEndWidth : _borderStartWidth;
++  }
++
 +#if !TARGET_OS_OSX // [macOS]
 +  if ([self respondsToSelector:@selector(setSemanticContentAttribute:)]) {
 +#pragma clang diagnostic push // [macOS]
@@ -6219,14 +6039,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
 +
 +  const CGFloat directionAwareBorderLeftWidth = isRTL ? _borderEndWidth : _borderStartWidth;
-   const CGFloat directionAwareBorderRightWidth = isRTL ? _borderStartWidth : _borderEndWidth;
- 
--  return (UIEdgeInsets){
--      RCTDefaultIfNegativeTo(borderWidth, _borderTopWidth),
--      RCTDefaultIfNegativeTo(borderWidth, RCTDefaultIfNegativeTo(_borderLeftWidth, directionAwareBorderLeftWidth)),
--      RCTDefaultIfNegativeTo(borderWidth, _borderBottomWidth),
--      RCTDefaultIfNegativeTo(borderWidth, RCTDefaultIfNegativeTo(_borderRightWidth, directionAwareBorderRightWidth)),
--  };
++  const CGFloat directionAwareBorderRightWidth = isRTL ? _borderStartWidth : _borderEndWidth;
++
 +  return (UIEdgeInsets){
 +      RCTDefaultIfNegativeTo(borderWidth, _borderTopWidth),
 +      RCTDefaultIfNegativeTo(borderWidth, RCTDefaultIfNegativeTo(_borderLeftWidth, directionAwareBorderLeftWidth)),
@@ -6715,14 +6529,26 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +#if TARGET_OS_OSX  // [macOS
 +
 +#pragma mark Focus ring
-+
+ 
+-- (NSString *)description
 +- (CGRect)focusRingMaskBounds
-+{
+ {
+-  return [[super description] stringByAppendingFormat:@" reactTag: %@; frame = %@; layer = %@",
+-                                                      self.reactTag,
+-                                                      NSStringFromCGRect(self.frame),
+-                                                      self.layer];
 +  return self.bounds;
-+}
-+
+ }
+ 
+-#if TARGET_OS_OSX // [macOS
+-- (void)setShadowColor:(CGColorRef)shadowColor
 +- (void)drawFocusRingMask
-+{
+ {
+-    if (_shadowColor != shadowColor)
+-    {
+-        _shadowColor = shadowColor;
+-        [self didUpdateShadow];
+-    }
 +  if ([self enableFocusRing]) {
 +    CGContextRef context = NSGraphicsContext.currentContext.CGContext;
 +    RCTCornerInsets cornerInsets = RCTGetCornerInsets(self.cornerRadii, NSEdgeInsetsZero);
@@ -6732,66 +6558,125 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    CGContextFillPath(context);
 +    CGPathRelease(path);
 +  }
-+}
-+
+ }
+ 
+-- (void)setShadowOffset:(CGSize)shadowOffset
 +#pragma mark - macOS Event Handler
 +
 +- (void)resetCursorRects
-+{
+ {
+-    if (!CGSizeEqualToSize(_shadowOffset, shadowOffset))
+-    {
+-        _shadowOffset = shadowOffset;
+-        [self didUpdateShadow];
+-    }
 +  [self discardCursorRects];
 +  if ([self cursor] != RCTCursorAuto)
 +  {
 +    NSCursor *cursor = NSCursorFromRCTCursor(self.cursor);
 +    [self addCursorRect:self.bounds cursor:cursor];
 +  }
-+}
-+
+ }
+ 
+-- (void)setShadowOpacity:(CGFloat)shadowOpacity
 +- (BOOL)needsPanelToBecomeKey
-+{
+ {
+-    if (_shadowOpacity != shadowOpacity)
+-    {
+-        _shadowOpacity = shadowOpacity;
+-        [self didUpdateShadow];
+-    }
 +	// We need to override this so that mouse clicks don't move keyboard focus on focusable views by default. 
 +	return false;
-+}
-+
+ }
+ 
+-- (void)setShadowRadius:(CGFloat)shadowRadius
 +- (BOOL)acceptsFirstResponder
-+{
+ {
+-    if (_shadowRadius != shadowRadius)
+-    {
+-        _shadowRadius = shadowRadius;
+-        [self didUpdateShadow];
+-    }
 +	return [self focusable] || [super acceptsFirstResponder];
  }
  
--- (RCTCornerRadii)cornerRadii
+--(void)didUpdateShadow
 +// [Ardia: AppKit asks for tracking areas only when a view's geometry changes, so handlers set on a view already
 +// laid out (a peek panel getting onMouseLeave as it comes out) had none, and its pointer never left. Ardia]
 +- (void)setOnMouseEnter:(RCTDirectEventBlock)onMouseEnter
  {
--  const BOOL isRTL = _reactLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
--  const CGFloat radius = MAX(0, _borderRadius);
+-    NSShadow *shadow = [NSShadow new];
+-    NSColor *baseShadowColor = nil;
+-    if (_shadowColor != NULL) {
+-      baseShadowColor = [NSColor colorWithCGColor:_shadowColor];
+-    }
+-    shadow.shadowColor = [baseShadowColor colorWithAlphaComponent:[self shadowOpacity]];
+-    shadow.shadowOffset = [self shadowOffset];
+-    shadow.shadowBlurRadius = [self shadowRadius];
+-    [self setShadow:shadow];
 +  _onMouseEnter = [onMouseEnter copy];
 +  [self updateTrackingAreas];
-+}
+ }
  
--  CGFloat topLeftRadius;
--  CGFloat topRightRadius;
--  CGFloat bottomLeftRadius;
--  CGFloat bottomRightRadius;
+-- (void)viewDidMoveToWindow
 +- (void)setOnMouseLeave:(RCTDirectEventBlock)onMouseLeave
-+{
+ {
+-  // Subscribe to view bounds changed notification so that the view can be notified when a
+-  // scroll event occurs either due to trackpad/gesture based scrolling or a scrollwheel event
+-  // both of which would not cause the mouseExited to be invoked.
+-
+-  if ([self window] == nil) {
+-    [[NSNotificationCenter defaultCenter] removeObserver:self
+-                                                    name:NSViewBoundsDidChangeNotification
+-                                                  object:nil];
+-  }
+-  else if ([[self enclosingScrollView] contentView] != nil) {
+-    [[NSNotificationCenter defaultCenter] addObserver:self
+-                                             selector:@selector(viewBoundsChanged:)
+-                                                 name:NSViewBoundsDidChangeNotification
+-                                               object:[[self enclosingScrollView] contentView]];
+-  }
+-
+-  [self reactViewDidMoveToWindow]; // [macOS] Github#1412
+-
+-  [super viewDidMoveToWindow];
 +  _onMouseLeave = [onMouseLeave copy];
 +  [self updateTrackingAreas];
-+}
+ }
  
--  const CGFloat logicalTopStartRadius = RCTDefaultIfNegativeTo(_borderStartStartRadius, _borderTopStartRadius);
--  const CGFloat logicalTopEndRadius = RCTDefaultIfNegativeTo(_borderStartEndRadius, _borderTopEndRadius);
--  const CGFloat logicalBottomStartRadius = RCTDefaultIfNegativeTo(_borderEndStartRadius, _borderBottomStartRadius);
--  const CGFloat logicalBottomEndRadius = RCTDefaultIfNegativeTo(_borderEndEndRadius, _borderBottomEndRadius);
+-- (void)viewBoundsChanged:(NSNotification*)__unused inNotif
 +- (void)updateTrackingAreas
-+{
+ {
+-  // When an enclosing scrollview is scrolled using the scrollWheel or trackpad,
+-  // the mouseExited: event does not get called on the view where mouseEntered: was previously called.
+-  // This creates an unnatural pairing of mouse enter and exit events and can cause problems.
+-  // We therefore explicitly check for this here and handle them by calling the appropriate callbacks.
+-
+-  if (!_hasMouseOver && self.onMouseEnter)
+-  {
+-    NSPoint locationInWindow = [[self window] mouseLocationOutsideOfEventStream];
+-    NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
+-
+-    if (NSPointInRect(locationInView, [self bounds]))
+-    {
+-      _hasMouseOver = YES;
+-
+-      [self sendMouseEventWithBlock:self.onMouseEnter
+-                       locationInfo:[self locationInfoFromDraggingLocation:locationInWindow]
+-                      modifierFlags:0
+-                     additionalData:nil];
+-    }
+-  }
+-  else if (_hasMouseOver && self.onMouseLeave)
+-  {
+-    NSPoint locationInWindow = [[self window] mouseLocationOutsideOfEventStream];
+-    NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
 +  BOOL hasMouseHoverEvent = self.onMouseEnter || self.onMouseLeave;
 +  BOOL wouldRecreateIdenticalTrackingArea = hasMouseHoverEvent && _trackingArea && NSEqualRects(self.bounds, [_trackingArea rect]);
  
--  if ([[RCTI18nUtil sharedInstance] doLeftAndRightSwapInRTL]) {
--    const CGFloat topStartRadius = RCTDefaultIfNegativeTo(_borderTopLeftRadius, logicalTopStartRadius);
--    const CGFloat topEndRadius = RCTDefaultIfNegativeTo(_borderTopRightRadius, logicalTopEndRadius);
--    const CGFloat bottomStartRadius = RCTDefaultIfNegativeTo(_borderBottomLeftRadius, logicalBottomStartRadius);
--    const CGFloat bottomEndRadius = RCTDefaultIfNegativeTo(_borderBottomRightRadius, logicalBottomEndRadius);
+-    if (!NSPointInRect(locationInView, [self bounds]))
+-    {
 +  if (!wouldRecreateIdenticalTrackingArea) {
 +    if (_trackingArea) {
 +      [self removeTrackingArea:_trackingArea];
@@ -6801,68 +6686,84 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      _trackingArea = nil;
 +      // [Ardia: and what it knew: a view that is under the pointer when it loses its area never hears it leave, and
 +      // its next scroll (viewBoundsChanged:) would send a leave for it. Ardia]
-+      _hasMouseOver = NO;
-+    }
+       _hasMouseOver = NO;
+-
+-      [self sendMouseEventWithBlock:self.onMouseLeave
+-                       locationInfo:[self locationInfoFromDraggingLocation:locationInWindow]
+-                      modifierFlags:0
+-                     additionalData:nil];
+     }
+-  }
+-}
+-#endif // macOS]
+-
+-#pragma mark - Statics for dealing with layoutGuides
+-
+-+ (void)autoAdjustInsetsForView:(RCTUIView<RCTAutoInsetsProtocol> *)parentView // [macOS]
+-                 withScrollView:(RCTUIScrollView *)scrollView // [macOS]
+-                   updateOffset:(BOOL)updateOffset
+-{
+-  UIEdgeInsets baseInset = parentView.contentInset;
+-  CGFloat previousInsetTop = scrollView.contentInset.top;
+-  CGPoint contentOffset = scrollView.contentOffset;
+-
+-#if !TARGET_OS_OSX // [macOS]
+-  if (parentView.automaticallyAdjustContentInsets) {
+-    UIEdgeInsets autoInset = RCTContentInsets(parentView);
+-    baseInset.top += autoInset.top;
+-    baseInset.bottom += autoInset.bottom;
+-    baseInset.left += autoInset.left;
+-    baseInset.right += autoInset.right;
+-  }
+-#endif // [macOS]
+-  scrollView.contentInset = baseInset;
+-  scrollView.scrollIndicatorInsets = baseInset;
  
--    const CGFloat directionAwareTopLeftRadius = isRTL ? topEndRadius : topStartRadius;
--    const CGFloat directionAwareTopRightRadius = isRTL ? topStartRadius : topEndRadius;
--    const CGFloat directionAwareBottomLeftRadius = isRTL ? bottomEndRadius : bottomStartRadius;
--    const CGFloat directionAwareBottomRightRadius = isRTL ? bottomStartRadius : bottomEndRadius;
+-  if (updateOffset) {
+-    // If we're adjusting the top inset, then let's also adjust the contentOffset so that the view
+-    // elements above the top guide do not cover the content.
+-    // This is generally only needed when your views are initially laid out, for
+-    // manual changes to contentOffset, you can optionally disable this step
+-    CGFloat currentInsetTop = scrollView.contentInset.top;
+-    if (currentInsetTop != previousInsetTop) {
+-      contentOffset.y -= (currentInsetTop - previousInsetTop);
+-      scrollView.contentOffset = contentOffset;
 +    if (hasMouseHoverEvent) {
 +      _trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
 +                                                   options:NSTrackingActiveAlways|NSTrackingMouseEnteredAndExited
 +                                                     owner:self
 +                                                  userInfo:nil];
 +      [self addTrackingArea:_trackingArea];
-+    }
-+  }
+     }
+   }
+-}
+-
+-#pragma mark - View Unmounting
  
--    topLeftRadius = RCTDefaultIfNegativeTo(radius, directionAwareTopLeftRadius);
--    topRightRadius = RCTDefaultIfNegativeTo(radius, directionAwareTopRightRadius);
--    bottomLeftRadius = RCTDefaultIfNegativeTo(radius, directionAwareBottomLeftRadius);
--    bottomRightRadius = RCTDefaultIfNegativeTo(radius, directionAwareBottomRightRadius);
+-- (void)react_remountAllSubviews
+-{
+-  if (_removeClippedSubviews) {
+-    for (RCTUIView *view in self.reactSubviews) { // [macOS]
+-      if (view.superview != self) {
+-        [self addSubview:view];
+-        [view react_remountAllSubviews];
+-      }
 +  // [Ardia: hover follows layout: the views the check looks at. Ardia]
 +  if (hasMouseHoverEvent) {
 +    if (ArdiaHoverViews == nil) {
 +      ArdiaHoverViews = [NSHashTable weakObjectsHashTable];
-+    }
+     }
 +    [ArdiaHoverViews addObject:self];
    } else {
--    const CGFloat directionAwareTopLeftRadius = isRTL ? logicalTopEndRadius : logicalTopStartRadius;
--    const CGFloat directionAwareTopRightRadius = isRTL ? logicalTopStartRadius : logicalTopEndRadius;
--    const CGFloat directionAwareBottomLeftRadius = isRTL ? logicalBottomEndRadius : logicalBottomStartRadius;
--    const CGFloat directionAwareBottomRightRadius = isRTL ? logicalBottomStartRadius : logicalBottomEndRadius;
--
--    topLeftRadius =
--        RCTDefaultIfNegativeTo(radius, RCTDefaultIfNegativeTo(_borderTopLeftRadius, directionAwareTopLeftRadius));
--    topRightRadius =
--        RCTDefaultIfNegativeTo(radius, RCTDefaultIfNegativeTo(_borderTopRightRadius, directionAwareTopRightRadius));
--    bottomLeftRadius =
--        RCTDefaultIfNegativeTo(radius, RCTDefaultIfNegativeTo(_borderBottomLeftRadius, directionAwareBottomLeftRadius));
--    bottomRightRadius = RCTDefaultIfNegativeTo(
--        radius, RCTDefaultIfNegativeTo(_borderBottomRightRadius, directionAwareBottomRightRadius));
+-    // If _removeClippedSubviews is false, we must already be showing all subviews
+-    [super react_remountAllSubviews];
 +    [ArdiaHoverViews removeObject:self];
    }
- 
--  // Get scale factors required to prevent radii from overlapping
--  const CGSize size = self.bounds.size;
--  const CGFloat topScaleFactor = RCTZeroIfNaN(MIN(1, size.width / (topLeftRadius + topRightRadius)));
--  const CGFloat bottomScaleFactor = RCTZeroIfNaN(MIN(1, size.width / (bottomLeftRadius + bottomRightRadius)));
--  const CGFloat rightScaleFactor = RCTZeroIfNaN(MIN(1, size.height / (topRightRadius + bottomRightRadius)));
--  const CGFloat leftScaleFactor = RCTZeroIfNaN(MIN(1, size.height / (topLeftRadius + bottomLeftRadius)));
++
 +  [super updateTrackingAreas];
-+}
+ }
  
--  // Return scaled radii
--  return (RCTCornerRadii){
--      topLeftRadius * MIN(topScaleFactor, leftScaleFactor),
--      topLeftRadius * MIN(topScaleFactor, leftScaleFactor),
--      topRightRadius * MIN(topScaleFactor, rightScaleFactor),
--      topRightRadius * MIN(topScaleFactor, rightScaleFactor),
--      bottomLeftRadius * MIN(bottomScaleFactor, leftScaleFactor),
--      bottomLeftRadius * MIN(bottomScaleFactor, leftScaleFactor),
--      bottomRightRadius * MIN(bottomScaleFactor, rightScaleFactor),
--      bottomRightRadius * MIN(bottomScaleFactor, rightScaleFactor),
+-- (void)react_updateClippedSubviewsWithClipRect:(CGRect)clipRect relativeToView:(RCTPlatformView *)clipView // [macOS]
 +// [Ardia: hover follows layout. The check: the pointer (or the dev override) against the visible frame of each view
 +// with hover handlers, in the window frontmost under the pointer, as AppKit's tracking areas would see it once the
 +// pointer moved. Frames, not layer transforms: hover follows where a view is laid out, where its clicks land, while an
@@ -6870,14 +6771,28 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +// first, so a row taking another's place under the pointer isn't left by a late leave. Enters wait while a mouse
 +// button is down, as AppKit's do. Ardia]
 ++ (void)ardia_markHoverDirty
-+{
+ {
+-  // TODO (#5906496): for scrollviews (the primary use-case) we could
+-  // optimize this by only doing a range check along the scroll axis,
+-  // instead of comparing the whole frame
+-
+-  if (!_removeClippedSubviews) {
+-    // Use default behavior if unmounting is disabled
+-    return [super react_updateClippedSubviewsWithClipRect:clipRect relativeToView:clipView];
+-  }
+-
+-  if (self.reactSubviews.count == 0) {
+-    // Do nothing if we have no subviews
 +  if (ArdiaPresentationPagesMoving()) {
 +    ArdiaHoverAfterPages = YES;
-+    return;
-+  }
+     return;
+   }
+-
+-  if (CGSizeEqualToSize(self.bounds.size, CGSizeZero)) {
+-    // Do nothing if layout hasn't happened yet
 +  if (ArdiaHoverSuspended || ArdiaHoverDirty || ArdiaPresentationDrainSlicing || ArdiaHoverViews.count == 0) {
-+    return;
-+  }
+     return;
+   }
 +  ArdiaHoverDirty = YES;
 +  if (!ArdiaHoverInstalled) {
 +    ArdiaHoverInstalled = YES;
@@ -6894,7 +6809,17 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    [RCTView ardia_checkHover];
 +  });
 +}
-+
+ 
+-  // Convert clipping rect to local coordinates
+-  clipRect = [clipView convertRect:clipRect toView:self];
+-  clipRect = CGRectIntersection(clipRect, self.bounds);
+-  clipView = self;
+-
+-  // Mount / unmount views
+-  for (RCTUIView *view in self.reactSubviews) { // [macOS]
+-    if (!CGSizeEqualToSize(CGRectIntersection(clipRect, view.frame).size, CGSizeZero)) {
+-      // View is at least partially visible, so remount it if unmounted
+-      [self addSubview:view];
 ++ (NSDictionary<NSString *, NSNumber *> *)ardia_foldReceipt
 +{
 +  return @{
@@ -6904,59 +6829,68 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    @"unfolds" : @(ArdiaPresentationUnfolds),
 +    @"detached" : @(ArdiaPresentationFoldDetached),
 +    @"attached" : @(ArdiaPresentationFoldAttached),
-   };
- }
++  };
++}
  
--#if !TARGET_OS_OSX // [macOS]
--- (RCTBorderColors)borderColorsWithTraitCollection:(UITraitCollection *)traitCollection
--#else // [macOS
--- (RCTBorderColors)borderColors
--#endif // macOS]
+-      // Then test its subviews
+-      if (CGRectContainsRect(clipRect, view.frame)) {
+-        // View is fully visible, so remount all subviews
+-        [view react_remountAllSubviews];
+-      } else {
+-        // View is partially visible, so update clipped subviews
+-        [view react_updateClippedSubviewsWithClipRect:clipRect relativeToView:clipView];
+-      }
 ++ (BOOL)ardia_commitPresentation
- {
--  const BOOL isRTL = _reactLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
++{
 +  return ArdiaPresentationCommitBarrier();
 +}
  
--  RCTUIColor *directionAwareBorderLeftColor = nil;
--  RCTUIColor *directionAwareBorderRightColor = nil;
+-    } else if (view.superview) {
+-      // View is completely outside the clipRect, so unmount it
+-      [view removeFromSuperview];
+-    }
+-  }
 +#if DEBUG
 ++ (void)ardia_setPointerOverride:(NSValue *)screenPoint
 +{
 +  ArdiaPointerOverride = screenPoint;
 +  [self ardia_markHoverDirty];
-+}
+ }
  
--  if ([[RCTI18nUtil sharedInstance] doLeftAndRightSwapInRTL]) {
--    RCTUIColor *borderStartColor = _borderStartColor ?: _borderLeftColor; // macOS RCTUIColor
--    RCTUIColor *borderEndColor = _borderEndColor ?: _borderRightColor; // macOS RCTUIColor
+-- (void)setRemoveClippedSubviews:(BOOL)removeClippedSubviews
 ++ (void)ardia_setButtonsOverride:(NSNumber *)pressed
-+{
+ {
+-  if (!removeClippedSubviews && _removeClippedSubviews) {
+-    [self react_remountAllSubviews];
+-  }
+-  _removeClippedSubviews = removeClippedSubviews;
 +  ArdiaButtonsOverride = pressed;
 +  [self ardia_markHoverDirty];
-+}
+ }
  
--    directionAwareBorderLeftColor = isRTL ? borderEndColor : borderStartColor;
--    directionAwareBorderRightColor = isRTL ? borderStartColor : borderEndColor;
--  } else {
--    directionAwareBorderLeftColor = (isRTL ? _borderEndColor : _borderStartColor) ?: _borderLeftColor;
--    directionAwareBorderRightColor = (isRTL ? _borderStartColor : _borderEndColor) ?: _borderRightColor;
+-- (void)didUpdateReactSubviews
 ++ (NSDictionary *)ardia_hoverStats:(NSNumber *)reset
-+{
+ {
+-  if (_removeClippedSubviews) {
+-    [self updateClippedSubviews];
+-  } else {
+-    [super didUpdateReactSubviews];
 +  NSDictionary *stats = @{@"passes": @(ArdiaHoverPasses), @"log": ArdiaHoverLog ?: @[], @"registered": @(ArdiaHoverViews.count)};
 +  if (reset.boolValue) {
 +    ArdiaHoverPasses = 0;
 +    ArdiaHoverLog = nil;
    }
 +  return stats;
-+}
+ }
 +#endif
  
--  RCTUIColor *borderColor = _borderColor;
--  RCTUIColor *borderTopColor = _borderTopColor;
--  RCTUIColor *borderBottomColor = _borderBottomColor;
+-- (void)updateClippedSubviews
 ++ (NSWindow *)ardia_windowUnderPointer:(NSPoint)screen
-+{
+ {
+-  // Find a suitable view to use for clipping
+-  RCTPlatformView *clipView = [self react_findClipView]; // [macOS]
+-  if (clipView) {
+-    [self react_updateClippedSubviewsWithClipRect:clipView.bounds relativeToView:clipView];
 +#if DEBUG
 +  if (ArdiaPointerOverride != nil) {
 +    for (NSWindow *window in NSApp.orderedWindows) {
@@ -6965,16 +6899,23 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      }
 +    }
 +    return nil;
-+  }
+   }
 +#endif
 +  return [NSApp windowWithWindowNumber:ArdiaPointerWindowNumberAt(screen)];
-+}
+ }
  
--  if (_borderBlockColor) {
--    borderTopColor = _borderBlockColor;
--    borderBottomColor = _borderBlockColor;
+-- (void)layoutSubviews
 ++ (NSArray<RCTView *> *)ardia_byDepth:(NSArray<RCTView *> *)views deepestFirst:(BOOL)deepestFirst
-+{
+ {
+-  // TODO (#5906496): this a nasty performance drain, but necessary
+-  // to prevent gaps appearing when the loading spinner disappears.
+-  // We might be able to fix this another way by triggering a call
+-  // to updateClippedSubviews manually after loading
+-
+-  [super layoutSubviews];
+-
+-  if (_removeClippedSubviews) {
+-    [self updateClippedSubviews];
 +  NSMapTable<RCTView *, NSNumber *> *depths = [NSMapTable strongToStrongObjectsMapTable];
 +  for (RCTView *view in views) {
 +    NSInteger depth = 0;
@@ -6983,21 +6924,21 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    }
 +    [depths setObject:@(depth) forKey:view];
    }
--  if (_borderBlockEndColor) {
--    borderBottomColor = _borderBlockEndColor;
 +  return [views sortedArrayUsingComparator:^NSComparisonResult(RCTView *a, RCTView *b) {
 +    NSComparisonResult order = [[depths objectForKey:a] compare:[depths objectForKey:b]];
 +    return deepestFirst ? -order : order;
 +  }];
-+}
-+
+ }
+ 
+-// [macOS
+-- (BOOL)becomeFirstResponder
 ++ (void)ardia_checkHover
-+{
+ {
+-  if (![super becomeFirstResponder]) {
+-    return NO;
 +  if (ArdiaHoverSuspended) {
 +    return;
-   }
--  if (_borderBlockStartColor) {
--    borderTopColor = _borderBlockStartColor;
++  }
 +#if DEBUG
 +  ArdiaHoverPasses++;
 +#endif
@@ -7035,33 +6976,33 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    } else {
 +      [entering addObject:view];
 +    }
-   }
++  }
 +  ArdiaHoverHeld = held;
 +  for (RCTView *view in [self ardia_byDepth:leaving deepestFirst:YES]) {
 +    [view ardia_setMouseOver:NO atScreenPoint:screen];
 +  }
 +  for (RCTView *view in [self ardia_byDepth:entering deepestFirst:NO]) {
 +    [view ardia_setMouseOver:YES atScreenPoint:screen];
-+  }
-+}
+   }
+-
+-  // If we've gained focus, notify listeners
+-  [_eventDispatcher sendEvent:[RCTFocusChangeEvent focusEventWithReactTag:self.reactTag]];
+-
+-  return YES;
+ }
  
--#if !TARGET_OS_OSX // [macOS]
--  borderColor = [borderColor resolvedColorWithTraitCollection:self.traitCollection];
--  borderTopColor = [borderTopColor resolvedColorWithTraitCollection:self.traitCollection];
--  directionAwareBorderLeftColor = [directionAwareBorderLeftColor resolvedColorWithTraitCollection:self.traitCollection];
--  borderBottomColor = [borderBottomColor resolvedColorWithTraitCollection:self.traitCollection];
--  directionAwareBorderRightColor =
--      [directionAwareBorderRightColor resolvedColorWithTraitCollection:self.traitCollection];
--#endif // [macOS]
+-- (BOOL)resignFirstResponder
 +- (void)ardia_setMouseOver:(BOOL)over atScreenPoint:(NSPoint)screen
-+{
+ {
+-  if (![super resignFirstResponder]) {
+-    return NO;
 +  _hasMouseOver = over;
 +  if (_trackingArea) {
 +    [self removeTrackingArea:_trackingArea];
 +    NSTrackingAreaOptions options = NSTrackingActiveAlways | NSTrackingMouseEnteredAndExited | (over ? NSTrackingAssumeInside : 0);
 +    _trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds options:options owner:self userInfo:nil];
 +    [self addTrackingArea:_trackingArea];
-+  }
+   }
 +#if DEBUG
 +  if (ArdiaHoverLog == nil) {
 +    ArdiaHoverLog = [NSMutableArray new];
@@ -7075,12 +7016,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +                 additionalData:nil];
 +}
  
--  return (RCTBorderColors){
--      (borderTopColor ?: borderColor),
--      (directionAwareBorderLeftColor ?: borderColor),
--      (borderBottomColor ?: borderColor),
--      (directionAwareBorderRightColor ?: borderColor),
--  };
+-  // If we've lost focus, notify listeners
+-  [_eventDispatcher sendEvent:[RCTFocusChangeEvent blurEventWithReactTag:self.reactTag]];
+-
+-  return YES;
 +- (void)mouseEntered:(NSEvent *)event
 +{
 +  _hasMouseOver = YES;
@@ -7090,81 +7029,79 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +                 additionalData:nil];
  }
  
--- (void)reactSetFrame:(CGRect)frame
+-#if !TARGET_OS_OSX // [macOS]
+-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
 +- (void)mouseExited:(NSEvent *)event
  {
--  // If frame is zero, or below the threshold where the border radii can
--  // be rendered as a stretchable image, we'll need to re-render.
--  // TODO: detect up-front if re-rendering is necessary
--  CGSize oldSize = self.bounds.size;
--  [super reactSetFrame:frame];
--  if (!CGSizeEqualToSize(self.bounds.size, oldSize)) {
--    [self.layer setNeedsDisplay];
--  }
+-  [super traitCollectionDidChange:previousTraitCollection];
 +  _hasMouseOver = NO;
 +  [self sendMouseEventWithBlock:self.onMouseLeave
 +                   locationInfo:[self locationInfoFromEvent:event]
 +                  modifierFlags:event.modifierFlags
 +                 additionalData:nil];
- }
++}
  
--- (void)displayLayer:(CALayer *)layer
+-  if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+-    [self.layer setNeedsDisplay];
 +- (void)mouseUp:(NSEvent *)event
- {
--  if (CGSizeEqualToSize(layer.bounds.size, CGSizeZero)) {
--    return;
++{
 +  if (_onDoubleClick && event.clickCount == 2){
 +    _onDoubleClick(nil);
 +  } else {
 +    [super mouseUp:event];
    }
-+}
+ }
+-#endif // [macOS]
+-
+-#pragma mark - Borders
  
--  RCTUpdateShadowPathForView(self);
+-- (RCTUIColor *)backgroundColor // [macOS] RCTUIColor
 +- (BOOL)mouseDownCanMoveWindow
-+{
+ {
+-  return _backgroundColor;
 +	return _mouseDownCanMoveWindow;
-+}
+ }
  
--  RCTUpdateHoverStyleForView(self);
+-- (void)setBackgroundColor:(RCTUIColor *)backgroundColor // macOS RCTUIColor
 +- (void)setMouseDownCanMoveWindow:(BOOL)mouseDownCanMoveWindow
-+{
+ {
+-  if ([_backgroundColor isEqual:backgroundColor]) {
+-    return;
+-  }
+-
+-  _backgroundColor = backgroundColor;
+-  [self.layer setNeedsDisplay];
 +	_mouseDownCanMoveWindow = mouseDownCanMoveWindow;
-+}
+ }
  
--#if TARGET_OS_OSX // [macOS
--  // clipsToBounds is stubbed out on macOS because it's not part of NSView
--  layer.masksToBounds = self.clipsToBounds;
--#endif // macOS]
+-static CGFloat RCTDefaultIfNegativeTo(CGFloat defaultValue, CGFloat x)
 +- (BOOL)allowsVibrancy
-+{
+ {
+-  return x >= 0 ? x : defaultValue;
+-};
 +  return _allowsVibrancyInternal;
 +}
  
--  const RCTCornerRadii cornerRadii = [self cornerRadii];
--  const UIEdgeInsets borderInsets = [self bordersAsInsets];
--#if !TARGET_OS_OSX // [macOS]
--  const RCTBorderColors borderColors = [self borderColorsWithTraitCollection:self.traitCollection];
--#else // [macOS
--  const RCTBorderColors borderColors = [self borderColors];
--#endif // macOS]
--  BOOL useIOSBorderRendering = 
--    RCTCornerRadiiAreEqualAndSymmetrical(cornerRadii) &&
--    RCTBorderInsetsAreEqual(borderInsets) &&
--    RCTBorderColorsAreEqual(borderColors) &&
--    _borderStyle == RCTBorderStyleSolid &&
+-- (UIEdgeInsets)bordersAsInsets
 +- (NSDictionary*)locationInfoFromEvent:(NSEvent*)event
-+{
+ {
+-  const CGFloat borderWidth = MAX(0, _borderWidth);
+-  const BOOL isRTL = _reactLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
 +  NSPoint locationInWindow = event.locationInWindow;
 +  NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
-+
+ 
+-  if ([[RCTI18nUtil sharedInstance] doLeftAndRightSwapInRTL]) {
+-    const CGFloat borderStartWidth = RCTDefaultIfNegativeTo(_borderLeftWidth, _borderStartWidth);
+-    const CGFloat borderEndWidth = RCTDefaultIfNegativeTo(_borderRightWidth, _borderEndWidth);
 +  return @{@"screenX": @(locationInWindow.x),
 +           @"screenY": @(locationInWindow.y),
 +           @"clientX": @(locationInView.x),
 +           @"clientY": @(locationInView.y)
 +           };
 +}
-+
+ 
+-    const CGFloat directionAwareBorderLeftWidth = isRTL ? borderEndWidth : borderStartWidth;
+-    const CGFloat directionAwareBorderRightWidth = isRTL ? borderStartWidth : borderEndWidth;
 +- (void)sendMouseEventWithBlock:(RCTDirectEventBlock)block
 +                   locationInfo:(NSDictionary*)locationInfo
 +                  modifierFlags:(NSEventModifierFlags)modifierFlags
@@ -7189,33 +7126,41 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    body[@"metaKey"] = @YES;
 +  }
  
--    // iOS draws borders in front of the content whereas CSS draws them behind
--    // the content. For this reason, only use iOS border drawing when clipping
--    // or when the border is hidden.
+-    return (UIEdgeInsets){
+-        RCTDefaultIfNegativeTo(borderWidth, _borderTopWidth),
+-        RCTDefaultIfNegativeTo(borderWidth, directionAwareBorderLeftWidth),
+-        RCTDefaultIfNegativeTo(borderWidth, _borderBottomWidth),
+-        RCTDefaultIfNegativeTo(borderWidth, directionAwareBorderRightWidth),
+-    };
 +  if (locationInfo) {
 +    [body addEntriesFromDictionary:locationInfo];
-+  }
+   }
  
--    (borderInsets.top == 0 ||
--     (borderColors.top && CGColorGetAlpha(borderColors.top.CGColor) == 0) ||
--     self.clipsToBounds);
+-  const CGFloat directionAwareBorderLeftWidth = isRTL ? _borderEndWidth : _borderStartWidth;
+-  const CGFloat directionAwareBorderRightWidth = isRTL ? _borderStartWidth : _borderEndWidth;
 +  if (additionalData) {
 +    [body addEntriesFromDictionary:additionalData];
 +  }
  
--  // iOS clips to the outside of the border, but CSS clips to the inside. To
--  // solve this, we'll need to add a container view inside the main view to
--  // correctly clip the subviews.
+-  return (UIEdgeInsets){
+-      RCTDefaultIfNegativeTo(borderWidth, _borderTopWidth),
+-      RCTDefaultIfNegativeTo(borderWidth, RCTDefaultIfNegativeTo(_borderLeftWidth, directionAwareBorderLeftWidth)),
+-      RCTDefaultIfNegativeTo(borderWidth, _borderBottomWidth),
+-      RCTDefaultIfNegativeTo(borderWidth, RCTDefaultIfNegativeTo(_borderRightWidth, directionAwareBorderRightWidth)),
+-  };
 +  block(body);
-+}
+ }
  
--#if !TARGET_OS_OSX // [macOS]
--  RCTUIColor *backgroundColor = [_backgroundColor resolvedColorWithTraitCollection:self.traitCollection];
--#else // [macOS
--  RCTUIColor *backgroundColor = _backgroundColor;
--#endif // macOS]
+-- (RCTCornerRadii)cornerRadii
 +- (NSDictionary*)dataTransferInfoFromPasteboard:(NSPasteboard*)pasteboard
-+{
+ {
+-  const BOOL isRTL = _reactLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+-  const CGFloat radius = MAX(0, _borderRadius);
+-
+-  CGFloat topLeftRadius;
+-  CGFloat topRightRadius;
+-  CGFloat bottomLeftRadius;
+-  CGFloat bottomRightRadius;
 +  NSArray *fileNames = [pasteboard propertyListForType:NSFilenamesPboardType] ?: @[];
 +  NSMutableArray *files = [[NSMutableArray alloc] initWithCapacity:fileNames.count];
 +  NSMutableArray *items = [[NSMutableArray alloc] initWithCapacity:fileNames.count];
@@ -7237,6 +7182,276 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +        }
 +      }
  
+-  const CGFloat logicalTopStartRadius = RCTDefaultIfNegativeTo(_borderStartStartRadius, _borderTopStartRadius);
+-  const CGFloat logicalTopEndRadius = RCTDefaultIfNegativeTo(_borderStartEndRadius, _borderTopEndRadius);
+-  const CGFloat logicalBottomStartRadius = RCTDefaultIfNegativeTo(_borderEndStartRadius, _borderBottomStartRadius);
+-  const CGFloat logicalBottomEndRadius = RCTDefaultIfNegativeTo(_borderEndEndRadius, _borderBottomEndRadius);
++      NSNumber *fileSizeValue = nil;
++      NSError *fileSizeError = nil;
++      BOOL success = [fileURL getResourceValue:&fileSizeValue
++                                        forKey:NSURLFileSizeKey
++                                         error:&fileSizeError];
+ 
+-  if ([[RCTI18nUtil sharedInstance] doLeftAndRightSwapInRTL]) {
+-    const CGFloat topStartRadius = RCTDefaultIfNegativeTo(_borderTopLeftRadius, logicalTopStartRadius);
+-    const CGFloat topEndRadius = RCTDefaultIfNegativeTo(_borderTopRightRadius, logicalTopEndRadius);
+-    const CGFloat bottomStartRadius = RCTDefaultIfNegativeTo(_borderBottomLeftRadius, logicalBottomStartRadius);
+-    const CGFloat bottomEndRadius = RCTDefaultIfNegativeTo(_borderBottomRightRadius, logicalBottomEndRadius);
++      NSNumber *width = nil;
++      NSNumber *height = nil;
++      if ([MIMETypeString hasPrefix:@"image/"]) {
++        NSImage *image = [[NSImage alloc] initWithContentsOfURL:fileURL];
++        width = @(image.size.width);
++        height = @(image.size.height);
++      }
+ 
+-    const CGFloat directionAwareTopLeftRadius = isRTL ? topEndRadius : topStartRadius;
+-    const CGFloat directionAwareTopRightRadius = isRTL ? topStartRadius : topEndRadius;
+-    const CGFloat directionAwareBottomLeftRadius = isRTL ? bottomEndRadius : bottomStartRadius;
+-    const CGFloat directionAwareBottomRightRadius = isRTL ? bottomStartRadius : bottomEndRadius;
++      [files addObject:@{@"name": RCTNullIfNil(fileURL.lastPathComponent),
++                         @"type": RCTNullIfNil(MIMETypeString),
++                         @"uri": RCTNullIfNil(fileURL.path),
++                         @"size": success ? fileSizeValue : (id)kCFNull,
++                         @"width": RCTNullIfNil(width),
++                         @"height": RCTNullIfNil(height)
++                         }];
+ 
+-    topLeftRadius = RCTDefaultIfNegativeTo(radius, directionAwareTopLeftRadius);
+-    topRightRadius = RCTDefaultIfNegativeTo(radius, directionAwareTopRightRadius);
+-    bottomLeftRadius = RCTDefaultIfNegativeTo(radius, directionAwareBottomLeftRadius);
+-    bottomRightRadius = RCTDefaultIfNegativeTo(radius, directionAwareBottomRightRadius);
+-  } else {
+-    const CGFloat directionAwareTopLeftRadius = isRTL ? logicalTopEndRadius : logicalTopStartRadius;
+-    const CGFloat directionAwareTopRightRadius = isRTL ? logicalTopStartRadius : logicalTopEndRadius;
+-    const CGFloat directionAwareBottomLeftRadius = isRTL ? logicalBottomEndRadius : logicalBottomStartRadius;
+-    const CGFloat directionAwareBottomRightRadius = isRTL ? logicalBottomStartRadius : logicalBottomEndRadius;
++      [items addObject:@{@"kind": @"file",
++                         @"type": RCTNullIfNil(MIMETypeString),
++                         }];
+ 
+-    topLeftRadius =
+-        RCTDefaultIfNegativeTo(radius, RCTDefaultIfNegativeTo(_borderTopLeftRadius, directionAwareTopLeftRadius));
+-    topRightRadius =
+-        RCTDefaultIfNegativeTo(radius, RCTDefaultIfNegativeTo(_borderTopRightRadius, directionAwareTopRightRadius));
+-    bottomLeftRadius =
+-        RCTDefaultIfNegativeTo(radius, RCTDefaultIfNegativeTo(_borderBottomLeftRadius, directionAwareBottomLeftRadius));
+-    bottomRightRadius = RCTDefaultIfNegativeTo(
+-        radius, RCTDefaultIfNegativeTo(_borderBottomRightRadius, directionAwareBottomRightRadius));
++      [types addObject:RCTNullIfNil(MIMETypeString)];
++    }
+   }
+ 
+-  // Get scale factors required to prevent radii from overlapping
+-  const CGSize size = self.bounds.size;
+-  const CGFloat topScaleFactor = RCTZeroIfNaN(MIN(1, size.width / (topLeftRadius + topRightRadius)));
+-  const CGFloat bottomScaleFactor = RCTZeroIfNaN(MIN(1, size.width / (bottomLeftRadius + bottomRightRadius)));
+-  const CGFloat rightScaleFactor = RCTZeroIfNaN(MIN(1, size.height / (topRightRadius + bottomRightRadius)));
+-  const CGFloat leftScaleFactor = RCTZeroIfNaN(MIN(1, size.height / (topLeftRadius + bottomLeftRadius)));
+-
+-  // Return scaled radii
+-  return (RCTCornerRadii){
+-      topLeftRadius * MIN(topScaleFactor, leftScaleFactor),
+-      topLeftRadius * MIN(topScaleFactor, leftScaleFactor),
+-      topRightRadius * MIN(topScaleFactor, rightScaleFactor),
+-      topRightRadius * MIN(topScaleFactor, rightScaleFactor),
+-      bottomLeftRadius * MIN(bottomScaleFactor, leftScaleFactor),
+-      bottomLeftRadius * MIN(bottomScaleFactor, leftScaleFactor),
+-      bottomRightRadius * MIN(bottomScaleFactor, rightScaleFactor),
+-      bottomRightRadius * MIN(bottomScaleFactor, rightScaleFactor),
+-  };
+-}
+-
+-#if !TARGET_OS_OSX // [macOS]
+-- (RCTBorderColors)borderColorsWithTraitCollection:(UITraitCollection *)traitCollection
+-#else // [macOS
+-- (RCTBorderColors)borderColors
+-#endif // macOS]
+-{
+-  const BOOL isRTL = _reactLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+-
+-  RCTUIColor *directionAwareBorderLeftColor = nil;
+-  RCTUIColor *directionAwareBorderRightColor = nil;
+-
+-  if ([[RCTI18nUtil sharedInstance] doLeftAndRightSwapInRTL]) {
+-    RCTUIColor *borderStartColor = _borderStartColor ?: _borderLeftColor; // macOS RCTUIColor
+-    RCTUIColor *borderEndColor = _borderEndColor ?: _borderRightColor; // macOS RCTUIColor
++  NSPasteboardType imageType = [pasteboard availableTypeFromArray:@[NSPasteboardTypePNG, NSPasteboardTypeTIFF]];
++  if (imageType && fileNames.count == 0) {
++    NSString *MIMETypeString = imageType == NSPasteboardTypePNG ? @"image/png" : @"image/tiff";
++    NSData *imageData = [pasteboard dataForType:imageType];
++    NSImage *image = [[NSImage alloc] initWithData:imageData];
+ 
+-    directionAwareBorderLeftColor = isRTL ? borderEndColor : borderStartColor;
+-    directionAwareBorderRightColor = isRTL ? borderStartColor : borderEndColor;
+-  } else {
+-    directionAwareBorderLeftColor = (isRTL ? _borderEndColor : _borderStartColor) ?: _borderLeftColor;
+-    directionAwareBorderRightColor = (isRTL ? _borderStartColor : _borderEndColor) ?: _borderRightColor;
+-  }
++    [files addObject:@{@"type": RCTNullIfNil(MIMETypeString),
++                       @"uri": RCTDataURL(MIMETypeString, imageData).absoluteString,
++                       @"size": @(imageData.length),
++                       @"width": @(image.size.width),
++                       @"height": @(image.size.height),
++                      }];
+ 
+-  RCTUIColor *borderColor = _borderColor;
+-  RCTUIColor *borderTopColor = _borderTopColor;
+-  RCTUIColor *borderBottomColor = _borderBottomColor;
++    [items addObject:@{@"kind": @"image",
++                       @"type": RCTNullIfNil(MIMETypeString),
++                      }];
+ 
+-  if (_borderBlockColor) {
+-    borderTopColor = _borderBlockColor;
+-    borderBottomColor = _borderBlockColor;
+-  }
+-  if (_borderBlockEndColor) {
+-    borderBottomColor = _borderBlockEndColor;
+-  }
+-  if (_borderBlockStartColor) {
+-    borderTopColor = _borderBlockStartColor;
++    [types addObject:RCTNullIfNil(MIMETypeString)];
+   }
+ 
+-#if !TARGET_OS_OSX // [macOS]
+-  borderColor = [borderColor resolvedColorWithTraitCollection:self.traitCollection];
+-  borderTopColor = [borderTopColor resolvedColorWithTraitCollection:self.traitCollection];
+-  directionAwareBorderLeftColor = [directionAwareBorderLeftColor resolvedColorWithTraitCollection:self.traitCollection];
+-  borderBottomColor = [borderBottomColor resolvedColorWithTraitCollection:self.traitCollection];
+-  directionAwareBorderRightColor =
+-      [directionAwareBorderRightColor resolvedColorWithTraitCollection:self.traitCollection];
+-#endif // [macOS]
+-
+-  return (RCTBorderColors){
+-      (borderTopColor ?: borderColor),
+-      (directionAwareBorderLeftColor ?: borderColor),
+-      (borderBottomColor ?: borderColor),
+-      (directionAwareBorderRightColor ?: borderColor),
+-  };
++  return @{@"dataTransfer": @{@"files": files,
++                              @"items": items,
++                              @"types": types}};
+ }
+ 
+-- (void)reactSetFrame:(CGRect)frame
++- (NSDictionary*)locationInfoFromDraggingLocation:(NSPoint)locationInWindow
+ {
+-  // If frame is zero, or below the threshold where the border radii can
+-  // be rendered as a stretchable image, we'll need to re-render.
+-  // TODO: detect up-front if re-rendering is necessary
+-  CGSize oldSize = self.bounds.size;
+-  [super reactSetFrame:frame];
+-  if (!CGSizeEqualToSize(self.bounds.size, oldSize)) {
+-    [self.layer setNeedsDisplay];
+-  }
++  NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
++
++  return @{@"screenX": @(locationInWindow.x),
++           @"screenY": @(locationInWindow.y),
++           @"clientX": @(locationInView.x),
++           @"clientY": @(locationInView.y)
++           };
+ }
+ 
+-- (void)displayLayer:(CALayer *)layer
++- (NSDragOperation)draggingEntered:(id <NSDraggingInfo>)sender
+ {
+-  if (CGSizeEqualToSize(layer.bounds.size, CGSizeZero)) {
+-    return;
++  NSPasteboard *pboard = sender.draggingPasteboard;
++  NSDragOperation sourceDragMask = sender.draggingSourceOperationMask;
++
++  [self sendMouseEventWithBlock:self.onDragEnter
++                   locationInfo:[self locationInfoFromDraggingLocation:sender.draggingLocation]
++                  modifierFlags:0
++                 additionalData:[self dataTransferInfoFromPasteboard:pboard]];
++
++  if ([pboard availableTypeFromArray:self.registeredDraggedTypes]) {
++    if (sourceDragMask & NSDragOperationLink) {
++      return NSDragOperationLink;
++    } else if (sourceDragMask & NSDragOperationCopy) {
++      return NSDragOperationCopy;
++    }
+   }
++  return NSDragOperationNone;
++}
+ 
+-  RCTUpdateShadowPathForView(self);
++- (void)draggingExited:(id<NSDraggingInfo>)sender
++{
++  [self sendMouseEventWithBlock:self.onDragLeave
++                   locationInfo:[self locationInfoFromDraggingLocation:sender.draggingLocation]
++                  modifierFlags:0
++                 additionalData:[self dataTransferInfoFromPasteboard:sender.draggingPasteboard]];
++}
+ 
+-  RCTUpdateHoverStyleForView(self);
++- (BOOL)performDragOperation:(id <NSDraggingInfo>)sender
++{
++  [self sendMouseEventWithBlock:self.onDrop
++                   locationInfo:[self locationInfoFromDraggingLocation:sender.draggingLocation]
++                  modifierFlags:0
++                 additionalData:[self dataTransferInfoFromPasteboard:sender.draggingPasteboard]];
++  return YES;
++}
+ 
+-#if TARGET_OS_OSX // [macOS
+-  // clipsToBounds is stubbed out on macOS because it's not part of NSView
+-  layer.masksToBounds = self.clipsToBounds;
+-#endif // macOS]
++#pragma mark - Keyboard Events
+ 
+-  const RCTCornerRadii cornerRadii = [self cornerRadii];
+-  const UIEdgeInsets borderInsets = [self bordersAsInsets];
+-#if !TARGET_OS_OSX // [macOS]
+-  const RCTBorderColors borderColors = [self borderColorsWithTraitCollection:self.traitCollection];
+-#else // [macOS
+-  const RCTBorderColors borderColors = [self borderColors];
+-#endif // macOS]
+-  BOOL useIOSBorderRendering = 
+-    RCTCornerRadiiAreEqualAndSymmetrical(cornerRadii) &&
+-    RCTBorderInsetsAreEqual(borderInsets) &&
+-    RCTBorderColorsAreEqual(borderColors) &&
+-    _borderStyle == RCTBorderStyleSolid &&
++- (BOOL)handleKeyboardEvent:(NSEvent *)event {
++  RCTAssert(
++    event.type == NSEventTypeKeyDown ||
++    event.type == NSEventTypeKeyUp,
++    @"Keyboard event must be keyDown, keyUp. Got type: %ld", (long)event.type);
+ 
+-    // iOS draws borders in front of the content whereas CSS draws them behind
+-    // the content. For this reason, only use iOS border drawing when clipping
+-    // or when the border is hidden.
++  RCTViewKeyboardEvent *keyboardEvent = [RCTViewKeyboardEvent keyEventFromEvent:event reactTag:self.reactTag];
+ 
+-    (borderInsets.top == 0 ||
+-     (borderColors.top && CGColorGetAlpha(borderColors.top.CGColor) == 0) ||
+-     self.clipsToBounds);
++  // Emit the event to JS only once. By default, events, will bubble up the respnder chain
++  // when we call super, so let's emit the event only at the first responder. It would be
++  // simpler to check `if (self == self.window.firstResponder), however, that does not account
++  // for cases like TextInputComponentView, where the first responder may be a subview.
++  static const char kRCTViewKeyboardEventEmittedKey = 0;
++  NSNumber *emitted = objc_getAssociatedObject(event, &kRCTViewKeyboardEventEmittedKey);
++  BOOL alreadyEmitted = [emitted boolValue];
++  if (!alreadyEmitted && keyboardEvent != nil) { // [Ardia: a dead key has no characters, so no event Ardia]
++    [_eventDispatcher sendEvent:keyboardEvent];
++    objc_setAssociatedObject(event, &kRCTViewKeyboardEventEmittedKey, @(YES), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
++  }
+ 
+-  // iOS clips to the outside of the border, but CSS clips to the inside. To
+-  // solve this, we'll need to add a container view inside the main view to
+-  // correctly clip the subviews.
++  NSArray<RCTHandledKey *> *keyEvents = event.type == NSEventTypeKeyDown ? self.keyDownEvents : self.keyUpEvents;
+ 
+-#if !TARGET_OS_OSX // [macOS]
+-  RCTUIColor *backgroundColor = [_backgroundColor resolvedColorWithTraitCollection:self.traitCollection];
+-#else // [macOS
+-  RCTUIColor *backgroundColor = _backgroundColor;
+-#endif // macOS]
++  BOOL shouldBlockNativeHandling = [RCTHandledKey event:event matchesFilter:keyEvents];
+ 
 -#if TARGET_OS_OSX // [macOS
 -  CATransform3D transform = [[self layer] transform];
 -  CGPoint anchorPoint = [layer anchorPoint];
@@ -7248,11 +7463,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 -  }
 -  [layer setTransform:transform];
 -#endif // macOS]
-+      NSNumber *fileSizeValue = nil;
-+      NSError *fileSizeError = nil;
-+      BOOL success = [fileURL getResourceValue:&fileSizeValue
-+                                        forKey:NSURLFileSizeKey
-+                                         error:&fileSizeError];
++  return shouldBlockNativeHandling;
++}
  
 -  if (useIOSBorderRendering) {
 -    layer.cornerRadius = cornerRadii.topLeftHorizontal;
@@ -7263,50 +7475,38 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 -    layer.needsDisplayOnBoundsChange = NO;
 -    layer.mask = nil;
 -    return;
--  }
-+      NSNumber *width = nil;
-+      NSNumber *height = nil;
-+      if ([MIMETypeString hasPrefix:@"image/"]) {
-+        NSImage *image = [[NSImage alloc] initWithContentsOfURL:fileURL];
-+        width = @(image.size.width);
-+        height = @(image.size.height);
-+      }
++- (void)keyDown:(NSEvent *)event {
++  if (![self handleKeyboardEvent:event]) {
++    [super keyDown:event];
+   }
++}
  
 -  RCTUIImage *image = RCTGetBorderImage( // [macOS]
 -      _borderStyle, layer.bounds.size, cornerRadii, borderInsets, borderColors, backgroundColor, self.clipsToBounds);
-+      [files addObject:@{@"name": RCTNullIfNil(fileURL.lastPathComponent),
-+                         @"type": RCTNullIfNil(MIMETypeString),
-+                         @"uri": RCTNullIfNil(fileURL.path),
-+                         @"size": success ? fileSizeValue : (id)kCFNull,
-+                         @"width": RCTNullIfNil(width),
-+                         @"height": RCTNullIfNil(height)
-+                         }];
- 
+-
 -  layer.backgroundColor = NULL;
-+      [items addObject:@{@"kind": @"file",
-+                         @"type": RCTNullIfNil(MIMETypeString),
-+                         }];
++- (void)keyUp:(NSEvent *)event {
++  if (![self handleKeyboardEvent:event]) {
++    [super keyUp:event];
++  }
++}
  
 -  if (image == nil) {
 -    layer.contents = nil;
 -    layer.needsDisplayOnBoundsChange = NO;
--    return;
-+      [types addObject:RCTNullIfNil(MIMETypeString)];
-+    }
++- (void)setPresentationGate:(BOOL)presentationGate
++{
++  if (_presentationGate == presentationGate) {
+     return;
    }
- 
+-
 -  CGRect contentsCenter = ({
 -    CGSize size = image.size;
 -    UIEdgeInsets insets = image.capInsets;
 -    CGRectMake(
 -        insets.left / size.width, insets.top / size.height, (CGFloat)1.0 / size.width, (CGFloat)1.0 / size.height);
 -  });
-+  NSPasteboardType imageType = [pasteboard availableTypeFromArray:@[NSPasteboardTypePNG, NSPasteboardTypeTIFF]];
-+  if (imageType && fileNames.count == 0) {
-+    NSString *MIMETypeString = imageType == NSPasteboardTypePNG ? @"image/png" : @"image/tiff";
-+    NSData *imageData = [pasteboard dataForType:imageType];
-+    NSImage *image = [[NSImage alloc] initWithData:imageData];
- 
+-
 -#if !TARGET_OS_OSX // [macOS]
 -  layer.contents = (id)image.CGImage;
 -  layer.contentsScale = image.scale;
@@ -7317,224 +7517,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 -#endif // macOS]
 -  layer.needsDisplayOnBoundsChange = YES;
 -  layer.magnificationFilter = kCAFilterNearest;
-+    [files addObject:@{@"type": RCTNullIfNil(MIMETypeString),
-+                       @"uri": RCTDataURL(MIMETypeString, imageData).absoluteString,
-+                       @"size": @(imageData.length),
-+                       @"width": @(image.size.width),
-+                       @"height": @(image.size.height),
-+                      }];
- 
+-
 -  const BOOL isResizable = !UIEdgeInsetsEqualToEdgeInsets(image.capInsets, UIEdgeInsetsZero);
 -  if (isResizable) {
 -    layer.contentsCenter = contentsCenter;
--  } else {
--    layer.contentsCenter = CGRectMake(0.0, 0.0, 1.0, 1.0);
-+    [items addObject:@{@"kind": @"image",
-+                       @"type": RCTNullIfNil(MIMETypeString),
-+                      }];
-+
-+    [types addObject:RCTNullIfNil(MIMETypeString)];
-   }
- 
--  [self updateClippingForLayer:layer];
-+  return @{@"dataTransfer": @{@"files": files,
-+                              @"items": items,
-+                              @"types": types}};
- }
- 
--static BOOL RCTLayerHasShadow(CALayer *layer)
-+- (NSDictionary*)locationInfoFromDraggingLocation:(NSPoint)locationInWindow
- {
--  return layer.shadowOpacity * CGColorGetAlpha(layer.shadowColor) > 0;
-+  NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
-+
-+  return @{@"screenX": @(locationInWindow.x),
-+           @"screenY": @(locationInWindow.y),
-+           @"clientX": @(locationInView.x),
-+           @"clientY": @(locationInView.y)
-+           };
- }
- 
--static void RCTUpdateShadowPathForView(RCTView *view)
-+- (NSDragOperation)draggingEntered:(id <NSDraggingInfo>)sender
- {
--  if (RCTLayerHasShadow(view.layer)) {
--    if (CGColorGetAlpha(view.backgroundColor.CGColor) > 0.999) {
--      // If view has a solid background color, calculate shadow path from border
--      const RCTCornerRadii cornerRadii = [view cornerRadii];
--      const RCTCornerInsets cornerInsets = RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero);
--      CGPathRef shadowPath = RCTPathCreateWithRoundedRect(view.bounds, cornerInsets, NULL, NO);
--      view.layer.shadowPath = shadowPath;
--      CGPathRelease(shadowPath);
-+  NSPasteboard *pboard = sender.draggingPasteboard;
-+  NSDragOperation sourceDragMask = sender.draggingSourceOperationMask;
- 
--    } else {
--      // Can't accurately calculate box shadow, so fall back to pixel-based shadow
--      view.layer.shadowPath = nil;
-+  [self sendMouseEventWithBlock:self.onDragEnter
-+                   locationInfo:[self locationInfoFromDraggingLocation:sender.draggingLocation]
-+                  modifierFlags:0
-+                 additionalData:[self dataTransferInfoFromPasteboard:pboard]];
- 
--      RCTLogAdvice(
--          @"View #%@ of type %@ has a shadow set but cannot calculate "
--           "shadow efficiently. Consider setting a solid background color to "
--           "fix this, or apply the shadow to a more specific component.",
--          view.reactTag,
--          [view class]);
-+  if ([pboard availableTypeFromArray:self.registeredDraggedTypes]) {
-+    if (sourceDragMask & NSDragOperationLink) {
-+      return NSDragOperationLink;
-+    } else if (sourceDragMask & NSDragOperationCopy) {
-+      return NSDragOperationCopy;
-     }
-   }
-+  return NSDragOperationNone;
- }
- 
--static void RCTUpdateHoverStyleForView(RCTView *view)
-+- (void)draggingExited:(id<NSDraggingInfo>)sender
- {
--#if !TARGET_OS_OSX // [macOS]
--#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */
--  if (@available(iOS 17.0, *)) {
--    UIHoverStyle *hoverStyle = nil;
--    if ([view cursor] == RCTCursorPointer) {
--      const RCTCornerRadii cornerRadii = [view cornerRadii];
--      const RCTCornerInsets cornerInsets = RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero);
--#if TARGET_OS_IOS
--      // Due to an Apple bug, it seems on iOS, `[UIShape shapeWithBezierPath:]` needs to
--      // be calculated in the superviews' coordinate space (view.frame). This is not true
--      // on other platforms like visionOS.
--      CGPathRef borderPath = RCTPathCreateWithRoundedRect(view.frame, cornerInsets, NULL, NO);
--#else // TARGET_OS_VISION
--      CGPathRef borderPath = RCTPathCreateWithRoundedRect(view.bounds, cornerInsets, NULL, NO);
--#endif
--      UIBezierPath *bezierPath = [UIBezierPath bezierPathWithCGPath:borderPath];
--      CGPathRelease(borderPath);
--      UIShape *shape = [UIShape shapeWithBezierPath:bezierPath];
--
--      hoverStyle = [UIHoverStyle styleWithEffect:[UIHoverHighlightEffect effect] shape:shape];
--    }
--    [view setHoverStyle:hoverStyle];
--  }
--#endif
--#endif // [macOS]
-+  [self sendMouseEventWithBlock:self.onDragLeave
-+                   locationInfo:[self locationInfoFromDraggingLocation:sender.draggingLocation]
-+                  modifierFlags:0
-+                 additionalData:[self dataTransferInfoFromPasteboard:sender.draggingPasteboard]];
- }
- 
--- (void)updateClippingForLayer:(CALayer *)layer
-+- (BOOL)performDragOperation:(id <NSDraggingInfo>)sender
- {
--  CALayer *mask = nil;
--  CGFloat cornerRadius = 0;
--
--  if (self.clipsToBounds) {
--    const RCTCornerRadii cornerRadii = [self cornerRadii];
--    if (RCTCornerRadiiAreEqualAndSymmetrical(cornerRadii)) {
--      cornerRadius = cornerRadii.topLeftHorizontal;
-+  [self sendMouseEventWithBlock:self.onDrop
-+                   locationInfo:[self locationInfoFromDraggingLocation:sender.draggingLocation]
-+                  modifierFlags:0
-+                 additionalData:[self dataTransferInfoFromPasteboard:sender.draggingPasteboard]];
-+  return YES;
-+}
- 
--    } else {
--      CAShapeLayer *shapeLayer = [CAShapeLayer layer];
--      CGPathRef path =
--          RCTPathCreateWithRoundedRect(self.bounds, RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero), NULL, NO);
--      shapeLayer.path = path;
--      CGPathRelease(path);
--      mask = shapeLayer;
--    }
--  }
-+#pragma mark - Keyboard Events
- 
--  layer.cornerRadius = cornerRadius;
--  layer.mask = mask;
--}
-+- (BOOL)handleKeyboardEvent:(NSEvent *)event {
-+  RCTAssert(
-+    event.type == NSEventTypeKeyDown ||
-+    event.type == NSEventTypeKeyUp,
-+    @"Keyboard event must be keyDown, keyUp. Got type: %ld", (long)event.type);
- 
--#pragma mark Border Color
-+  RCTViewKeyboardEvent *keyboardEvent = [RCTViewKeyboardEvent keyEventFromEvent:event reactTag:self.reactTag];
- 
--// macOS RCTUIColor
--#define setBorderColor(side)                       \
--  -(void)setBorder##side##Color : (RCTUIColor *)color \
--  {                                                \
--    if ([_border##side##Color isEqual:color]) {    \
--      return;                                      \
--    }                                              \
--    _border##side##Color = color;                  \
--    [self.layer setNeedsDisplay];                  \
-+  // Emit the event to JS only once. By default, events, will bubble up the respnder chain
-+  // when we call super, so let's emit the event only at the first responder. It would be
-+  // simpler to check `if (self == self.window.firstResponder), however, that does not account
-+  // for cases like TextInputComponentView, where the first responder may be a subview.
-+  static const char kRCTViewKeyboardEventEmittedKey = 0;
-+  NSNumber *emitted = objc_getAssociatedObject(event, &kRCTViewKeyboardEventEmittedKey);
-+  BOOL alreadyEmitted = [emitted boolValue];
-+  if (!alreadyEmitted && keyboardEvent != nil) { // [Ardia: a dead key has no characters, so no event Ardia]
-+    [_eventDispatcher sendEvent:keyboardEvent];
-+    objc_setAssociatedObject(event, &kRCTViewKeyboardEventEmittedKey, @(YES), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-   }
- 
--setBorderColor() setBorderColor(Top) setBorderColor(Right) setBorderColor(Bottom) setBorderColor(Left)
--    setBorderColor(Start) setBorderColor(End) setBorderColor(Block) setBorderColor(BlockEnd) setBorderColor(BlockStart)
-+  NSArray<RCTHandledKey *> *keyEvents = event.type == NSEventTypeKeyDown ? self.keyDownEvents : self.keyUpEvents;
- 
--#pragma mark - Border Width
-+  BOOL shouldBlockNativeHandling = [RCTHandledKey event:event matchesFilter:keyEvents];
- 
--#define setBorderWidth(side)                     \
--  -(void)setBorder##side##Width : (CGFloat)width \
--  {                                              \
--    if (_border##side##Width == width) {         \
--      return;                                    \
--    }                                            \
--    _border##side##Width = width;                \
--    [self.layer setNeedsDisplay];                \
--  }
-+  return shouldBlockNativeHandling;
-+}
- 
--        setBorderWidth() setBorderWidth(Top) setBorderWidth(Right) setBorderWidth(Bottom) setBorderWidth(Left)
--            setBorderWidth(Start) setBorderWidth(End)
-+- (void)keyDown:(NSEvent *)event {
-+  if (![self handleKeyboardEvent:event]) {
-+    [super keyDown:event];
-+  }
-+}
- 
--#pragma mark - Border Radius
-+- (void)keyUp:(NSEvent *)event {
-+  if (![self handleKeyboardEvent:event]) {
-+    [super keyUp:event];
-+  }
-+}
- 
--#define setBorderRadius(side)                      \
--  -(void)setBorder##side##Radius : (CGFloat)radius \
--  {                                                \
--    if (_border##side##Radius == radius) {         \
--      return;                                      \
--    }                                              \
--    _border##side##Radius = radius;                \
--    [self.layer setNeedsDisplay];                  \
-+- (void)setPresentationGate:(BOOL)presentationGate
-+{
-+  if (_presentationGate == presentationGate) {
-+    return;
-+  }
 +  _presentationGate = presentationGate;
 +  ArdiaPresentationSetUp();
 +  if (presentationGate) {
@@ -7545,7 +7531,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      [ArdiaPresentationGates addObject:self];
 +    }
 +    ArdiaPresentationGateGeometryDidChange();
-+  } else {
+   } else {
+-    layer.contentsCenter = CGRectMake(0.0, 0.0, 1.0, 1.0);
 +    if (ArdiaPresentationFreezeKeepsClosed(self)) {
 +      [ArdiaPresentationPendingResets addObject:self];
 +    } else {
@@ -7556,14 +7543,14 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPresentationStale = YES;
 +    ArdiaPresentationGateGeometryDidChange();
    }
-+}
+-
+-  [self updateClippingForLayer:layer];
+ }
  
--                setBorderRadius() setBorderRadius(TopLeft) setBorderRadius(TopRight) setBorderRadius(TopStart)
--                    setBorderRadius(TopEnd) setBorderRadius(BottomLeft) setBorderRadius(BottomRight)
--                        setBorderRadius(BottomStart) setBorderRadius(BottomEnd) setBorderRadius(EndEnd)
--                            setBorderRadius(EndStart) setBorderRadius(StartEnd) setBorderRadius(StartStart)
+-static BOOL RCTLayerHasShadow(CALayer *layer)
 +- (void)setPresentationSession:(BOOL)presentationSession
-+{
+ {
+-  return layer.shadowOpacity * CGColorGetAlpha(layer.shadowColor) > 0;
 +  ArdiaPresentationSetUp();
 +  [ArdiaPresentationSessions addObject:self];
 +  if (_presentationSession == presentationSession) {
@@ -7584,11 +7571,30 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPresentationStale = YES;
 +    ArdiaPresentationGateGeometryDidChange();
 +  }
-+}
+ }
  
--#pragma mark - Border Curve
+-static void RCTUpdateShadowPathForView(RCTView *view)
 +- (void)setPresentationArming:(BOOL)presentationArming
-+{
+ {
+-  if (RCTLayerHasShadow(view.layer)) {
+-    if (CGColorGetAlpha(view.backgroundColor.CGColor) > 0.999) {
+-      // If view has a solid background color, calculate shadow path from border
+-      const RCTCornerRadii cornerRadii = [view cornerRadii];
+-      const RCTCornerInsets cornerInsets = RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero);
+-      CGPathRef shadowPath = RCTPathCreateWithRoundedRect(view.bounds, cornerInsets, NULL, NO);
+-      view.layer.shadowPath = shadowPath;
+-      CGPathRelease(shadowPath);
+-
+-    } else {
+-      // Can't accurately calculate box shadow, so fall back to pixel-based shadow
+-      view.layer.shadowPath = nil;
+-
+-      RCTLogAdvice(
+-          @"View #%@ of type %@ has a shadow set but cannot calculate "
+-           "shadow efficiently. Consider setting a solid background color to "
+-           "fix this, or apply the shadow to a more specific component.",
+-          view.reactTag,
+-          [view class]);
 +  ArdiaPresentationSetUp();
 +  [ArdiaPresentationSessions addObject:self];
 +  if (_presentationArming == presentationArming) {
@@ -7616,29 +7622,40 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      }
 +      ArdiaPresentationStale = YES;
 +      ArdiaPresentationGateGeometryDidChange();
-+    }
-+  }
-+}
+     }
+   }
+ }
  
--#define setBorderCurve(side)                            \
--  -(void)setBorder##side##Curve : (RCTBorderCurve)curve \
--  {                                                     \
--    if (_border##side##Curve == curve) {                \
--      return;                                           \
--    }                                                   \
--    _border##side##Curve = curve;                       \
--    [self.layer setNeedsDisplay];                       \
+-static void RCTUpdateHoverStyleForView(RCTView *view)
 +- (void)ardia_beginArming
-+{
+ {
+-#if !TARGET_OS_OSX // [macOS]
+-#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000 /* __IPHONE_17_0 */
+-  if (@available(iOS 17.0, *)) {
+-    UIHoverStyle *hoverStyle = nil;
+-    if ([view cursor] == RCTCursorPointer) {
+-      const RCTCornerRadii cornerRadii = [view cornerRadii];
+-      const RCTCornerInsets cornerInsets = RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero);
+-#if TARGET_OS_IOS
+-      // Due to an Apple bug, it seems on iOS, `[UIShape shapeWithBezierPath:]` needs to
+-      // be calculated in the superviews' coordinate space (view.frame). This is not true
+-      // on other platforms like visionOS.
+-      CGPathRef borderPath = RCTPathCreateWithRoundedRect(view.frame, cornerInsets, NULL, NO);
+-#else // TARGET_OS_VISION
+-      CGPathRef borderPath = RCTPathCreateWithRoundedRect(view.bounds, cornerInsets, NULL, NO);
+-#endif
+-      UIBezierPath *bezierPath = [UIBezierPath bezierPathWithCGPath:borderPath];
+-      CGPathRelease(borderPath);
+-      UIShape *shape = [UIShape shapeWithBezierPath:bezierPath];
 +  if (!_presentationArming || _presentationSession || _presentationArmed || self.window == nil || ArdiaPresentationFailsOpen()) {
 +    return;
-   }
++  }
 +  _presentationDraining = NO;
 +  _presentationArmed = YES;
++  ArdiaPresentationUnsettled = YES;
 +  ArdiaPresentationDrainSchedule();
 +}
- 
--                                setBorderCurve()
++
 +- (void)setPresentationPersistent:(BOOL)presentationPersistent
 +{
 +  if (_presentationPersistent == presentationPersistent) {
@@ -7655,7 +7672,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  ArdiaPresentationGateGeometryDidChange();
 +}
  
--#pragma mark - Border Style
+-      hoverStyle = [UIHoverStyle styleWithEffect:[UIHoverHighlightEffect effect] shape:shape];
 +- (void)setPresentationFolded:(BOOL)presentationFolded
 +{
 +  if (_presentationFolded == presentationFolded) {
@@ -7673,22 +7690,20 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    ArdiaPresentationUnfolds++;
 +    if (!ArdiaPresentationUnderFolded(self)) {
 +      ArdiaPresentationSetDormantWithin(self, NO);
-+    }
+     }
+-    [view setHoverStyle:hoverStyle];
 +    [self ardia_attachFoldedChildren];
 +    ArdiaPresentationGateGeometryDidChange();
-+  }
-+}
+   }
+-#endif
+-#endif // [macOS]
+ }
  
--#define setBorderStyle(side)                            \
--  -(void)setBorder##side##Style : (RCTBorderStyle)style \
--  {                                                     \
--    if (_border##side##Style == style) {                \
--      return;                                           \
--    }                                                   \
--    _border##side##Style = style;                       \
--    [self.layer setNeedsDisplay];                       \
+-- (void)updateClippingForLayer:(CALayer *)layer
 +- (void)setPresentationShiftBound:(CGFloat)presentationShiftBound
-+{
+ {
+-  CALayer *mask = nil;
+-  CGFloat cornerRadius = 0;
 +  if (_presentationShiftBound == presentationShiftBound) {
 +    return;
 +  }
@@ -7696,10 +7711,13 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  if (_presentationSession) {
 +    ArdiaPresentationStale = YES;
 +    ArdiaPresentationGateGeometryDidChange();
-   }
++  }
 +}
  
--                                    setBorderStyle()
+-  if (self.clipsToBounds) {
+-    const RCTCornerRadii cornerRadii = [self cornerRadii];
+-    if (RCTCornerRadiiAreEqualAndSymmetrical(cornerRadii)) {
+-      cornerRadius = cornerRadii.topLeftHorizontal;
 +- (void)setMountReceipt:(NSNumber *)mountReceipt
 +{
 +  _mountReceipt = [mountReceipt copy];
@@ -7713,93 +7731,158 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
 +}
  
--#if TARGET_OS_OSX  // [macOS
+-    } else {
+-      CAShapeLayer *shapeLayer = [CAShapeLayer layer];
+-      CGPathRef path =
+-          RCTPathCreateWithRoundedRect(self.bounds, RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero), NULL, NO);
+-      shapeLayer.path = path;
+-      CGPathRelease(path);
+-      mask = shapeLayer;
 +- (void)ardia_detachPresentationChildren
 +{
 +  for (RCTPlatformView *child in self.reactSubviews) {
 +    [ArdiaPresentationOwners setObject:self forKey:child];
 +    if (child.superview == self) {
 +      [child removeFromSuperview];
-+    }
-+  }
-+}
+     }
+   }
+-
+-  layer.cornerRadius = cornerRadius;
+-  layer.mask = mask;
+ }
  
--#pragma mark Focus ring
+-#pragma mark Border Color
+-
+-// macOS RCTUIColor
+-#define setBorderColor(side)                       \
+-  -(void)setBorder##side##Color : (RCTUIColor *)color \
+-  {                                                \
+-    if ([_border##side##Color isEqual:color]) {    \
+-      return;                                      \
+-    }                                              \
+-    _border##side##Color = color;                  \
+-    [self.layer setNeedsDisplay];                  \
 +- (void)ardia_foldChildren
 +{
 +  for (RCTPlatformView *child in self.reactSubviews) {
 +    ArdiaPresentationOpenWithin(child);
-+  }
+   }
 +  ArdiaPresentationSetDormantWithin(self, YES);
 +  [self ardia_detachFoldedChildren];
 +}
  
--- (CGRect)focusRingMaskBounds
+-setBorderColor() setBorderColor(Top) setBorderColor(Right) setBorderColor(Bottom) setBorderColor(Left)
+-    setBorderColor(Start) setBorderColor(End) setBorderColor(Block) setBorderColor(BlockEnd) setBorderColor(BlockStart)
+-
+-#pragma mark - Border Width
+-
+-#define setBorderWidth(side)                     \
+-  -(void)setBorder##side##Width : (CGFloat)width \
+-  {                                              \
+-    if (_border##side##Width == width) {         \
+-      return;                                    \
+-    }                                            \
+-    _border##side##Width = width;                \
+-    [self.layer setNeedsDisplay];                \
 +- (void)ardia_detachFoldedChildren
- {
--  return self.bounds;
++{
 +  for (RCTPlatformView *child in self.reactSubviews) {
 +    if (child.superview == self) {
 +      [child removeFromSuperview];
 +      ArdiaPresentationFoldDetached++;
 +    }
-+  }
- }
+   }
++}
  
--- (void)drawFocusRingMask
+-        setBorderWidth() setBorderWidth(Top) setBorderWidth(Right) setBorderWidth(Bottom) setBorderWidth(Left)
+-            setBorderWidth(Start) setBorderWidth(End)
+-
+-#pragma mark - Border Radius
+-
+-#define setBorderRadius(side)                      \
+-  -(void)setBorder##side##Radius : (CGFloat)radius \
+-  {                                                \
+-    if (_border##side##Radius == radius) {         \
+-      return;                                      \
+-    }                                              \
+-    _border##side##Radius = radius;                \
+-    [self.layer setNeedsDisplay];                  \
 +- (void)ardia_attachFoldedChildren
- {
--  if ([self enableFocusRing]) {
--    CGContextRef context = NSGraphicsContext.currentContext.CGContext;
--    RCTCornerInsets cornerInsets = RCTGetCornerInsets(self.cornerRadii, NSEdgeInsetsZero);
--    CGPathRef path = RCTPathCreateWithRoundedRect(self.bounds, cornerInsets, NULL, NO);
++{
 +  [self didUpdateReactSubviews];
 +  for (RCTPlatformView *child in self.reactSubviews) {
 +    if (child.superview == self) {
 +      ArdiaPresentationFoldAttached++;
 +    }
-+  }
+   }
 +}
  
--    CGContextAddPath(context, path);
--    CGContextFillPath(context);
--    CGPathRelease(path);
+-                setBorderRadius() setBorderRadius(TopLeft) setBorderRadius(TopRight) setBorderRadius(TopStart)
+-                    setBorderRadius(TopEnd) setBorderRadius(BottomLeft) setBorderRadius(BottomRight)
+-                        setBorderRadius(BottomStart) setBorderRadius(BottomEnd) setBorderRadius(EndEnd)
+-                            setBorderRadius(EndStart) setBorderRadius(StartEnd) setBorderRadius(StartStart)
+-
+-#pragma mark - Border Curve
+-
+-#define setBorderCurve(side)                            \
+-  -(void)setBorder##side##Curve : (RCTBorderCurve)curve \
+-  {                                                     \
+-    if (_border##side##Curve == curve) {                \
+-      return;                                           \
+-    }                                                   \
+-    _border##side##Curve = curve;                       \
+-    [self.layer setNeedsDisplay];                       \
 +- (void)ardia_closePresentation
 +{
 +  if ([ArdiaPresentationClosedGates containsObject:self]) {
 +    return;
    }
 +  [ArdiaPresentationClosedGates addObject:self];
++  ArdiaPresentationUnsettled = YES;
 +  [ArdiaPresentationRetiring removeObject:self];
 +  [self ardia_detachPresentationChildren];
- }
++}
  
--#pragma mark - macOS Event Handler
+-                                setBorderCurve()
+-
+-#pragma mark - Border Style
+-
+-#define setBorderStyle(side)                            \
+-  -(void)setBorder##side##Style : (RCTBorderStyle)style \
+-  {                                                     \
+-    if (_border##side##Style == style) {                \
+-      return;                                           \
+-    }                                                   \
+-    _border##side##Style = style;                       \
+-    [self.layer setNeedsDisplay];                       \
 +- (void)ardia_openPresentation
 +{
 +  if (![ArdiaPresentationClosedGates containsObject:self]) {
 +    return;
-+  }
+   }
 +  [self ardia_openPresentationUnder:ArdiaPresentationSessionOf(self)];
 +}
  
--- (void)resetCursorRects
+-                                    setBorderStyle()
+-
+-#if TARGET_OS_OSX  // [macOS
+-
+-#pragma mark Focus ring
+-
+-- (CGRect)focusRingMaskBounds
 +- (void)ardia_openPresentationUnder:(RCTView *)session
  {
--  [self discardCursorRects];
--  if ([self cursor] != RCTCursorAuto)
--  {
--    NSCursor *cursor = NSCursorFromRCTCursor(self.cursor);
--    [self addCursorRect:self.bounds cursor:cursor];
+-  return self.bounds;
 +  if (![ArdiaPresentationClosedGates containsObject:self]) {
 +    return;
 +  }
 +  ArdiaPresentationFreezeState *frozen = ArdiaPresentationFreezeStateHolding(self);
 +  if (frozen != nil) {
 +    ArdiaPresentationFreezeScheduleThaw(frozen, self);
-   }
++  }
 +  RCTView *inner = [ArdiaPresentationSessions containsObject:self] ? self : session;
 +  [ArdiaPresentationClosedGates removeObject:self];
++  ArdiaPresentationUnsettled = YES;
 +  for (RCTPlatformView *child in self.reactSubviews) {
 +    [ArdiaPresentationOwners removeObjectForKey:child];
 +    ArdiaPresentationReplay(child, YES, inner);
@@ -7807,21 +7890,33 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  [self didUpdateReactSubviews];
  }
  
--- (BOOL)needsPanelToBecomeKey
+-- (void)drawFocusRingMask
 +- (void)ardia_resetPresentation
  {
--	// We need to override this so that mouse clicks don't move keyboard focus on focusable views by default. 
--	return false;
+-  if ([self enableFocusRing]) {
+-    CGContextRef context = NSGraphicsContext.currentContext.CGContext;
+-    RCTCornerInsets cornerInsets = RCTGetCornerInsets(self.cornerRadii, NSEdgeInsetsZero);
+-    CGPathRef path = RCTPathCreateWithRoundedRect(self.bounds, cornerInsets, NULL, NO);
+-
+-    CGContextAddPath(context, path);
+-    CGContextFillPath(context);
+-    CGPathRelease(path);
 +  [self ardia_openPresentation];
 +  for (NSView *child in self.reactSubviews) {
 +    ArdiaPresentationOpenWithin(child);
-+  }
+   }
  }
  
--- (BOOL)acceptsFirstResponder
+-#pragma mark - macOS Event Handler
+-
+-- (void)resetCursorRects
 ++ (void)ardia_drainPresentation
  {
--	return [self focusable] || [super acceptsFirstResponder];
+-  [self discardCursorRects];
+-  if ([self cursor] != RCTCursorAuto)
+-  {
+-    NSCursor *cursor = NSCursorFromRCTCursor(self.cursor);
+-    [self addCursorRect:self.bounds cursor:cursor];
 +  if (ArdiaPresentationDrainObserver == NULL || ArdiaPresentationEvaluating || ArdiaPresentationMounting > 0) {
 +    return;
 +  }
@@ -7852,6 +7947,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    for (RCTView *owner in ArdiaPresentationSessions.allObjects) {
 +      owner.presentationDraining = NO;
 +    }
++    ArdiaPresentationUnsettled = YES;
 +    if (!ArdiaPresentationAnyArmed()) {
 +      ArdiaPresentationDrainEnd();
 +      return;
@@ -7933,15 +8029,15 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  if (!working && ArdiaPresentationDrainUnits.count == 0 && ArdiaPresentationArmUnits.count == 0 && ArdiaPresentationAnyDraining()) {
 +    ArdiaPresentationDrainCollected = NO;
 +    working = YES;
-+  }
+   }
 +  ArdiaPresentationDrainSettle(changes, working);
  }
  
--- (void)updateTrackingAreas
+-- (BOOL)needsPanelToBecomeKey
 ++ (void)ardia_evaluatePresentation
  {
--  BOOL hasMouseHoverEvent = self.onMouseEnter || self.onMouseLeave;
--  BOOL wouldRecreateIdenticalTrackingArea = hasMouseHoverEvent && _trackingArea && NSEqualRects(self.bounds, [_trackingArea rect]);
+-	// We need to override this so that mouse clicks don't move keyboard focus on focusable views by default. 
+-	return false;
 +  BOOL active = ArdiaPresentationAnySession();
 +  if (!active) {
 +    ArdiaPresentationLatched = NO;
@@ -8109,17 +8205,16 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    free(records);
 +    free(entries);
 +  }
-+}
+ }
 +#endif // macOS]
  
--  if (!wouldRecreateIdenticalTrackingArea) {
--    if (_trackingArea) {
--      [self removeTrackingArea:_trackingArea];
+-- (BOOL)acceptsFirstResponder
 +@end
 +
 +#if TARGET_OS_OSX
 +BOOL ArdiaPresentationGateDefersFrame(RCTPlatformView *view, CGRect frame, BOOL deferrable)
-+{
+ {
+-	return [self focusable] || [super acceptsFirstResponder];
 +  if (view == nil || (ArdiaPresentationFrames.count == 0 && ArdiaPresentationClosedGates.count == 0)) {
 +    return NO;
 +  }
@@ -8128,22 +8223,23 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    if (pending == nil) {
 +      pending = [ArdiaPresentationFrame new];
 +      [ArdiaPresentationFrames setObject:pending forKey:view];
-     }
++    }
 +    pending.rect = frame;
 +    return YES;
 +  }
 +  [ArdiaPresentationFrames removeObjectForKey:view];
 +  return NO;
-+}
+ }
  
--    if (hasMouseHoverEvent) {
--      _trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
--                                                   options:NSTrackingActiveAlways|NSTrackingMouseEnteredAndExited
--                                                     owner:self
--                                                  userInfo:nil];
--      [self addTrackingArea:_trackingArea];
+-- (void)updateTrackingAreas
 +void ArdiaPresentationGateFlushAncestors(RCTPlatformView *view)
-+{
+ {
+-  BOOL hasMouseHoverEvent = self.onMouseEnter || self.onMouseLeave;
+-  BOOL wouldRecreateIdenticalTrackingArea = hasMouseHoverEvent && _trackingArea && NSEqualRects(self.bounds, [_trackingArea rect]);
+-
+-  if (!wouldRecreateIdenticalTrackingArea) {
+-    if (_trackingArea) {
+-      [self removeTrackingArea:_trackingArea];
 +  if (view == nil) {
 +    return;
 +  }
@@ -8154,24 +8250,24 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +        outermost = (RCTView *)ancestor;
 +      }
      }
+-
+-    if (hasMouseHoverEvent) {
+-      _trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
+-                                                   options:NSTrackingActiveAlways|NSTrackingMouseEnteredAndExited
+-                                                     owner:self
+-                                                  userInfo:nil];
+-      [self addTrackingArea:_trackingArea];
 +    if (outermost == nil || ArdiaPresentationFreezeKeepsClosed(outermost)) {
 +      return;
-+    }
+     }
 +    [outermost ardia_openPresentation];
 +    ArdiaPresentationStale = YES;
    }
--
--  [super updateTrackingAreas];
- }
++}
  
--- (void)mouseEntered:(NSEvent *)event
+-  [super updateTrackingAreas];
 +static void ArdiaPresentationExposeGate(RCTView *gate, NSMutableArray<RCTView *> *reclose)
- {
--  _hasMouseOver = YES;
--  [self sendMouseEventWithBlock:self.onMouseEnter
--                   locationInfo:[self locationInfoFromEvent:event]
--                  modifierFlags:event.modifierFlags
--                 additionalData:nil];
++{
 +  if (ArdiaPresentationFreezeKeepsClosed(gate)) {
 +    [reclose addObject:gate];
 +  }
@@ -8179,11 +8275,11 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  ArdiaPresentationStale = YES;
  }
  
--- (void)mouseExited:(NSEvent *)event
+-- (void)mouseEntered:(NSEvent *)event
 +static void ArdiaPresentationExposeWithin(NSView *view, NSMutableArray<RCTView *> *reclose)
  {
--  _hasMouseOver = NO;
--  [self sendMouseEventWithBlock:self.onMouseLeave
+-  _hasMouseOver = YES;
+-  [self sendMouseEventWithBlock:self.onMouseEnter
 -                   locationInfo:[self locationInfoFromEvent:event]
 -                  modifierFlags:event.modifierFlags
 -                 additionalData:nil];
@@ -8195,13 +8291,14 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
  }
  
--- (void)mouseUp:(NSEvent *)event
+-- (void)mouseExited:(NSEvent *)event
 +id ArdiaPresentationGateExposeAncestors(RCTPlatformView *view)
  {
--  if (_onDoubleClick && event.clickCount == 2){
--    _onDoubleClick(nil);
--  } else {
--    [super mouseUp:event];
+-  _hasMouseOver = NO;
+-  [self sendMouseEventWithBlock:self.onMouseLeave
+-                   locationInfo:[self locationInfoFromEvent:event]
+-                  modifierFlags:event.modifierFlags
+-                 additionalData:nil];
 +  NSMutableArray<RCTView *> *reclose = [NSMutableArray new];
 +  if (view == nil) {
 +    return reclose;
@@ -8217,24 +8314,27 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +      return reclose;
 +    }
 +    ArdiaPresentationExposeGate(outermost, reclose);
-   }
++  }
  }
  
--- (BOOL)mouseDownCanMoveWindow
+-- (void)mouseUp:(NSEvent *)event
 +id ArdiaPresentationGateExposeSubtree(RCTPlatformView *view)
  {
--	return _mouseDownCanMoveWindow;
+-  if (_onDoubleClick && event.clickCount == 2){
+-    _onDoubleClick(nil);
+-  } else {
+-    [super mouseUp:event];
 +  NSMutableArray<RCTView *> *reclose = ArdiaPresentationGateExposeAncestors(view);
 +  if (view != nil && ArdiaPresentationClosedGates.count > 0) {
 +    ArdiaPresentationExposeWithin(view, reclose);
-+  }
+   }
 +  return reclose;
  }
  
--- (void)setMouseDownCanMoveWindow:(BOOL)mouseDownCanMoveWindow
+-- (BOOL)mouseDownCanMoveWindow
 +void ArdiaPresentationGateRestoreExposure(id exposure)
  {
--	_mouseDownCanMoveWindow = mouseDownCanMoveWindow;
+-	return _mouseDownCanMoveWindow;
 +  NSArray<RCTView *> *gates = [exposure isKindOfClass:NSArray.class] ? exposure : @[];
 +  for (RCTView *gate in gates.reverseObjectEnumerator) {
 +    if (ArdiaPresentationFreezeStateHolding(gate) != nil && ![ArdiaPresentationClosedGates containsObject:gate]) {
@@ -8243,10 +8343,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  }
  }
  
--- (BOOL)allowsVibrancy
+-- (void)setMouseDownCanMoveWindow:(BOOL)mouseDownCanMoveWindow
 +id ArdiaPresentationGateHold(void)
  {
--  return _allowsVibrancyInternal;
+-	_mouseDownCanMoveWindow = mouseDownCanMoveWindow;
 +  ArdiaPresentationHold *hold = [ArdiaPresentationHold new];
 +  ArdiaPresentationCancelRetirement();
 +  if (ArdiaPresentationAnySession()) {
@@ -8258,54 +8358,89 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +  return hold;
  }
  
--- (NSDictionary*)locationInfoFromEvent:(NSEvent*)event
+-- (BOOL)allowsVibrancy
 +void ArdiaPresentationGateRelease(id hold)
+ {
+-  return _allowsVibrancyInternal;
++  [(ArdiaPresentationHold *)hold end];
+ }
+ 
+-- (NSDictionary*)locationInfoFromEvent:(NSEvent*)event
++void ArdiaPresentationGateDidRemoveReactSubview(RCTPlatformView *subview)
  {
 -  NSPoint locationInWindow = event.locationInWindow;
 -  NSPoint locationInView = [self convertPoint:locationInWindow fromView:nil];
--
++  if (subview == nil || (ArdiaPresentationOwners.count == 0 && ArdiaPresentationFrames.count == 0)) {
++    return;
++  }
++  [ArdiaPresentationOwners removeObjectForKey:subview];
++  ArdiaPresentationReplay(subview, NO, nil);
++}
+ 
 -  return @{@"screenX": @(locationInWindow.x),
 -           @"screenY": @(locationInWindow.y),
 -           @"clientX": @(locationInView.x),
 -           @"clientY": @(locationInView.y)
 -           };
-+  [(ArdiaPresentationHold *)hold end];
++static BOOL ArdiaPresentationTransformReachesGate(NSView *view)
++{
++  if ([ArdiaPresentationGates containsObject:(RCTView *)view]) {
++    return YES;
++  }
++  NSArray<NSView *> *children = view.subviews;
++  if (children.count == 0) {
++    return NO;
++  }
++  if (children.count >= ArdiaPresentationTransformReach) {
++    return YES;
++  }
++  NSUInteger budget = ArdiaPresentationTransformReach - 1 - children.count;
++  NSMutableArray<NSView *> *pending = [children mutableCopy];
++  while (pending.count > 0) {
++    NSView *next = pending.lastObject;
++    [pending removeLastObject];
++    if ([ArdiaPresentationGates containsObject:(RCTView *)next]) {
++      return YES;
++    }
++    NSArray<NSView *> *below = next.subviews;
++    if (below.count > budget) {
++      return YES;
++    }
++    budget -= below.count;
++    [pending addObjectsFromArray:below];
++  }
++  return NO;
  }
  
 -- (void)sendMouseEventWithBlock:(RCTDirectEventBlock)block
 -                   locationInfo:(NSDictionary*)locationInfo
 -                  modifierFlags:(NSEventModifierFlags)modifierFlags
 -                 additionalData:(NSDictionary*)additionalData
-+void ArdiaPresentationGateDidRemoveReactSubview(RCTPlatformView *subview)
++void ArdiaPresentationGateTransformDidChange(RCTPlatformView *view)
  {
 -  if (block == nil) {
-+  if (subview == nil || (ArdiaPresentationOwners.count == 0 && ArdiaPresentationFrames.count == 0)) {
-     return;
+-    return;
++  if ([ArdiaPresentationPersistentGates containsObject:(RCTView *)view] && !ArdiaPresentationPagerAtRest((RCTView *)view)) {
++    ArdiaPresentationPageMovedAt = CACurrentMediaTime();
++    ArdiaPresentationSchedulePageSettle();
    }
 -  
 -  NSMutableDictionary *body = [NSMutableDictionary new];
 -  
 -  if (modifierFlags & NSEventModifierFlagShift) {
 -    body[@"shiftKey"] = @YES;
-+  [ArdiaPresentationOwners removeObjectForKey:subview];
-+  ArdiaPresentationReplay(subview, NO, nil);
-+}
-+
-+void ArdiaPresentationGateTransformDidChange(RCTPlatformView *view)
-+{
-+  if ([ArdiaPresentationPersistentGates containsObject:(RCTView *)view] && !ArdiaPresentationPagerAtRest((RCTView *)view)) {
-+    ArdiaPresentationPageMovedAt = CACurrentMediaTime();
-+    ArdiaPresentationSchedulePageSettle();
-   }
--  if (modifierFlags & NSEventModifierFlagControl) {
--    body[@"ctrlKey"] = @YES;
 +  if (ArdiaPresentationDrainObserver != NULL) {
 +    ArdiaPresentationDrainMoved = YES;
    }
--  if (modifierFlags & NSEventModifierFlagOption) {
--    body[@"altKey"] = @YES;
+-  if (modifierFlags & NSEventModifierFlagControl) {
+-    body[@"ctrlKey"] = @YES;
 +  if (!ArdiaPresentationPending()) {
 +    return;
+   }
+-  if (modifierFlags & NSEventModifierFlagOption) {
+-    body[@"altKey"] = @YES;
++  if (!ArdiaPresentationGateTransformed && ArdiaPresentationTransformReachesGate(view)) {
++    ArdiaPresentationGateTransformed = YES;
    }
 -  if (modifierFlags & NSEventModifierFlagCommand) {
 -    body[@"metaKey"] = @YES;
@@ -8330,7 +8465,15 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +          return;
 +        }
 +        ArdiaPresentationCommitPending = NO;
-+        ArdiaPresentationGateGeometryDidChange();
++        if (ArdiaPresentationMounting > 0 || ArdiaPresentationEvaluating || ArdiaPresentationGateTransformed ||
++            ArdiaPresentationUnsettled || ArdiaPresentationRespondersMoved()) {
++          ArdiaPresentationGateGeometryDidChange();
++        } else {
++          if (ArdiaPresentationDrainObserver != NULL) {
++            ArdiaPresentationDrainMoved = YES;
++          }
++          ArdiaPresentationStale = NO;
++        }
 +        if (ArdiaPresentationFreezeThawScheduled && ArdiaPresentationMounting == 0 && !ArdiaPresentationEvaluating) {
 +          ArdiaPresentationFreezeThawPass();
 +          if (ArdiaPresentationStale) {
@@ -8610,6 +8753,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 -
 -  return shouldBlockNativeHandling;
 +  ArdiaPresentationStale = YES;
++  ArdiaPresentationUnsettled = YES;
  }
  
 -- (void)keyDown:(NSEvent *)event {
@@ -8628,6 +8772,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..0a82b59110624fd8bbe8b0957ba177bd
 +    state.disabled = state.disabled || disabled;
    }
 +  ArdiaPresentationStale = YES;
++  ArdiaPresentationUnsettled = YES;
  }
  
 -- (void)keyUp:(NSEvent *)event {
