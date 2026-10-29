@@ -130,7 +130,6 @@ export function openInWebStore(profileId: string, urls: string[]) {
 export function importTabs(
   profileId: string,
   tabs: (Pick<ImportedTab, "url" | "title" | "pinned" | "customTitle"> & { row?: boolean })[],
-  group: string | null,
 ): number {
   const s = useBrowser.getState();
   const pinned = pinnedPages(s, profileId);
@@ -163,7 +162,6 @@ export function importTabs(
     else unpinned.push(id);
   }
   useBrowser.setState(next);
-  if (group && unpinned.length) useBrowser.getState().createGroup(unpinned, { name: group });
   return usable.length;
 }
 
@@ -234,7 +232,7 @@ export function importArcSpace(profileId: string, space: SpaceSuggestion, favico
   const imported = importPinnedTree(profileId, space.pinned);
   const skipped = imported.skipped;
   let tabs = imported.tabs;
-  tabs += importTabs(profileId, space.tabs.map((t) => ({ ...t, pinned: false })), "Imported");
+  tabs += importTabs(profileId, space.tabs.map((t) => ({ ...t, pinned: false })));
   const theme = space.theme ? parseArcTheme(space.theme) : null;
   if (theme) {
     adoptProfileTheme(profileId);
@@ -247,8 +245,8 @@ export function importDiaProfile(profileId: string, profile: DiaTabsProfile, wha
   importFavicons(profileId, favicons, [...(what.pinned ? profile.pinned : []), ...(what.open ? profile.tabs : [])].map((t) => t.url));
   const have = openPages(useBrowser.getState(), profileId);
   const fresh = (tabs: ImportedTab[]) => tabs.filter((t) => !have.has(pageKey(t.url)));
-  let n = what.pinned ? importTabs(profileId, fresh(profile.pinned), null) : 0;
-  if (what.open) n += importTabs(profileId, fresh(profile.tabs).map((t) => ({ ...t, pinned: false })), "Imported");
+  let n = what.pinned ? importTabs(profileId, fresh(profile.pinned)) : 0;
+  if (what.open) n += importTabs(profileId, fresh(profile.tabs).map((t) => ({ ...t, pinned: false })));
   return n;
 }
 
@@ -266,8 +264,8 @@ export async function applyResult(
   if (result.history.length) counts.history += importHistory(profileId, result.history);
   const native = (["cookies", "autofill"] as const).filter((k) => requested.includes(k));
   Object.assign(counts, await importNative(profileId, result.vaultToken, native, onFailed));
-  if (result.tabs.length && !result.spaces.length) counts.tabs += importTabs(profileId, result.tabs, "Imported");
-  if (result.favorites.length) counts.tabs += importTabs(profileId, result.favorites.map((t) => ({ ...t, pinned: true })), null);
+  if (result.tabs.length && !result.spaces.length) counts.tabs += importTabs(profileId, result.tabs);
+  if (result.favorites.length) counts.tabs += importTabs(profileId, result.favorites.map((t) => ({ ...t, pinned: true })));
   if (result.credentials.length) counts.passwords += await importPasswords(profileId, result.credentials);
   return counts;
 }
@@ -278,7 +276,7 @@ export async function applySafari(profileId: string, data: SafariExport, cookies
   const history = data.profiles.find((p) => !p.name)?.history ?? data.profiles[0]?.history ?? [];
   counts.history = importHistory(profileId, history);
   Object.assign(counts, await importNative(profileId, data.vaultToken, cookies ? ["cookies", "autofill"] : ["autofill"], onFailed));
-  if (data.tabs.length) counts.tabs += importTabs(profileId, data.tabs, "Imported");
+  if (data.tabs.length) counts.tabs += importTabs(profileId, data.tabs);
   counts.passwords = await importPasswords(profileId, data.credentials);
   return counts;
 }
