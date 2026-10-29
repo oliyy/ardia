@@ -64,9 +64,6 @@ final class UrlFieldTextContent: NSView {
     return NSFontManager.shared.font(withFamily: family, traits: [], weight: 7, size: base.pointSize) ?? base
   }()
   private static let wrapperTrailingInset: CGFloat = 5
-  private static let fieldEdgeInset: CGFloat = 2
-  private static let fieldEdgePriority = NSLayoutConstraint.Priority(250)
-  private static let wrapperTrailingPriority = NSLayoutConstraint.Priority(999)
   private static let fadeWidth: CGFloat = 20
   private static let fadeOffsetGap: CGFloat = 5
   private static let opaque = NSColor.white.cgColor
@@ -75,8 +72,6 @@ final class UrlFieldTextContent: NSView {
   private let wrapper = NSView(frame: .zero)
   private let field = NSTextField(frame: .zero)
   private let gradient = CAGradientLayer()
-  private var leadingConstraints: [NSLayoutConstraint] = []
-  private var trailingConstraints: [NSLayoutConstraint] = []
   private var alignment = Alignment.leading
   private var hoverButtonsWidth: CGFloat = 0
   private var displayedText: String?
@@ -97,40 +92,8 @@ final class UrlFieldTextContent: NSView {
     field.refusesFirstResponder = true
     field.setAccessibilityElement(false)
     field.font = Self.loadedFont
-    field.setContentCompressionResistancePriority(.required, for: .horizontal)
-    wrapper.translatesAutoresizingMaskIntoConstraints = false
-    field.translatesAutoresizingMaskIntoConstraints = false
     addSubview(wrapper)
     wrapper.addSubview(field)
-
-    let wrapperTrailing = wrapper.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.wrapperTrailingInset)
-    wrapperTrailing.priority = Self.wrapperTrailingPriority
-    NSLayoutConstraint.activate([
-      wrapper.leadingAnchor.constraint(equalTo: leadingAnchor),
-      wrapperTrailing,
-      wrapper.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
-      wrapper.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
-
-    let trailingSoftLeading = field.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: Self.fieldEdgeInset)
-    trailingSoftLeading.priority = Self.fieldEdgePriority
-    trailingConstraints = [
-      trailingSoftLeading,
-      field.widthAnchor.constraint(greaterThanOrEqualTo: wrapper.widthAnchor),
-      field.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-      field.topAnchor.constraint(equalTo: wrapper.topAnchor),
-      field.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-    ]
-    let leadingSoftTrailing = field.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -Self.fieldEdgeInset)
-    leadingSoftTrailing.priority = Self.fieldEdgePriority
-    leadingConstraints = [
-      leadingSoftTrailing,
-      field.widthAnchor.constraint(greaterThanOrEqualTo: wrapper.widthAnchor),
-      field.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-      field.topAnchor.constraint(equalTo: wrapper.topAnchor),
-      field.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-    ]
-    NSLayoutConstraint.activate(leadingConstraints)
 
     gradient.startPoint = CGPoint(x: 0, y: 0.5)
     gradient.endPoint = CGPoint(x: 1, y: 0.5)
@@ -141,8 +104,6 @@ final class UrlFieldTextContent: NSView {
   func commit(text: String, placeholder: String?, alignment: Alignment, color: NSColor, hoverButtonsWidth: CGFloat) {
     field.attributedStringValue = NSAttributedString(string: text, attributes: [.font: Self.loadedFont, .foregroundColor: color])
     field.placeholderAttributedString = placeholder.map { NSAttributedString(string: $0, attributes: [.foregroundColor: color, .font: Self.placeholderFont]) }
-    NSLayoutConstraint.deactivate(alignment == .trailing ? leadingConstraints : trailingConstraints)
-    NSLayoutConstraint.activate(alignment == .trailing ? trailingConstraints : leadingConstraints)
     displayedText = text.isEmpty ? placeholder.flatMap { $0.isEmpty ? nil : $0 } : text
     self.alignment = alignment
     self.hoverButtonsWidth = hoverButtonsWidth.isFinite && hoverButtonsWidth >= 0 ? hoverButtonsWidth : 0
@@ -167,7 +128,18 @@ final class UrlFieldTextContent: NSView {
 
   override func layout() {
     super.layout()
+    layoutField()
     applyMask()
+  }
+
+  private func layoutField() {
+    let size = field.intrinsicContentSize
+    let height = size.height.isFinite ? max(0, size.height) : 0
+    let wrapperWidth = max(0, bounds.width - Self.wrapperTrailingInset)
+    wrapper.frame = backingAlignedRect(NSRect(x: 0, y: (bounds.height - height) / 2, width: wrapperWidth, height: height), options: .alignAllEdgesNearest)
+    let fieldWidth = max(wrapper.bounds.width, size.width.isFinite ? size.width : 0)
+    let x = alignment == .trailing ? wrapper.bounds.width - fieldWidth : 0
+    field.frame = wrapper.backingAlignedRect(field.frame(forAlignmentRect: NSRect(x: x, y: 0, width: fieldWidth, height: wrapper.bounds.height)), options: .alignAllEdgesNearest)
   }
 
   private func applyMask() {
