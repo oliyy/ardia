@@ -455,15 +455,26 @@ export type FadeLabelProps = ViewProps & {
   color?: string;
   fadeWidth?: number;
   letterSpacing?: number;
+  trailingSymbol?: string;
+  trailingSymbolColor?: string;
 };
 
 export const FadeLabel = requireNativeViewManager<FadeLabelProps>("ArdiaFadeLabel");
 
 export type ActivitySpinnerProps = ViewProps & {
   visible?: boolean;
+  color?: string;
+  period?: number;
 };
 
 export const ActivitySpinner = requireNativeViewManager<ActivitySpinnerProps>("ArdiaActivitySpinner");
+
+export type PulseDotProps = ViewProps & {
+  color: string;
+  pulsing?: boolean;
+};
+
+export const PulseDot = requireNativeViewManager<PulseDotProps>("ArdiaPulseDot");
 
 export type ContextMenuAreaProps = ViewProps & {
   onContextMenu?: () => void;

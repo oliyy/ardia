@@ -7,7 +7,7 @@ import { ago } from "../../lib/timeAgo";
 import { webviews } from "../../lib/webviews";
 import { useBrowser } from "../../store/browser";
 import { openLiveItem } from "../../live/engine";
-import { inHiddenRepo } from "../../live/rows";
+import { inHiddenRepo, openItems, shownCompleted } from "../../live/rows";
 import { useLive } from "../../live/store";
 import type { LiveItem } from "../../live/types";
 import { displayedSubtree, groupNode, isLiveNode, isTabNode, keyOfNode, pinKeyOf } from "../../store/pinTree";
@@ -65,7 +65,7 @@ function useGroupRows(groupId: string, windowId: string): Row[] {
     ])];
     return ids.map((id) => s.tabs[id]).filter((t): t is Tab => !!t);
   }));
-  const data = useLive(useShallow((s) => ({ folders: s.folders, items: s.items, hidden: s.hidden })));
+  const data = useLive(useShallow((s) => ({ folders: s.folders, items: s.items, hidden: s.hidden, completed: s.completed })));
   return useMemo(() => {
     const s = useBrowser.getState();
     const group = s.groups[groupId];
@@ -77,7 +77,8 @@ function useGroupRows(groupId: string, windowId: string): Row[] {
       const folder = data.folders[folderId];
       if (!folder || folder.profileId !== group?.profileId) continue;
       const hidden = new Set([...(data.hidden[folderId] ?? []), ...(data.items[folderId] ?? []).filter((item) => inHiddenRepo(folder, item))].map((item) => item.id));
-      const items = (data.items[folderId] ?? []).filter((item) => !hidden.has(item.id));
+      const done = shownCompleted(folder, data.completed[folderId] ?? []);
+      const items = [...openItems(data.items[folderId] ?? [], done).filter((item) => !hidden.has(item.id)), ...done.map((c) => c.item)];
       const loaded = new Map(tabs.filter((t) => !t.pinned && t.liveItem?.folderId === folderId).map((t) => [t.liveItem!.itemId, t]));
       for (const item of items) {
         const tab = loaded.get(item.id);

@@ -1,15 +1,15 @@
-import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, Surface, Symbol } from "@ardia/shell";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, PulseDot, Surface, Symbol } from "@ardia/shell";
+import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Animated, Easing, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { COMPLETION_MS, errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
-import { prBadge } from "../../live/github";
-import { folderRows, hasShownUnread, inHiddenRepo, liveTabPlace, shownItems, type FolderRow } from "../../live/rows";
+import { prBadge, summarizeChecks } from "../../live/github";
+import { folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import { setLive, updateFolder, useLive } from "../../live/store";
-import type { CompletedItem, LiveItem } from "../../live/types";
+import type { CompletedItem, CompletionState, LiveItem } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { usePageProfileId, useWindowId } from "../../store/hooks";
 import { activeTabId, viewTabIds } from "../../store/model";
@@ -35,7 +35,6 @@ import { ARC_SELECTED_INACTIVE, arcSelectedLabel, useArcLabel, useArcTitle, useS
 
 const PAD = GROUP_PAD;
 const EMPTY: LiveItem[] = [];
-const NONE: string[] = [];
 const NONE_COMPLETED: CompletedItem[] = [];
 
 const liveRowKey = (folderId: string, itemId: string) => `live|${folderId}|${itemId}`;
@@ -49,8 +48,9 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   const showAll = useLive((s) => s.showAll);
   const folded = useDragFolded(`l:${folderId}`);
   const collapsed = folded || !!folder?.collapsed || peek;
-  const rows = useMemo(() => (folder ? folderRows(folder, items, showAll) : []), [folder, items, showAll]);
-  const itemIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
+  const completed = useCompletedShown(folderId);
+  const rows = useMemo(() => (folder ? folderRows(folder, openItems(items, completed), showAll, completed) : []), [folder, items, showAll, completed]);
+  const itemIds = useMemo(() => new Set([...items, ...completed.map((c) => c.item)].map((i) => i.id)), [items, completed]);
   const hiddenList = useLive((s) => s.hidden[folderId] ?? EMPTY);
   const hiddenIds = useMemo(() => new Set([...hiddenList, ...fetched.filter((it) => !itemIds.has(it.id))].map((i) => i.id)), [hiddenList, fetched, itemIds]);
   const profileId = usePageProfileId();
@@ -65,7 +65,6 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
     return liveItem?.folderId === folderId && liveTabPlace(liveItem.itemId, itemIds, hiddenIds) !== "hidden" ? id : null;
   });
   const activeItem = useBrowser((s) => (activeTab ? (s.tabs[activeTab]?.liveItem?.itemId ?? null) : null));
-  const completed = useCompletedShown(folderId).length > 0;
   const fold = useFold(collapsed);
   const flat = useAddressBarInSidebar();
   const frame = groupFrame(flat);
@@ -79,7 +78,6 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
     ? rows.map((row) => ({ key: row.key, node: <FolderRowView row={row} folderId={folderId} windowId={windowId} /> }))
     : [{ key: "note", node: <FolderNote folderId={folderId} /> }];
   for (const id of strays) entries.push({ key: `stray:${id}`, node: <TabRow tabId={id} /> });
-  if (completed) entries.push({ key: "completed", node: <CompletedFooter folderId={folderId} windowId={windowId} /> });
   const keep = !activeTab
     ? null
     : strays.includes(activeTab)
@@ -114,7 +112,7 @@ function FolderRowView({ row, folderId, windowId }: { row: FolderRow; folderId: 
     case "stack":
       return <StackRow folderId={folderId} windowId={windowId} stack={row} />;
     case "item":
-      return <LiveItemRow folderId={folderId} item={row.item} windowId={windowId} />;
+      return <LiveItemRow folderId={folderId} item={row.item} windowId={windowId} done={row.done} />;
   }
 }
 
@@ -309,7 +307,7 @@ function StackRow({ folderId, windowId, stack }: { folderId: string; windowId: s
   );
 }
 
-function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean }) {
+function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean; done?: CompletionState }) {
   const indent = inStack ? 10 : 0;
   const theme = useTheme();
   const tokens = useSidebarTokens();
@@ -323,24 +321,25 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   const profileId = usePageProfileId();
   const tabId = useBrowser((s) => viewTabIds(s, windowId, profileId).find((id) => s.tabs[id]?.liveItem?.itemId === item.id && s.tabs[id]?.liveItem?.folderId === folderId) ?? null);
   const active = useBrowser((s) => !!tabId && activeTabId(s, windowId, profileId) === tabId);
-  const unread = useLive((s) => !!s.unread[folderId]?.includes(item.id));
-  const completion = useLive((s) => (s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
+  const unread = useLive((s) => !done && !!s.unread[folderId]?.includes(item.id));
+  const completing = useLive((s) => (!done && s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
+  const completion = completing ?? done ?? null;
+  const needsReview = item.section === "review" || item.section === "team";
   const { hovered, hoverProps } = useRowHover(windowId, completion ? null : { kind: "live", id: key });
   const fold = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (!completion) return;
+    if (!completing) return;
     fold.setValue(1);
     Animated.sequence([
       Animated.delay(COMPLETION_MS - 420),
       Animated.timing(fold, { toValue: 0, duration: 360, easing: Easing.bezier(0.2, 0.9, 0.3, 1), useNativeDriver: false }),
     ]).start();
-  }, [completion]);
+  }, [completing]);
   const fill = active ? tokens.selectedFill : hovered ? theme.tabHover : "rgba(0,0,0,0)";
-  const label = (completion ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completion ? theme.textSecondary : (arcLabel ?? theme.textTab));
-  const subtitleText = liveSubtitle(item, subtitle, completion);
+  const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
 
   return (
-    <Animated.View presentationGate style={completion ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
+    <Animated.View presentationGate style={completing ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
       <View
         ref={(v) => {
           registerRow(windowId, key, hidden ? null : v);
@@ -367,12 +366,12 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
                 cornerRadius={layout.rowRadius}
                 style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}
               >
-                {unread && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-                <ItemIcon item={item} completion={completion} colors={colors} flat={flat} />
+                {unread && !flat ? <PulseDot color={colors.pip} pulsing={needsReview} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
+                <ItemIcon item={item} completion={flat && !completing ? null : completion} colors={colors} flat={flat} animate={!!completing} />
                 {flat && subtitle ? (
                   <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
                     <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} style={{ height: 18 }} />
-                    <FadeLabel text={subtitleText} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />
+                    <LiveSubtitle item={item} subtitle={subtitle} completion={completion} colors={colors} />
                   </View>
                 ) : (
                   <FadeLabel
@@ -384,16 +383,16 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
                   />
                 )}
                 <HoverSlot
-                  hovered={hovered && !!tabId && !completion}
+                  hovered={hovered && !!tabId && !completing}
                   width={22}
                   hover={<IconButton icon="xmark" size={10} weight="semibold" box={22} radius={6} onPress={() => tabId && void closeTab(tabId)} tooltip="Close Tab (⌘W)" />}
                 >
                   {unread && flat ? (
                     <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
+                      <PulseDot color={theme.textPrimary} pulsing={needsReview} style={{ width: 6, height: 6, opacity: 0.9 }} />
                     </View>
                   ) : null}
-                  <Trailing item={item} completion={completion} colors={colors} />
+                  <Trailing item={item} completion={completion} colors={colors} flat={flat} />
                 </HoverSlot>
               </Surface>
             )}
@@ -404,9 +403,42 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   );
 }
 
-export function liveSubtitle(item: LiveItem, subtitle: string, completion: CompletedItem["state"] | null): string {
-  const approved = !completion && !!item.pr && prBadge(item.pr) === "approved";
-  return [subtitle, approved && "Approved", item.pr && `#${item.pr.number}`].filter(Boolean).join(" · ");
+const PR_STATES: Record<"open" | "draft" | CompletionState, { title: string; icon: ImageSourcePropType; color: keyof LiveColors }> = {
+  open: { title: "Open", icon: require("../../../assets/octicons/git-pull-request.png"), color: "stateOpen" },
+  draft: { title: "Draft", icon: require("../../../assets/octicons/git-pull-request-draft.png"), color: "stateDraft" },
+  merged: { title: "Merged", icon: require("../../../assets/octicons/git-merge.png"), color: "stateMerged" },
+  closed: { title: "Closed", icon: require("../../../assets/octicons/git-pull-request-closed.png"), color: "stateClosed" },
+  reviewed: { title: "Reviewed", icon: require("../../../assets/octicons/eye.png"), color: "stateReviewed" },
+};
+
+function StateChip({ state, colors }: { state: keyof typeof PR_STATES; colors: LiveColors }) {
+  const spec = PR_STATES[state];
+  return (
+    <Surface fill={colors[spec.color]} cornerRadius={7} style={{ height: 14, flexDirection: "row", alignItems: "center", paddingLeft: 4, paddingRight: 5, marginRight: 5 }}>
+      <Image source={spec.icon} style={{ width: 10, height: 10 }} />
+      <Text style={{ marginLeft: 2, fontSize: 9.5, fontWeight: "600", color: "#FFFFFF" }}>{spec.title}</Text>
+    </Surface>
+  );
+}
+
+export function LiveSubtitle({ item, subtitle, completion, colors }: { item: LiveItem; subtitle: string; completion: CompletionState | null; colors: LiveColors }) {
+  const theme = useTheme();
+  if (!item.pr) return <FadeLabel text={subtitle} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />;
+  const passed = !completion && summarizeChecks(item.pr.checks)?.tone === "success";
+  const text = [subtitle, `#${item.pr.number}`].filter(Boolean).join(" · ");
+  return (
+    <View style={{ height: 14, flexDirection: "row", alignItems: "center" }}>
+      <StateChip state={completion ?? (item.pr.draft ? "draft" : "open")} colors={colors} />
+      <FadeLabel
+        text={passed ? `${text} · ` : text}
+        trailingSymbol={passed ? "checkmark" : undefined}
+        trailingSymbolColor={colors.success}
+        fontSize={12}
+        color={theme.textSecondary}
+        style={{ flex: 1, height: 14 }}
+      />
+    </View>
+  );
 }
 
 const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: keyof LiveColors }> = {
@@ -450,29 +482,30 @@ export function ItemIcon({
   return <TabIcon url={item.source === "confluence" && !item.icon ? SOURCES.confluence.site : item.url} icon={item.icon} />;
 }
 
-const BADGES: Record<NonNullable<ReturnType<typeof prBadge>>, { symbol: string | null; color: keyof LiveColors; tip: string }> = {
+const PENDING_PERIOD = 3;
+
+const BADGES: Record<Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed">, { symbol: string | null; color: keyof LiveColors; tip: string }> = {
   conflict: { symbol: "exclamationmark.triangle.fill", color: "conflict", tip: "Merge conflicts" },
   failing: { symbol: "xmark.circle.fill", color: "failure", tip: "Checks are failing" },
   changesRequested: { symbol: "arrow.uturn.backward.circle.fill", color: "failure", tip: "Changes Requested" },
   pending: { symbol: null, color: "pending", tip: "Some checks haven't completed yet" },
   approved: { symbol: "checkmark.seal.fill", color: "success", tip: "Approved" },
-  passed: { symbol: "checkmark", color: "success", tip: "All checks have passed" },
 };
 
-export function Trailing({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }): ReactNode {
-  const theme = useTheme();
+export function Trailing({ item, completion, colors, flat }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors; flat: boolean }): ReactNode {
   if (completion) {
+    if (flat) return null;
     return <Text style={{ fontSize: 11, fontWeight: "500", color: colors[COMPLETION_GLYPH[completion].color], marginRight: 4 }}>{completion === "merged" ? "Merged" : completion === "reviewed" ? "Reviewed" : "Closed"}</Text>;
   }
   const badge = item.pr ? prBadge(item.pr) : null;
-  if (!badge) return null;
+  if (!badge || badge === "passed") return null;
   const spec = BADGES[badge];
   return (
     <View tooltip={spec.tip} style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
       {spec.symbol ? (
         <Symbol name={spec.symbol} size={11} weight="semibold" color={colors[spec.color]} style={{ width: 16, height: 16 }} />
       ) : (
-        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors[spec.color], borderWidth: 0.5, borderColor: theme.dark ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.1)" }} />
+        <ActivitySpinner visible color={colors[spec.color]} period={PENDING_PERIOD} style={{ width: 12, height: 12 }} />
       )}
     </View>
   );
@@ -482,46 +515,7 @@ function useCompletedShown(folderId: string): CompletedItem[] {
   return useLive(
     useShallow((s) => {
       const folder = s.folders[folderId];
-      if (!folder?.showCompleted) return NONE_COMPLETED;
-      const completing = s.completing[folderId] ?? NONE;
-      return (s.completed[folderId] ?? []).filter((c) => Date.now() - c.at < 24 * 3_600_000 && !completing.includes(c.item.id) && !inHiddenRepo(folder, c.item));
+      return folder ? shownCompleted(folder, s.completed[folderId] ?? NONE_COMPLETED) : NONE_COMPLETED;
     }),
-  );
-}
-
-function CompletedFooter({ folderId, windowId }: { folderId: string; windowId: string }) {
-  const theme = useTheme();
-  const colors = useLiveColors();
-  const shown = useCompletedShown(folderId);
-  const [open, setOpen] = useState(false);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  if (!shown.length) return null;
-  const enter = () => {
-    clearTimeout(hideTimer.current);
-    setOpen(true);
-  };
-  const leave = () => {
-    clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setOpen(false), 250);
-  };
-  return (
-    <View onMouseEnter={enter} onMouseLeave={leave} style={{ gap: layout.rowGap }}>
-      <View style={{ height: 24, flexDirection: "row", alignItems: "center", paddingLeft: 9, borderRadius: 8, backgroundColor: open ? theme.rowHover : undefined }}>
-        <Symbol name="checkmark.circle" size={11} color={theme.textSecondary} style={{ width: 16, height: 16 }} />
-        <Text style={{ marginLeft: 5, fontSize: 12, color: theme.textSecondary }}>{shown.length} Completed</Text>
-      </View>
-      {open
-        ? shown.slice(0, 8).map((c) => (
-            <Pressable key={c.item.id} onPress={() => openLiveItem(windowId, folderId, c.item)}>
-              {({ pressed }) => (
-                <View style={{ height: 28, borderRadius: 8, flexDirection: "row", alignItems: "center", paddingLeft: 9, paddingRight: 8, backgroundColor: pressed ? theme.tabPressed : undefined, opacity: 0.75 }}>
-                  <Symbol name={COMPLETION_GLYPH[c.state].symbol} size={12} color={colors[COMPLETION_GLYPH[c.state].color]} style={{ width: 16, height: 16 }} />
-                  <FadeLabel text={c.item.title} fontSize={12.5} color={theme.textSecondary} style={{ flex: 1, height: 17, marginLeft: 5 }} />
-                </View>
-              )}
-            </Pressable>
-          ))
-        : null}
-    </View>
   );
 }

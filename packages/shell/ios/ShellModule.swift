@@ -685,6 +685,8 @@ public class FadeLabelModule: Module {
       Prop("color") { (view: FadeLabel, hex: String) in view.color = NSColor(hex: hex) ?? .labelColor }
       Prop("fadeWidth") { (view: FadeLabel, v: Double) in view.fadeWidth = v }
       Prop("letterSpacing") { (view: FadeLabel, v: Double?) in view.letterSpacing = v.flatMap { $0.isFinite ? $0 : nil } ?? 0 }
+      Prop("trailingSymbol") { (view: FadeLabel, v: String?) in view.trailingSymbol = v ?? "" }
+      Prop("trailingSymbolColor") { (view: FadeLabel, hex: String?) in view.trailingSymbolColor = hex.flatMap(NSColor.init(hex:)) }
     }
   }
 }
@@ -723,7 +725,7 @@ final class FadeLabel: ExpoView {
   var weight = "regular" { didSet { update() } }
   var color: NSColor = .labelColor {
     didSet {
-      if letterSpacing == 0 {
+      if plainText {
         field.textColor = color
         label.needsDisplay = true
       } else {
@@ -733,6 +735,10 @@ final class FadeLabel: ExpoView {
   }
   var fadeWidth: Double = 24 { didSet { relayout() } }
   var letterSpacing: Double = 0 { didSet { if letterSpacing != oldValue { update() } } }
+  var trailingSymbol = "" { didSet { if trailingSymbol != oldValue { update() } } }
+  var trailingSymbolColor: NSColor? { didSet { if trailingSymbolColor != oldValue, !trailingSymbol.isEmpty { update() } } }
+
+  private var plainText: Bool { letterSpacing == 0 && trailingSymbol.isEmpty }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -785,14 +791,26 @@ final class FadeLabel: ExpoView {
     ]
     let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: weights[weight] ?? .regular)
     field.font = font
-    if letterSpacing == 0 {
+    if plainText {
       field.stringValue = text
       field.textColor = color
     } else {
-      field.attributedStringValue = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .kern: letterSpacing])
+      let attributed = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .kern: letterSpacing])
+      if let mark = trailingMark(font) { attributed.append(mark) }
+      field.attributedStringValue = attributed
     }
     label.needsDisplay = true
     measure()
+  }
+
+  private func trailingMark(_ font: NSFont) -> NSAttributedString? {
+    let configuration = NSImage.SymbolConfiguration(pointSize: font.pointSize * 0.8, weight: .bold)
+      .applying(NSImage.SymbolConfiguration(paletteColors: [trailingSymbolColor ?? color]))
+    guard let image = NSImage(systemSymbolName: trailingSymbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) else { return nil }
+    let attachment = NSTextAttachment()
+    attachment.image = image
+    attachment.bounds = NSRect(x: 0, y: ((font.capHeight - image.size.height) / 2).rounded(), width: image.size.width, height: image.size.height)
+    return NSAttributedString(attachment: attachment)
   }
 
   private func measure() {
@@ -953,7 +971,7 @@ private final class FadeLabelText: NSView {
 
   override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
 
-  override func accessibilityValue() -> Any? { field?.stringValue }
+  override func accessibilityValue() -> Any? { field?.stringValue.replacingOccurrences(of: "\u{FFFC}", with: "✓") }
 
   override func accessibilityFrame() -> NSRect {
     NSAccessibility.screenRect(fromView: self, rect: bounds.insetBy(dx: 1, dy: -1))
@@ -1145,6 +1163,8 @@ public class ActivitySpinnerModule: Module {
 
     View(ActivitySpinner.self) {
       Prop("visible") { (view: ActivitySpinner, visible: Bool) in view.visible = visible }
+      Prop("color") { (view: ActivitySpinner, hex: String?) in view.tint = hex.flatMap(NSColor.init(hex:)) }
+      Prop("period") { (view: ActivitySpinner, period: Double?) in view.period = period.flatMap { $0 > 0 ? $0 : nil } ?? ActivitySpinner.defaultPeriod }
     }
   }
 }
@@ -1154,6 +1174,7 @@ final class ActivitySpinner: ExpoView {
   private static let hideDelay: TimeInterval = 0.25
   private static let disappearDuration: CFTimeInterval = 0.2
   private static let hiddenScale: CGFloat = 0.6
+  static let defaultPeriod: CFTimeInterval = 1.88
 
   private let glyph = CALayer()
   private let track = CAShapeLayer()
@@ -1174,6 +1195,14 @@ final class ActivitySpinner: ExpoView {
           self.disappear()
         }
       }
+    }
+  }
+  var tint: NSColor? { didSet { if tint != oldValue { recolor() } } }
+  var period = ActivitySpinner.defaultPeriod {
+    didSet {
+      guard period != oldValue, ring.animation(forKey: "activityRotation") != nil else { return }
+      ring.removeAnimation(forKey: "activityRotation")
+      spin()
     }
   }
 
@@ -1228,8 +1257,9 @@ final class ActivitySpinner: ExpoView {
 
   private func recolor() {
     effectiveAppearance.performAsCurrentDrawingAppearance {
-      track.strokeColor = NSColor.secondaryLabelColor.withAlphaComponent(0.18).cgColor
-      ring.strokeColor = NSColor.secondaryLabelColor.cgColor
+      let stroke = tint ?? .secondaryLabelColor
+      track.strokeColor = stroke.withAlphaComponent(tint == nil ? 0.18 : 0.25).cgColor
+      ring.strokeColor = stroke.cgColor
     }
   }
 
@@ -1280,11 +1310,113 @@ final class ActivitySpinner: ExpoView {
     let turn = CABasicAnimation(keyPath: "transform.rotation.z")
     turn.fromValue = 0
     turn.toValue = isFlipped ? 2 * Double.pi : -2 * Double.pi
-    turn.duration = 1.88
+    turn.duration = period
     turn.repeatCount = .infinity
     turn.timingFunction = CAMediaTimingFunction(name: .linear)
     turn.isRemovedOnCompletion = false
     ring.add(turn, forKey: "activityRotation")
+  }
+}
+
+public class PulseDotModule: Module {
+  public func definition() -> ModuleDefinition {
+    Name("ArdiaPulseDot")
+
+    View(PulseDot.self) {
+      Prop("color") { (view: PulseDot, hex: String) in view.color = NSColor(hex: hex) ?? .labelColor }
+      Prop("pulsing") { (view: PulseDot, pulsing: Bool) in view.pulsing = pulsing }
+    }
+  }
+}
+
+final class PulseDot: ExpoView {
+  private static let halfPeriod: CFTimeInterval = 0.9
+
+  private let dot = CALayer()
+
+  var color: NSColor = .labelColor { didSet { recolor() } }
+  var pulsing = false { didSet { if pulsing != oldValue { syncPulse() } } }
+
+  required init(appContext: AppContext? = nil) {
+    super.init(appContext: appContext)
+    wantsLayer = true
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    relayout()
+    syncPulse()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    relayout()
+    syncPulse()
+  }
+
+  override func viewDidHide() {
+    super.viewDidHide()
+    syncPulse()
+  }
+
+  override func viewDidUnhide() {
+    super.viewDidUnhide()
+    syncPulse()
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    syncPulse()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    recolor()
+  }
+
+  private func relayout() {
+    guard let layer else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    if dot.superlayer !== layer { layer.addSublayer(dot) }
+    let side = min(bounds.width, bounds.height)
+    dot.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+    dot.position = CGPoint(x: bounds.midX, y: bounds.midY)
+    dot.cornerRadius = side / 2
+    CATransaction.commit()
+    recolor()
+  }
+
+  private func recolor() {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    effectiveAppearance.performAsCurrentDrawingAppearance { dot.backgroundColor = color.cgColor }
+    CATransaction.commit()
+  }
+
+  private var onScreen: Bool {
+    window != nil && !isHiddenOrHasHiddenAncestor && !bounds.intersection(visibleRect).isEmpty
+  }
+
+  private func syncPulse() {
+    let wanted = pulsing && onScreen
+    guard wanted != (dot.animation(forKey: "pulse") != nil) else { return }
+    guard wanted else { return dot.removeAnimation(forKey: "pulse") }
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = 1
+    fade.toValue = 0.3
+    let shrink = CABasicAnimation(keyPath: "transform.scale")
+    shrink.fromValue = 1
+    shrink.toValue = 0.8
+    let pulse = CAAnimationGroup()
+    pulse.animations = [fade, shrink]
+    pulse.duration = Self.halfPeriod
+    pulse.autoreverses = true
+    pulse.repeatCount = .infinity
+    pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    dot.add(pulse, forKey: "pulse")
   }
 }
 

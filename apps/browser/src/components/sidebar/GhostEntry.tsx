@@ -4,10 +4,10 @@ import { resolveFavicon, useFavicons } from "../../lib/favicons";
 import { bundledSiteIcon } from "../../lib/siteIcons";
 import { layout, useTheme } from "../../lib/theme";
 import { errorText } from "../../live/engine";
-import { folderRows, hasShownUnread, inHiddenRepo, liveTabPlace, shownItems, type FolderRow } from "../../live/rows";
+import { folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import type { live } from "../../live/store";
-import type { CompletedItem, LiveFolder, LiveItem } from "../../live/types";
+import type { CompletedItem, CompletionState, LiveFolder, LiveItem } from "../../live/types";
 import { useLiveColors } from "../live/colors";
 import type { BrowserState } from "../../store/browser";
 import { activeTabId, viewTabIds } from "../../store/model";
@@ -19,7 +19,7 @@ import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_PAD, GROUP_RADIUS, groupFrame, k
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { pointerOnRow } from "./hover";
-import { ItemIcon, liveSubtitle, Trailing } from "./LiveFolderBlock";
+import { ItemIcon, LiveSubtitle, Trailing } from "./LiveFolderBlock";
 import { folderChildrenWith } from "./pinnedTree";
 import { FaviconFallback, NewTabIcon } from "../primitives";
 import { HoverSlot } from "../HoverSlot";
@@ -28,15 +28,14 @@ import { GROUP_COLORS, useArcTitle, useSidebarTokens, withAlpha } from "./tokens
 
 type TabShot = { kind: "tab"; key: string; title: string; url: string; favicon?: string | null; icon?: string | null; profileId: string; uri: string | null; template: boolean; sound: "muted" | "playing" | null; hovered: boolean };
 type SplitShot = { kind: "split"; key: string; panes: TabShot[] };
-type LiveItemShot = { key: string; item: LiveItem; indent: number; completion: CompletedItem["state"] | null; unread: boolean };
+type LiveItemShot = { key: string; item: LiveItem; indent: number; completion: CompletedItem["state"] | null; done: CompletionState | null; unread: boolean };
 type LiveRowShot =
   | { kind: "title"; key: string; title: string }
   | { kind: "more"; key: string; count: number }
   | { kind: "stack"; key: string; repo: string; count: number; items: LiveItemShot[] | null }
   | { kind: "item"; key: string; item: LiveItemShot }
   | { kind: "note"; key: string; text: string }
-  | { kind: "tab"; key: string; tab: TabShot }
-  | { kind: "completed"; key: string; count: number };
+  | { kind: "tab"; key: string; tab: TabShot };
 type LiveShot = {
   kind: "live";
   key: string;
@@ -90,14 +89,13 @@ function splitShot(s: BrowserState, splitId: string): SplitShot {
   return { kind: "split", key: `s:${splitId}`, panes: panes.flatMap((id) => tabShot(s, id, false) ?? []) };
 }
 
-const COMPLETED_SHOWN_MS = 24 * 3_600_000;
-
-const itemShot = (data: LiveData, folderId: string, item: LiveItem, indent: number): LiveItemShot => ({
+const itemShot = (data: LiveData, folderId: string, item: LiveItem, indent: number, done: CompletionState | null = null): LiveItemShot => ({
   key: item.id,
   item,
   indent,
-  completion: data.completing[folderId]?.includes(item.id) ? (data.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null,
-  unread: !!data.unread[folderId]?.includes(item.id),
+  completion: !done && data.completing[folderId]?.includes(item.id) ? (data.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null,
+  done,
+  unread: !done && !!data.unread[folderId]?.includes(item.id),
 });
 
 function noteText(data: LiveData, folder: LiveFolder): string {
@@ -112,7 +110,7 @@ function noteText(data: LiveData, folder: LiveFolder): string {
 function rowShot(data: LiveData, folderId: string, row: FolderRow): LiveRowShot {
   if (row.kind === "header") return { kind: "title", key: row.key, title: row.title };
   if (row.kind === "more") return { kind: "more", key: row.key, count: row.count };
-  if (row.kind === "item") return { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, 0) };
+  if (row.kind === "item") return { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, 0, row.done ?? null) };
   const open = data.expandedStacks[row.id] !== false;
   return { kind: "stack", key: row.key, repo: row.repo.split("/")[1] ?? row.repo, count: row.items.length, items: open ? row.items.map((it) => itemShot(data, folderId, it, 10)) : null };
 }
@@ -122,18 +120,16 @@ function liveShot(s: BrowserState, windowId: string, profileId: string, folderId
   if (!folder) return null;
   const fetched = data.items[folderId] ?? [];
   const items = shownItems(folder, fetched);
-  const rows = folderRows(folder, items, data.showAll);
-  const itemIds = new Set(items.map((i) => i.id));
+  const completed = shownCompleted(folder, data.completed[folderId] ?? []);
+  const rows = folderRows(folder, openItems(items, completed), data.showAll, completed);
+  const itemIds = new Set([...items, ...completed.map((c) => c.item)].map((i) => i.id));
   const hiddenIds = new Set([...(data.hidden[folderId] ?? []), ...fetched.filter((it) => !itemIds.has(it.id))].map((item) => item.id));
   const strays = viewTabIds(s, windowId, profileId).filter((id) => s.tabs[id]?.liveItem?.folderId === folderId && liveTabPlace(s.tabs[id]!.liveItem!.itemId, itemIds, hiddenIds) === "stray");
-  const completing = data.completing[folderId] ?? [];
-  const completed = folder.showCompleted ? (data.completed[folderId] ?? []).filter((c) => Date.now() - c.at < COMPLETED_SHOWN_MS && !completing.includes(c.item.id) && !inHiddenRepo(folder, c.item)).length : 0;
   const all: LiveRowShot[] = rows.length ? rows.map((row) => rowShot(data, folderId, row)) : [{ kind: "note", key: "note", text: noteText(data, folder) }];
   for (const id of strays) {
     const tab = tabShot(s, id, false);
     if (tab) all.push({ kind: "tab", key: `stray:${id}`, tab });
   }
-  if (completed) all.push({ kind: "completed", key: "completed", count: completed });
   const collapsed = folder.collapsed || peek;
   const status = data.status[folderId];
   const initialLoading = !status || status.state === "initializing" || (status.state === "updating" && !status.lastFetch);
@@ -355,18 +351,18 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
   const theme = useTheme();
   const colors = useLiveColors();
   const arcTitle = useArcTitle();
-  const { item, completion, unread, indent } = shot;
+  const { item, completion: completing, done, unread, indent } = shot;
+  const completion = completing ?? done;
   const subtitle = item.pr?.author || item.subtitle;
-  const subtitleText = liveSubtitle(item, subtitle, completion);
-  const color = completion ? theme.textSecondary : (arcTitle ?? label);
+  const color = completing ? theme.textSecondary : (arcTitle ?? label);
   return (
     <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}>
       {unread && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-      <ItemIcon item={item} completion={completion} colors={colors} flat={flat} animate={false} />
+      <ItemIcon item={item} completion={flat && !completing ? null : completion} colors={colors} flat={flat} animate={false} />
       {flat && subtitle ? (
         <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
           <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={color} style={{ height: 18 }} />
-          <FadeLabel text={subtitleText} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />
+          <LiveSubtitle item={item} subtitle={subtitle} completion={completion} colors={colors} />
         </View>
       ) : (
         <FadeLabel text={item.title} fontSize={layout.rowFontSize} weight={unread && !flat ? "medium" : undefined} color={color} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
@@ -377,7 +373,7 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
           </View>
         ) : null}
-        <Trailing item={item} completion={completion} colors={colors} />
+        <Trailing item={item} completion={completion} colors={colors} flat={flat} />
       </HoverSlot>
     </View>
   );
@@ -399,8 +395,6 @@ function liveRowGhost(row: LiveRowShot, theme: ReturnType<typeof useTheme>, labe
       return secondary(26, `Show ${row.count} More`, "ellipsis");
     case "note":
       return secondary(28, row.text);
-    case "completed":
-      return secondary(24, `${row.count} Completed`, "checkmark.circle");
     case "tab":
       return <TabGhost shot={row.tab} theme={theme} label={label} />;
     case "item":
