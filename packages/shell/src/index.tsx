@@ -420,6 +420,7 @@ export type ArcTabRowBackgroundProps = ViewProps & {
   iconWidth?: number;
   regionHovered?: boolean;
   regionPressed?: boolean;
+  onSeparateKey?: (event: { nativeEvent: { held: boolean } }) => void;
 };
 
 export const ArcTabRowBackground = requireNativeViewManager<ArcTabRowBackgroundProps>("ArdiaTabRowBackground");

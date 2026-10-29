@@ -28,6 +28,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const gesture = useRef<Gesture | null>(null);
   const released = useRef<boolean | null>(null);
+  const lastPress = useRef(false);
   const overlay = useRef(false);
   const watch = useCallback((on: boolean) => pointed(windowId, rerender, on), [windowId]);
   const clearReleased = useCallback(() => {
@@ -58,6 +59,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
       const g = gesture.current;
       if (!g) return;
       gesture.current = null;
+      lastPress.current = keepContainment && held(g).pressed;
       released.current = keepContainment && g.rect ? within(g.rect, g.last) : null;
       if (released.current === null) watch(false);
       rerender();
@@ -100,6 +102,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
       if (!p) return;
       const optimistic = idle;
       finish(false);
+      lastPress.current = false;
       clearReleased();
       const g: Gesture = { touch: t.identifier, origin: p, last: p, optimistic, owner: null, rect: null, measure: 0 };
       gesture.current = g;
@@ -134,6 +137,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
     const g = gesture.current;
     if (g) measure(g);
   };
+  const pressedInRegion = useCallback(() => (gesture.current ? held(gesture.current).pressed : lastPress.current), []);
   const out = !live ? NONE : gesture.current ? held(gesture.current) : { hovered: idle, pressed: false };
-  return { overlayProps, rowLeft, touchProps, onLayout: gesture.current ? onLayout : undefined, regionHovered: out.hovered, regionPressed: out.pressed };
+  return { overlayProps, rowLeft, touchProps, onLayout: gesture.current ? onLayout : undefined, regionHovered: out.hovered, regionPressed: out.pressed, pressedInRegion };
 }

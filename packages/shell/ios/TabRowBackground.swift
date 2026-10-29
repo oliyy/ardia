@@ -6,6 +6,7 @@ public class TabRowBackgroundModule: Module {
     Name("ArdiaTabRowBackground")
 
     View(TabRowBackground.self) {
+      Events("onSeparateKey")
       Prop("dark") { (view: TabRowBackground, value: Bool?) in
         view.dark = value ?? true
       }
@@ -48,6 +49,7 @@ final class TabRowBackground: ExpoView {
     let itemBackground: CGColor
     let pressed: CGColor
     let selectedShadow: CGColor
+    let separator: CGColor
   }
 
   private static let lightPalette = Palette(
@@ -56,7 +58,8 @@ final class TabRowBackground: ExpoView {
     multiSelected: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.10000000149011612).cgColor,
     itemBackground: NSColor(displayP3Red: 0.054999999701976776, green: 0.05900000035762787, blue: 0.06300000101327896, alpha: 0.05000000074505806).cgColor,
     pressed: NSColor(displayP3Red: 0.054999999701976776, green: 0.05900000035762787, blue: 0.06300000101327896, alpha: 0.06499999761581421).cgColor,
-    selectedShadow: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.20000000298023224).cgColor
+    selectedShadow: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.20000000298023224).cgColor,
+    separator: NSColor(displayP3Red: 0, green: 0, blue: 0, alpha: 0.30000001192092896).cgColor
   )
   private static let darkPalette = Palette(
     current: NSColor(displayP3Red: 0.9800000190734863, green: 0.984000027179718, blue: 1, alpha: 0.20000000298023224).cgColor,
@@ -64,7 +67,8 @@ final class TabRowBackground: ExpoView {
     multiSelected: NSColor(displayP3Red: 0.9800000190734863, green: 0.984000027179718, blue: 1, alpha: 0.10000000149011612).cgColor,
     itemBackground: NSColor(displayP3Red: 0.9800000190734863, green: 0.984000027179718, blue: 1, alpha: 0.10000000149011612).cgColor,
     pressed: NSColor(displayP3Red: 0.9800000190734863, green: 0.984000027179718, blue: 1, alpha: 0.06499999761581421).cgColor,
-    selectedShadow: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0).cgColor
+    selectedShadow: NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0).cgColor,
+    separator: NSColor(displayP3Red: 1, green: 1, blue: 1, alpha: 0.30000001192092896).cgColor
   )
   private static let cornerRadius: CGFloat = 12
   private static let inactiveOpacity: Float = 0.5
@@ -72,6 +76,10 @@ final class TabRowBackground: ExpoView {
   private static let minXCorners: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
   private static let allCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
   private static let frameLimit = CGRect(x: -0x1p63, y: -0x1p63, width: 0x1p64, height: 0x1p64)
+  private static let separatorWidth: CGFloat = 2
+  private static let separatorInset: CGFloat = 6
+  private static let separatorRun: CGFloat = 2
+  private static let separatorRise: CGFloat = 13
 
   var dark = true { didSet { apply() } }
   var current = false { didSet { apply() } }
@@ -83,10 +91,14 @@ final class TabRowBackground: ExpoView {
   var iconWidth: CGFloat = 0 { didSet { apply() } }
   var regionHovered = false { didSet { apply() } }
   var regionPressed = false { didSet { apply() } }
+  let onSeparateKey = EventDispatcher()
 
   private let background = CALayer()
   private let iconRegion = CALayer()
+  private let separator = CAShapeLayer()
   private var activityObservers: [NSObjectProtocol] = []
+  private var separateKeyMonitor: Any?
+  private var separateKeyHeld = false
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -95,10 +107,14 @@ final class TabRowBackground: ExpoView {
     background.masksToBounds = false
     background.shadowOpacity = 1
     background.shadowRadius = Self.shadowRadius
+    separator.fillColor = nil
+    separator.lineWidth = Self.separatorWidth
+    separator.lineCap = .round
   }
 
   deinit {
     for token in activityObservers { NotificationCenter.default.removeObserver(token) }
+    if let separateKeyMonitor { NSEvent.removeMonitor(separateKeyMonitor) }
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -170,6 +186,7 @@ final class TabRowBackground: ExpoView {
     if background.superlayer !== layer {
       layer.insertSublayer(background, at: 0)
       layer.insertSublayer(iconRegion, above: background)
+      layer.insertSublayer(separator, above: iconRegion)
     }
     let palette = dark ? Self.darkPalette : Self.lightPalette
     let flipped = layer.isGeometryFlipped || isFlipped
@@ -190,6 +207,42 @@ final class TabRowBackground: ExpoView {
     iconRegion.cornerRadius = Self.cornerRadius
     iconRegion.maskedCorners = fill == nil ? Self.allCorners : Self.minXCorners
     iconRegion.backgroundColor = regionPressed ? palette.pressed : regionHovered ? palette.itemBackground : nil
+    applySeparator(palette, flipped: flipped)
     CATransaction.commit()
+    watchSeparateKey(canReset && regionHovered && window != nil)
+  }
+
+  private func watchSeparateKey(_ on: Bool) {
+    if on, separateKeyMonitor == nil {
+      separateKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        self?.setSeparateKeyHeld(event.modifierFlags.contains(.command))
+        return event
+      }
+      setSeparateKeyHeld(NSEvent.modifierFlags.contains(.command))
+    } else if !on, let monitor = separateKeyMonitor {
+      NSEvent.removeMonitor(monitor)
+      separateKeyMonitor = nil
+      setSeparateKeyHeld(false)
+    }
+  }
+
+  private func setSeparateKeyHeld(_ held: Bool) {
+    guard held != separateKeyHeld else { return }
+    separateKeyHeld = held
+    onSeparateKey(["held": held])
+  }
+
+  private func applySeparator(_ palette: Palette, flipped: Bool) {
+    let shown = canReset && !regionHovered && !regionPressed
+    separator.isHidden = !shown
+    guard shown else { return }
+    let center = CGPoint(x: bounds.minX + iconMinX + iconWidth + Self.separatorInset, y: bounds.midY)
+    let rise = (flipped ? -Self.separatorRise : Self.separatorRise) / 2
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: center.x - Self.separatorRun / 2, y: center.y - rise))
+    path.addLine(to: CGPoint(x: center.x + Self.separatorRun / 2, y: center.y + rise))
+    separator.frame = bounds
+    separator.path = path
+    separator.strokeColor = palette.separator
   }
 }

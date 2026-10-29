@@ -1,6 +1,6 @@
 import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, MouseArea, Surface, Symbol } from "@ardia/shell";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, PlatformColor, Pressable, StyleSheet, TextInput, View, type GestureResponderEvent } from "react-native";
+import { Animated, Easing, PlatformColor, Pressable, StyleSheet, TextInput, View, type GestureResponderEvent } from "react-native";
 import { toggleMute } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
@@ -27,6 +27,10 @@ import { TabBadges } from "../media/TabBadges";
 import { ARC_SELECTED_INACTIVE, arcSelectedLabel, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 
 const AnimatedSurface = Animated.createAnimatedComponent(Surface);
+const AWAY_LABEL_SHIFT = 2;
+const RESET_HINT_LIFT = 7;
+const RESET_HINT_TOP = 10.5;
+const RESET_HINT_FADE = { duration: 100, easing: Easing.bezier(0.42, 0, 0.58, 1) } as const;
 
 export const clickMods = (e: GestureResponderEvent) => {
   const n = e.nativeEvent as unknown as { metaKey?: boolean; shiftKey?: boolean; altKey?: boolean };
@@ -76,6 +80,8 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
     ),
   );
   const backToPin = useHover();
+  const [separateKey, setSeparateKey] = useState(false);
+  const onSeparateKey = useCallback((e: { nativeEvent: { held: boolean } }) => setSeparateKey(e.nativeEvent.held), []);
   const arcLayout = useAddressBarInSidebar();
   const region = useIconRegion(windowId, arcLayout && !dragging && !hidden, hovered, rowView);
   const rowLeave = useCallback(
@@ -87,8 +93,10 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
   );
   if (!tab) return null;
   const resettable = isPinnedRow(tab) && awayFromPin(tab);
-  const resetting = resettable && backToPin.hovered && !renaming;
+  const resetting = !arcLayout && resettable && backToPin.hovered && !renaming;
+  const hinting = arcLayout && resettable && region.regionHovered && !renaming;
   const title = resetting ? "Back to Pinned URL" : tabTitle(tab);
+  const titleColor = arcTitle ?? (active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textTab);
   const visible = !!(flags & VISIBLE);
   const arcPaint = arcLayout && !onto;
   const fill = active ? tokens.selectedFill : selected ? tokens.multiSelected : hovered ? theme.tabHover : "rgba(0,0,0,0)";
@@ -116,7 +124,9 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
           <Pressable
             onPress={(e) => {
               dismissHover();
-              clickTab(windowId, tabId, clickMods(e));
+              const mods = clickMods(e);
+              if (arcLayout && resettable && region.pressedInRegion()) return mods.metaKey ? useBrowser.getState().separateFromPin(tab.id) : useBrowser.getState().returnToPinnedUrl(tab.id);
+              clickTab(windowId, tabId, mods);
             }}
           >
             {({ pressed }) => (
@@ -147,11 +157,12 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
                         iconWidth={ICON_WIDTH}
                         regionHovered={region.regionHovered}
                         regionPressed={region.regionPressed}
+                        onSeparateKey={resettable ? onSeparateKey : undefined}
                         pointerEvents="none"
                         style={StyleSheet.absoluteFill}
                       />
                     ) : null}
-                    {resettable ? (
+                    {resettable && !arcLayout ? (
                       <View {...backToPin.hoverProps}>
                         <Pressable onPress={() => useBrowser.getState().returnToPinnedUrl(tab.id)} tooltip="Back to Pinned URL (⌘↩)">
                           {resetting ? (
@@ -167,7 +178,7 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
                         </Pressable>
                       </View>
                     ) : (
-                      <View>
+                      <View tooltip={resettable ? "Reset Tab (⌘↩)" : undefined}>
                         <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} />
                         <TabBadges tabId={tab.id} />
                       </View>
@@ -188,16 +199,13 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
                         current={active}
                         onDone={(text) => (text === null ? endRename({ kind: "tab", id: tabId }) : commitRename({ kind: "tab", id: tabId }, text))}
                       />
+                    ) : arcLayout && resettable ? (
+                      <ResetHintTitle title={title} color={titleColor} hinting={hinting} separate={separateKey} />
                     ) : (
-                      <FadeLabel
-                        text={title}
-                        fontSize={layout.rowFontSize}
-                        color={arcTitle ?? (active ? arcSelectedLabel(arcLabel) : arcLabel) ?? (active ? theme.tabSelectedText : theme.textTab)}
-                        style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }}
-                      />
+                      <FadeLabel text={title} fontSize={layout.rowFontSize} color={titleColor} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
                     )}
                     <HoverSlot
-                      hovered={hovered && !renaming}
+                      hovered={hovered && !renaming && !hinting}
                       width={22}
                       hover={<TabCloseButton tabId={tab.id} />}
                     >
@@ -213,6 +221,30 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
     </View>
   );
 });
+
+function ResetHintTitle({ title, color, hinting, separate }: { title: string; color: string; hinting: boolean; separate: boolean }) {
+  const [shown] = useState(() => new Animated.Value(hinting ? 1 : 0));
+  const [motion] = useState(() => ({
+    lift: shown.interpolate({ inputRange: [0, 1], outputRange: [0, -RESET_HINT_LIFT] }),
+    opacity: shown.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }),
+  }));
+  const hintedFor = useRef(hinting);
+  useEffect(() => {
+    if (hintedFor.current === hinting) return;
+    hintedFor.current = hinting;
+    Animated.timing(shown, { toValue: hinting ? 1 : 0, ...RESET_HINT_FADE, useNativeDriver: true }).start();
+  }, [hinting, shown]);
+  return (
+    <View style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap + AWAY_LABEL_SHIFT }}>
+      <AnimatedSurface style={{ flex: 1, transform: [{ translateY: motion.lift }] }}>
+        <FadeLabel text={title} fontSize={layout.rowFontSize} color={color} style={{ flex: 1 }} />
+      </AnimatedSurface>
+      <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: RESET_HINT_TOP, height: 14, opacity: motion.opacity }}>
+        <FadeLabel text={separate ? "Separate From Pinned Tab" : "Back to Pinned URL"} fontSize={11} color={color} style={{ flex: 1 }} />
+      </Animated.View>
+    </View>
+  );
+}
 
 function TabCloseButton({ tabId }: { tabId: string }) {
   const closeControl = useTabCloseControl(tabId);

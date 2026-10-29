@@ -86,6 +86,7 @@ export type OrganizeSlice = {
   placeTabs(ids: string[], placement: TabPlacement): void;
   pinTabs(ids: string[], pinned: boolean, row?: boolean): void;
   returnToPinnedUrl(tabId: string): void;
+  separateFromPin(tabId: string): void;
   setPinnedUrl(tabId: string, url?: string): void;
   setMuted(ids: string[], muted: boolean): void;
   setSiteMuted(tabId: string, muted: boolean): void;
@@ -948,6 +949,15 @@ export const createOrganizeSlice: StateCreator<BrowserState, [], [], OrganizeSli
     const t = get().tabs[tabId];
     if (!t?.pinnedUrl || samePage(t.url, t.pinnedUrl)) return;
     get().navigate(tabId, t.pinnedUrl);
+  },
+
+  separateFromPin(tabId) {
+    const s = get();
+    const t = s.tabs[tabId];
+    if (!t || !awayFromPin(t)) return;
+    const shown = activeTabId(s, t.windowId, t.profileId) === tabId;
+    s.newTab(t.windowId, { url: t.url, profileId: t.profileId, background: !shown, snapshot: { title: t.title, favicon: t.favicon, muted: t.muted, zoom: t.zoom, ...(t.engine ? { engine: t.engine } : {}) } });
+    get().returnToPinnedUrl(tabId);
   },
 
   setPinnedUrl(tabId, url) {
