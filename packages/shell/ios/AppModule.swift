@@ -303,6 +303,18 @@ public class AppModule: Module {
       #endif
     }.runOnQueue(.main)
 
+    AsyncFunction("devFoldReceipt") { () -> [String: Int] in
+      #if DEBUG
+      let select = NSSelectorFromString("ardia_foldReceipt")
+      guard let view = NSClassFromString("RCTView"), (view as AnyObject).responds(to: select),
+            let receipt = (view as AnyObject).perform(select)?.takeUnretainedValue() as? [String: NSNumber]
+      else { return [:] }
+      return receipt.mapValues { $0.intValue }
+      #else
+      return [:]
+      #endif
+    }.runOnQueue(.main)
+
     AsyncFunction("devLeftEdgePointer") { (windowId: String, x: Double, y: Double, on: Bool) -> Bool in
       #if DEBUG
       guard on else {
