@@ -1,8 +1,8 @@
+import { useRef } from "react";
 import { useBrowser, type BrowserState } from "../../store/browser";
 import { activeTabId } from "../../store/model";
 import { splitIndex } from "../../store/structure";
 import type { Tab } from "../../store/types";
-import { useShallow } from "zustand/react/shallow";
 
 export const ACTIVE = 1;
 export const SELECTED = 2;
@@ -23,6 +23,14 @@ function rowFlags(s: BrowserState, windowId: string, tabId: string): number {
   return flags;
 }
 
-export function useRowState(tabId: string, windowId: string): { tab: Tab | undefined; flags: number } {
-  return useBrowser(useShallow((s) => ({ tab: s.tabs[tabId], flags: rowFlags(s, windowId, tabId) })));
+type RowState = { tab: Tab | undefined; flags: number };
+
+export function useRowState(tabId: string, windowId: string): RowState {
+  const last = useRef<RowState | null>(null);
+  return useBrowser((s) => {
+    const tab = s.tabs[tabId];
+    const flags = rowFlags(s, windowId, tabId);
+    const prev = last.current;
+    return prev && prev.tab === tab && prev.flags === flags ? prev : (last.current = { tab, flags });
+  });
 }

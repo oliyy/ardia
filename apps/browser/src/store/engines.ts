@@ -9,14 +9,28 @@ export const otherEngine = (engine: PageEngine): PageEngine => (engine === "webk
 
 type EngineState = Pick<BrowserState, "tabs" | "settings">;
 
-export function siteOf(url: string | undefined | null): string | null {
-  if (!url) return null;
+const SITE_CACHE_LIMIT = 4096;
+const sites = new Map<string, string | null>();
+
+function parseSite(url: string): string | null {
   try {
     const u = new URL(url);
     return u.protocol === "http:" || u.protocol === "https:" ? `${u.protocol}//${u.host}`.toLowerCase() : null;
   } catch {
     return null;
   }
+}
+
+export function siteOf(url: string | undefined | null): string | null {
+  if (!url) return null;
+  const cached = sites.get(url);
+  if (cached !== undefined) return cached;
+  const site = parseSite(url);
+  if (/^https?:/i.test(url)) {
+    if (sites.size >= SITE_CACHE_LIMIT) sites.clear();
+    sites.set(url, site);
+  }
+  return site;
 }
 
 export const canSwitchEngine = (url: string | undefined | null) => !!url && /^(https?|file):/i.test(url);
