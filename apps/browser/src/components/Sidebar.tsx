@@ -592,7 +592,8 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
     }),
     [pinnedMotion.slideBelow, motion.slideBelow],
   );
-  const scope = useMemo(() => ({ enabled: animated, slideBelow: motion.slideBelow, fold }), [animated, motion.slideBelow, fold]);
+  const scope = useMemo(() => ({ enabled: animated, slideBelow: motion.slideBelow, fold }), [motion.slideBelow, fold]);
+  scope.enabled = animated;
   const tailShift = offScreen ? null : pinnedMotion.tail;
   const tailStyle = useMemo(() => (tailShift ? { transform: [{ translateY: tailShift }] } : null), [tailShift]);
   const listAt = useRef({ tail: 0, list: 0 }).current;
