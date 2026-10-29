@@ -68,12 +68,16 @@ final class UrlFieldTextContent: NSView {
   private static let fadeOffsetGap: CGFloat = 5
   private static let opaque = NSColor.white.cgColor
   private static let transparent = NSColor.white.withAlphaComponent(0).cgColor
+  private static let maskAnimationKey = "hoverButtons"
+  private static let maskDuration: CFTimeInterval = 0.15
 
   private let wrapper = NSView(frame: .zero)
   private let field = NSTextField(frame: .zero)
   private let gradient = CAGradientLayer()
   private var alignment = Alignment.leading
   private var hoverButtonsWidth: CGFloat = 0
+  private var animatesNextMask = false
+  private var maskGeneration = 0
   private var displayedText: String?
 
   override init(frame frameRect: NSRect) {
@@ -106,7 +110,9 @@ final class UrlFieldTextContent: NSView {
     field.placeholderAttributedString = placeholder.map { NSAttributedString(string: $0, attributes: [.foregroundColor: color, .font: Self.placeholderFont]) }
     displayedText = text.isEmpty ? placeholder.flatMap { $0.isEmpty ? nil : $0 } : text
     self.alignment = alignment
-    self.hoverButtonsWidth = hoverButtonsWidth.isFinite && hoverButtonsWidth >= 0 ? hoverButtonsWidth : 0
+    let buttonsWidth = hoverButtonsWidth.isFinite && hoverButtonsWidth >= 0 ? hoverButtonsWidth : 0
+    if buttonsWidth != self.hoverButtonsWidth, window != nil { animatesNextMask = true }
+    self.hoverButtonsWidth = buttonsWidth
     field.invalidateIntrinsicContentSize()
     needsLayout = true
   }
@@ -149,28 +155,47 @@ final class UrlFieldTextContent: NSView {
     let overflow = wrapperWidth > 0 && intrinsicWidth.isFinite && wrapperWidth < intrinsicWidth
     let showLeft = alignment == .trailing && overflow
     let showRight = hoverButtonsWidth > 0 || (alignment == .leading && overflow)
+    let animated = animatesNextMask
+    animatesNextMask = false
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     defer { CATransaction.commit() }
-    guard showLeft || showRight, width.isFinite, width > 0 else {
+    let animating = layer?.mask === gradient && gradient.animation(forKey: Self.maskAnimationKey) != nil
+    guard width.isFinite, width > 0, showLeft || showRight || animated || animating else {
       layer?.mask = nil
       return
     }
-    var locations: [NSNumber] = [0]
-    var colors: [CGColor] = [Self.opaque]
-    if showLeft {
-      locations.append(NSNumber(value: Double(Self.fadeWidth / width)))
-      colors.insert(Self.transparent, at: 0)
-    }
-    let offset = hoverButtonsWidth + Self.fadeOffsetGap
-    if showRight, offset < width {
-      let end = 1 - offset / width
-      locations.append(contentsOf: [NSNumber(value: Double(end - Self.fadeWidth / width)), NSNumber(value: Double(end))])
-      colors.append(contentsOf: [Self.opaque, Self.transparent])
-    }
+    let fade = Self.fadeWidth / width
+    let end = max(0, 1 - (hoverButtonsWidth + Self.fadeOffsetGap) / width)
+    let leftInner = min(fade, end)
+    let locations = [0, leftInner, max(leftInner, end - fade), end].map { NSNumber(value: Double($0)) }
+    let colors = [showLeft ? Self.transparent : Self.opaque, Self.opaque, Self.opaque, showRight ? Self.transparent : Self.opaque]
+    let attached = layer?.mask === gradient
+    let shown = attached ? gradient.presentation() ?? gradient : nil
+    let fromLocations = shown?.locations ?? locations
+    let fromColors = (shown?.colors as? [CGColor]) ?? [Self.opaque, Self.opaque, Self.opaque, Self.opaque]
     gradient.frame = bounds
     gradient.locations = locations
     gradient.colors = colors
     layer?.mask = gradient
+    guard animated, fromLocations.count == locations.count, fromColors.count == colors.count else { return }
+    maskGeneration += 1
+    let generation = maskGeneration
+    let timing = CAMediaTimingFunction(name: .easeOut)
+    let slide = CABasicAnimation(keyPath: "locations")
+    slide.fromValue = fromLocations
+    slide.toValue = locations
+    let tint = CABasicAnimation(keyPath: "colors")
+    tint.fromValue = fromColors
+    tint.toValue = colors
+    let group = CAAnimationGroup()
+    group.animations = [slide, tint]
+    group.duration = Self.maskDuration
+    group.timingFunction = timing
+    CATransaction.setCompletionBlock { [weak self] in
+      guard let self, self.maskGeneration == generation else { return }
+      self.needsLayout = true
+    }
+    gradient.add(group, forKey: Self.maskAnimationKey)
   }
 }

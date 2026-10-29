@@ -2,7 +2,7 @@ import { breadcrumb, urlForDisplay } from "@ardia/core";
 import { ArcUrlFieldBackground, ArcUrlFieldText, ArcUrlInsecureIcon, ContextMenuArea, MouseArea, Symbol, WindowDragRegion, type SymbolProps } from "@ardia/shell";
 import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Animated, Easing, Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
+import { Animated, Easing, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType, type ViewStyle } from "react-native";
 import { layout, useTheme } from "../lib/theme";
 import { withLivePage } from "../lib/livePage";
 import { webviews } from "../lib/webviews";
@@ -21,9 +21,9 @@ import { toolbarPalette, useEasedColor, type ToolbarPalette } from "./layout/too
 import { setToolbarExtensionsWidth, SIDEBAR_FIELD } from "./layout/windowLayout";
 import { showUrlBarMenu } from "./omnibox/paste";
 import { useHover } from "./primitives";
+import { useSidebarHovered } from "./sidebar/ClearDivider";
 import { ToolbarExtensions, useToolbarExtensionsWidth } from "./extensions/ToolbarExtensions";
 import { FIELD_GLASS_HOVER_OPACITY, FIELD_GLASS_OPACITY, GlassFill, liquidGlass } from "./glass";
-import { TranslateButton } from "./site/TranslateControls";
 import { ZoomIndicator } from "./site/ZoomControls";
 
 type ToolbarTab = Pick<Tab, "id" | "url" | "title" | "windowId" | "zoom">;
@@ -39,6 +39,13 @@ const LOCK = { left: 7, width: 18, gap: 3 } as const;
 const ARC_INSECURE_ICON = 22;
 const SIDEBAR_URL = { lightText: "#00000099", darkText: "#FFFFFF99" } as const;
 const HOVER_BUTTON_BOX = 24;
+const FIELD_BUTTONS_FADE = { duration: 150, easing: Easing.bezier(0, 0, 0.58, 1) } as const;
+const FIELD_GLYPHS = {
+  bookmark: { source: require("../../assets/arc-url-icons/bookmark.png"), size: 16 },
+  bookmarked: { source: require("../../assets/arc-url-icons/bookmark-fill.png"), size: 16 },
+  siteControls: { source: require("../../assets/arc-url-icons/site-controls.png"), size: 18 },
+  siteControlsOpen: { source: require("../../assets/arc-url-icons/site-controls-fill.png"), size: 18 },
+} as const;
 const RAW_WEB_AUTHORITY = /^https?:\/\/([^/?#]*)/i;
 function urlTextAlignment(url: string): "leading" | "trailing" {
   const authority = RAW_WEB_AUTHORITY.exec(url)?.[1] ?? "";
@@ -317,13 +324,37 @@ export const UrlField = memo(function UrlField({
   const arcInsecure = Boolean(sidebar) && insecure === "insecure";
   const popover = usePages((p) => p.popover[tab.id] ?? null);
   const hovered = pointerOver || popover === "siteControls";
+  const sidebarHovered = useSidebarHovered(sidebar ? windowId : "");
+  const buttonsShown = Boolean(sidebar) && (hovered || sidebarHovered);
+  const buttonsFade = useFieldButtonsFade(buttonsShown);
   const isFile = tab.url.startsWith("file:");
   const host = isFile ? "File" : breadcrumb(tab.url).host;
   const full = isFile ? ` ${safeDecode(tab.url.slice("file://".length))}` : urlForDisplay(tab.url);
   const path = !isFile && full.startsWith(host) ? full.slice(host.length) : full;
   const web = isWebUrl(tab.url);
   const trail = hovered ? path : showFullUrl ? path.replace(/\/$/, "") : !web && tab.title ? ` / ${tab.title}` : "";
-  const hoverButtons = sidebar && hovered ? 2 * HOVER_BUTTON_BOX : 0;
+  const hoverButtons = buttonsShown ? 2 * HOVER_BUTTON_BOX : 0;
+  const urlArea = (
+    <ContextMenuArea style={{ flex: 1 }} onContextMenu={() => void showUrlBarMenu(tab)}>
+      <Pressable onPress={() => openPanel(tab.url)} style={{ flex: 1, height: sidebar?.height ?? 30, justifyContent: "center", paddingLeft: insecure ? LOCK.gap : sidebar ? SIDEBAR_FIELD.textLeft : urlTextLeft(false) }}>
+        {sidebar ? (
+          <ArcUrlFieldText
+            text={host + trail}
+            alignment={urlTextAlignment(tab.url)}
+            color={theme.dark ? SIDEBAR_URL.darkText : SIDEBAR_URL.lightText}
+            hoverButtonsWidth={hoverButtons}
+            pointerEvents="none"
+            style={{ position: "absolute", left: insecure ? LOCK.gap : SIDEBAR_FIELD.textLeft, right: 0, top: 0, bottom: 0 }}
+          />
+        ) : (
+          <Text numberOfLines={1} style={{ fontSize: 13, color: palette.text }}>
+            <Text style={{ fontWeight: "500" }}>{host}</Text>
+            {trail ? <Text style={{ color: palette.secondary }}>{trail}</Text> : null}
+          </Text>
+        )}
+      </Pressable>
+    </ContextMenuArea>
+  );
 
   return (
     <View
@@ -360,28 +391,25 @@ export const UrlField = memo(function UrlField({
           />
         </Pressable>
       )}
-      <ContextMenuArea style={{ flex: 1 }} onContextMenu={() => void showUrlBarMenu(tab)}>
-      <Pressable onPress={() => openPanel(tab.url)} style={{ flex: 1, height: sidebar?.height ?? 30, justifyContent: "center", paddingLeft: insecure ? LOCK.gap : sidebar ? SIDEBAR_FIELD.textLeft : urlTextLeft(false) }}>
-        {sidebar ? (
-          <ArcUrlFieldText
-            text={host + trail}
-            alignment={urlTextAlignment(tab.url)}
-            color={theme.dark ? SIDEBAR_URL.darkText : SIDEBAR_URL.lightText}
-            hoverButtonsWidth={hoverButtons}
-            pointerEvents="none"
-            style={{ position: "absolute", left: insecure ? LOCK.gap : SIDEBAR_FIELD.textLeft, right: -hoverButtons, top: 0, bottom: 0 }}
-          />
-        ) : (
-          <Text numberOfLines={1} style={{ fontSize: 13, color: palette.text }}>
-            <Text style={{ fontWeight: "500" }}>{host}</Text>
-            {trail ? <Text style={{ color: palette.secondary }}>{trail}</Text> : null}
-          </Text>
-        )}
-      </Pressable>
-      </ContextMenuArea>
+      {sidebar ? (
+        <View style={{ flex: 1, height: sidebar.height }}>
+          {urlArea}
+          <Animated.View pointerEvents={buttonsShown ? "box-none" : "none"} style={{ position: "absolute", right: 0, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", opacity: buttonsFade }}>
+            <FieldGlyphButton glyph={bookmarked ? FIELD_GLYPHS.bookmarked : FIELD_GLYPHS.bookmark} palette={palette} onPress={toggleBookmark} tooltip={bookmarked ? "Remove Bookmark" : "Bookmark This Page (⌘D)"} />
+            <FieldGlyphButton
+              glyph={popover === "siteControls" ? FIELD_GLYPHS.siteControlsOpen : FIELD_GLYPHS.siteControls}
+              palette={palette}
+              active={popover === "siteControls"}
+              onPress={toggleSiteControls}
+              tooltip="Site Controls"
+            />
+          </Animated.View>
+        </View>
+      ) : (
+        urlArea
+      )}
       <View style={{ flexDirection: "row", alignItems: "center", paddingRight: 3 }}>
         {capture && <CaptureIndicator camera={capture.camera} microphone={capture.microphone} screen={capture.screen} onPress={toggleSiteControls} />}
-        <TranslateButton tabId={tab.id} palette={palette} onFocus={onFocus} />
         <ZoomIndicator tabId={tab.id} zoom={tab.zoom} palette={palette} onFocus={onFocus} />
         {popups > 0 && (
           <ToolbarButton
@@ -398,10 +426,10 @@ export const UrlField = memo(function UrlField({
             tooltip="Pop-ups blocked on this page"
           />
         )}
-        {hovered && (
+        {hovered && !sidebar && (
           <>
             <ToolbarButton palette={palette} icon={bookmarked ? "bookmark.fill" : "bookmark"} size={13} box={HOVER_BUTTON_BOX} radius={6} onPress={toggleBookmark} tooltip={bookmarked ? "Remove Bookmark" : "Bookmark This Page (⌘D)"} />
-            {!inSplit && !sidebar && (
+            {!inSplit && (
               <ToolbarButton
                 palette={palette}
                 icon="rectangle.split.2x1"
@@ -420,6 +448,53 @@ export const UrlField = memo(function UrlField({
     </View>
   );
 });
+
+function useFieldButtonsFade(shown: boolean) {
+  const opacity = useRef(new Animated.Value(shown ? 1 : 0)).current;
+  const shownFor = useRef(shown);
+  useEffect(() => {
+    if (shownFor.current === shown) return;
+    shownFor.current = shown;
+    Animated.timing(opacity, { toValue: shown ? 1 : 0, ...FIELD_BUTTONS_FADE, useNativeDriver: true }).start();
+  }, [shown]);
+  return opacity;
+}
+
+function FieldGlyphButton({
+  glyph,
+  palette,
+  active,
+  onPress,
+  tooltip,
+}: {
+  glyph: { source: ImageSourcePropType; size: number };
+  palette: ToolbarPalette;
+  active?: boolean;
+  onPress: () => void;
+  tooltip: string;
+}) {
+  const { hovered, hoverProps } = useHover();
+  return (
+    <View tooltip={tooltip} mouseDownCanMoveWindow={false} {...hoverProps}>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={tooltip}>
+        {({ pressed }) => (
+          <View
+            style={{
+              width: HOVER_BUTTON_BOX,
+              height: HOVER_BUTTON_BOX,
+              borderRadius: 6,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed || active ? palette.pressed : hovered ? palette.hover : undefined,
+            }}
+          >
+            <Image source={glyph.source} accessible={false} style={{ width: glyph.size, height: glyph.size, tintColor: palette.icon }} />
+          </View>
+        )}
+      </Pressable>
+    </View>
+  );
+}
 
 function InsecureLock({ dark }: { dark: boolean }) {
   const { hovered, hoverProps } = useHover();

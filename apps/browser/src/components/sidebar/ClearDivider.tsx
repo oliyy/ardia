@@ -37,7 +37,7 @@ export function useSidebarHoverProps(windowId: string) {
   return props;
 }
 
-const useSidebarHovered = (windowId: string) => useSyncExternalStore(subscribeSidebarHover, () => hoveredSidebars.has(windowId));
+export const useSidebarHovered = (windowId: string) => useSyncExternalStore(subscribeSidebarHover, () => hoveredSidebars.has(windowId));
 
 type DividerProps = { windowId: string; profileId: string; spaced: boolean; clear: boolean; tidy: boolean; flush?: boolean };
 
