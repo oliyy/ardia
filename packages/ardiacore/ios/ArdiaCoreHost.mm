@@ -674,7 +674,7 @@ static void StartEarlyWindow() {
       "--user-data-dir=" + std::string(gDataDirectory.UTF8String),
       "--enable-smooth-scrolling",
       "--disable-stack-profiler",
-      std::string("--disable-features=MacAppCodeSignClone,DevToolsAcceptDebuggingConnections") +
+      std::string("--disable-features=MacAppCodeSignClone,DevToolsAcceptDebuggingConnections,SegmentationPlatform") +
           (biometricsCheckPerTab ? "" : ",AutofillAiWalletPrivatePasses") +
           (freezeLeastRecentTabs ? "" : ",InfiniteTabsFreezing"),
       std::string("--enable-features=WebContentsDiscard,BrowserInitiatedAutomaticPictureInPicture,ImprovedStartupBestEffortDelay:StartupDelayStopOnLoadingTimedOut/true,"
