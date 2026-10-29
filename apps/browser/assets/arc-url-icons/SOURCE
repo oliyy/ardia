@@ -8,12 +8,6 @@ Font input SHA256: dbf17c08aa14d28585f0df35960de0d25ab790e3c105bfb8f1dafb5741b29
 Generation: icomoon at 14pt, font and foreground attributes only, centered in a 14x14 unflipped template NSImage, drawn at (1,1,14,14) into a transparent 16x16 allocation at 1x and 2x. The source is drawn black, as in the decoded renderer. Its exact alpha is preserved while RGB is set to white for caller tinting. No crop-to-ink, stretch, fitted offset or contrast adjustment.
 Retained renderer and controls: output/arc-visual-parity-2026-10-24/url-glyph-contract/render-assets.swift and CONTRACT.md.
 
-bookmark.png, bookmark@2x.png, bookmark-fill.png, bookmark-fill@2x.png
-Feather bookmark artwork, Copyright (c) 2013-2023 Cole Bemis. MIT License; full text in LICENSE and embedded in each PNG.
-Original artwork: https://github.com/feathericons/feather/blob/v4.29.2/icons/bookmark.svg
-Original SVG SHA256: cc25f3f32004c76d1821efc019ea8ff229f771efb7ab2fc20650d4aca9f53b3b
-Raster source: U+E924 in the same icomoon font (input SHA256 dbf17c08aa14d28585f0df35960de0d25ab790e3c105bfb8f1dafb5741b29ef5), at 14pt, its glyph outline drawn with CoreGraphics with the ink box centered in a 14x14 box at (1,1) of a transparent 16x16 allocation at 1x and 2x. bookmark-fill fills the glyph's outer contour only, so both states share one silhouette. RGB is white for caller tinting.
-
 site-controls.png, site-controls@2x.png, site-controls-fill.png, site-controls-fill@2x.png
 NOT OPEN ARTWORK. These are Arc's own icon-control-center and icon-control-center-fill images from /Applications/Arc.app/Contents/Resources/ARC_SiteControlCenter.bundle (Assets.car SHA256 7966da57e151e952e4569a46be7496f210290911ab12491c62f1abb46549a971, Arc 1.170.0), copyright The Browser Company. They are used only in the owner's private build at the owner's request and are not for public release: replace them before this fork or its builds are ever made public. Each PNG carries the same notice in its tEXt chunks.
 Generation: NSImage from that bundle drawn at its 18x18 size into a transparent 18x18 allocation at 1x and 2x, alpha kept, RGB set to white for caller tinting.

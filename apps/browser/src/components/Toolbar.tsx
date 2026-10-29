@@ -1,8 +1,8 @@
-import { breadcrumb, urlForDisplay } from "@ardia/core";
-import { ArcUrlFieldBackground, ArcUrlFieldText, ArcUrlInsecureIcon, ContextMenuArea, MouseArea, Symbol, WindowDragRegion, type SymbolProps } from "@ardia/shell";
-import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { breadcrumb, cleanUrl, urlForDisplay } from "@ardia/core";
+import { ArcUrlFieldBackground, ArcUrlFieldText, ArcUrlInsecureIcon, ContextMenuArea, copyText, MouseArea, Symbol, WindowDragRegion, type SymbolProps } from "@ardia/shell";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Animated, Easing, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType, type ViewStyle } from "react-native";
+import { Animated, Easing, Image, Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { layout, useTheme } from "../lib/theme";
 import { withLivePage } from "../lib/livePage";
 import { webviews } from "../lib/webviews";
@@ -12,6 +12,7 @@ import { bookmarkProfileId } from "../store/model";
 import { usePageProgress } from "../store/pageProgress";
 import type { Tab } from "../store/types";
 import { ToolbarButton, type ButtonHit, type ClickModifiers } from "./layout/controls";
+import { springConfig } from "./layout/dockMotion";
 import { type ToolbarGeometry } from "./layout/geometry";
 import { setPopover, usePage, usePages, type PageState } from "./layout/pageState";
 import { closeHistoryMenu, goBack, goForward, historyItems, openHistoryMenu, useHistoryAvailability, useHistoryMenu } from "./layout/history";
@@ -40,11 +41,20 @@ const ARC_INSECURE_ICON = 22;
 const SIDEBAR_URL = { lightText: "#00000099", darkText: "#FFFFFF99" } as const;
 const HOVER_BUTTON_BOX = 24;
 const FIELD_BUTTONS_FADE = { duration: 150, easing: Easing.bezier(0, 0, 0.58, 1) } as const;
-const FIELD_GLYPHS = {
-  bookmark: { source: require("../../assets/arc-url-icons/bookmark.png"), size: 16 },
-  bookmarked: { source: require("../../assets/arc-url-icons/bookmark-fill.png"), size: 16 },
-  siteControls: { source: require("../../assets/arc-url-icons/site-controls.png"), size: 18 },
-  siteControlsOpen: { source: require("../../assets/arc-url-icons/site-controls-fill.png"), size: 18 },
+const SITE_CONTROLS_GLYPH = {
+  closed: require("../../assets/arc-url-icons/site-controls.png"),
+  open: require("../../assets/arc-url-icons/site-controls-fill.png"),
+  size: 18,
+} as const;
+const COPY_LINK = {
+  glyph: 14,
+  frame: 18,
+  copiedFor: 1000,
+  delay: 150,
+  slide: -10,
+  shrink: 0.01,
+  linkSpring: springConfig({ response: 0.3, damping: 0.6 }),
+  checkSpring: springConfig({ response: 0.5, damping: 0.6 }),
 } as const;
 const RAW_WEB_AUTHORITY = /^https?:\/\/([^/?#]*)/i;
 function urlTextAlignment(url: string): "leading" | "trailing" {
@@ -395,14 +405,14 @@ export const UrlField = memo(function UrlField({
         <View style={{ flex: 1, height: sidebar.height }}>
           {urlArea}
           <Animated.View pointerEvents={buttonsShown ? "box-none" : "none"} style={{ position: "absolute", right: 0, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", opacity: buttonsFade }}>
-            <FieldGlyphButton glyph={bookmarked ? FIELD_GLYPHS.bookmarked : FIELD_GLYPHS.bookmark} palette={palette} onPress={toggleBookmark} tooltip={bookmarked ? "Remove Bookmark" : "Bookmark This Page (⌘D)"} />
-            <FieldGlyphButton
-              glyph={popover === "siteControls" ? FIELD_GLYPHS.siteControlsOpen : FIELD_GLYPHS.siteControls}
-              palette={palette}
-              active={popover === "siteControls"}
-              onPress={toggleSiteControls}
-              tooltip="Site Controls"
-            />
+            <CopyLinkButton url={tab.url} palette={palette} />
+            <FieldButton palette={palette} active={popover === "siteControls"} onPress={toggleSiteControls} tooltip="Site Controls">
+              <Image
+                source={popover === "siteControls" ? SITE_CONTROLS_GLYPH.open : SITE_CONTROLS_GLYPH.closed}
+                accessible={false}
+                style={{ width: SITE_CONTROLS_GLYPH.size, height: SITE_CONTROLS_GLYPH.size, tintColor: palette.icon }}
+              />
+            </FieldButton>
           </Animated.View>
         </View>
       ) : (
@@ -460,18 +470,69 @@ function useFieldButtonsFade(shown: boolean) {
   return opacity;
 }
 
-function FieldGlyphButton({
-  glyph,
+function useSpringFlag(on: boolean, spring: ReturnType<typeof springConfig>, delay: number) {
+  const progress = useRef(new Animated.Value(on ? 1 : 0)).current;
+  const onFor = useRef(on);
+  useEffect(() => {
+    if (onFor.current === on) return;
+    onFor.current = on;
+    Animated.spring(progress, { toValue: on ? 1 : 0, ...spring, delay, useNativeDriver: true }).start();
+  }, [on]);
+  return progress;
+}
+
+function CopyLinkButton({ url, palette }: { url: string; palette: ToolbarPalette }) {
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const link = useSpringFlag(!copied, COPY_LINK.linkSpring, copied ? 0 : COPY_LINK.delay);
+  const check = useSpringFlag(copied, COPY_LINK.checkSpring, COPY_LINK.delay);
+  const linkStyle = useMemo(
+    () => ({
+      opacity: link.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" }),
+      transform: [{ scale: link.interpolate({ inputRange: [0, 1], outputRange: [COPY_LINK.shrink, 1], extrapolateLeft: "clamp" }) }],
+    }),
+    [link],
+  );
+  const checkStyle = useMemo(
+    () => ({
+      opacity: check.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" }),
+      transform: [{ translateX: check.interpolate({ inputRange: [0, 1], outputRange: [COPY_LINK.slide, 0] }) }],
+    }),
+    [check],
+  );
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  const copy = () => {
+    if (!url) return;
+    copyText(cleanUrl(url));
+    setCopied(true);
+    clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), COPY_LINK.copiedFor);
+  };
+  const glyph = { position: "absolute", width: COPY_LINK.frame, height: COPY_LINK.frame } as const;
+  return (
+    <FieldButton palette={palette} onPress={copy} tooltip="Copy URL (⇧⌘C)">
+      <Animated.View pointerEvents="none" style={[glyph, checkStyle]}>
+        <Symbol name="checkmark" size={COPY_LINK.glyph} weight="medium" color={palette.icon} style={{ width: COPY_LINK.frame, height: COPY_LINK.frame }} />
+      </Animated.View>
+      <Animated.View pointerEvents="none" style={[glyph, linkStyle]}>
+        <Symbol name="link" size={COPY_LINK.glyph} weight="medium" color={palette.icon} style={{ width: COPY_LINK.frame, height: COPY_LINK.frame }} />
+      </Animated.View>
+    </FieldButton>
+  );
+}
+
+function FieldButton({
   palette,
   active,
   onPress,
   tooltip,
+  children,
 }: {
-  glyph: { source: ImageSourcePropType; size: number };
   palette: ToolbarPalette;
   active?: boolean;
   onPress: () => void;
   tooltip: string;
+  children: ReactNode;
 }) {
   const { hovered, hoverProps } = useHover();
   return (
@@ -488,7 +549,7 @@ function FieldGlyphButton({
               backgroundColor: pressed || active ? palette.pressed : hovered ? palette.hover : undefined,
             }}
           >
-            <Image source={glyph.source} accessible={false} style={{ width: glyph.size, height: glyph.size, tintColor: palette.icon }} />
+            {children}
           </View>
         )}
       </Pressable>
