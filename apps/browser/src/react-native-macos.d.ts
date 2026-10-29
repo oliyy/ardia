@@ -4,6 +4,7 @@ declare module "react-native" {
   interface ViewProps {
     tooltip?: string;
     presentationGate?: boolean;
+    presentationFolded?: boolean;
     presentationPersistent?: boolean;
     presentationSession?: boolean;
     presentationShiftBound?: number;

@@ -9,6 +9,7 @@ export const FOLD_TIMING = { ms: FOLD_MS, easing: FOLD_EASING };
 export type FoldSlide = { shift: Animated.Value; delta: number; expand: boolean; kept: string | null };
 
 const immediateClip = { overflow: "hidden", backgroundColor: "transparent" } as const;
+const foldedRow = { display: "none" } as const;
 const FOLD_SLACK_MS = 50;
 
 const foldsUntil = new Map<string, number>();
@@ -71,6 +72,7 @@ export function Fold({
   padBottom = 0,
   indent = 0,
   mountClosed = false,
+  keepMounted = false,
   footer,
   slide = null,
 }: {
@@ -84,6 +86,7 @@ export function Fold({
   padBottom?: number;
   indent?: number;
   mountClosed?: boolean;
+  keepMounted?: boolean;
   footer?: ReactNode;
   slide?: FoldSlide | null;
 }) {
@@ -93,6 +96,7 @@ export function Fold({
   const measuring = rowHeight === undefined;
   const [measured, setMeasured] = useState<Record<string, number>>({});
   const styles = useRef(new Map<number, object>()).current;
+  const retained = useRef(false);
   const kept = keep && entries.some((e) => e.key === keep) ? keep : null;
   const sliding = !!slide && slide.expand === !collapsed && slide.kept === kept && moving && !measuring;
   const folding = !!kept && (collapsed || moving) && !sliding;
@@ -146,7 +150,9 @@ export function Fold({
         : collapsed
           ? { height: 0, opacity: 0, overflow: "hidden" as const }
           : null;
-  const mountAll = !collapsed || moving || mountClosed || measuring;
+  if (!keepMounted || measuring || mountClosed) retained.current = false;
+  else if (!collapsed || moving) retained.current = true;
+  const mountAll = !collapsed || moving || mountClosed || measuring || retained.current;
   const footerHidden = outerHidden || restCollapsed;
 
   return (
@@ -156,11 +162,13 @@ export function Fold({
           const stays = key === kept;
           if (!stays && !mountAll) return null;
           const hidden = outerHidden || (restCollapsed && !stays);
+          const folded = retained.current && collapsed && !moving && !stays;
           return (
             <Animated.View
               key={key}
-              style={folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : sliding ? (stays ? slideStyles?.kept : slideStyles?.entry) : null}
+              style={folded ? foldedRow : folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : sliding ? (stays ? slideStyles?.kept : slideStyles?.entry) : null}
               pointerEvents={collapsed && !stays ? "none" : "auto"}
+              presentationFolded={folded}
             >
               <FoldedAway.Provider value={parentAway || (!stays && (restCollapsed || (moving && !collapsed)))}>
                 <FoldHidden.Provider value={hidden}>

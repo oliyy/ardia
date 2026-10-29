@@ -127,6 +127,7 @@ export const GroupBlock = memo(function GroupBlock({ groupId, section, parentGro
                 padTop={entries.length ? frame.padTop : 0}
                 padBottom={frame.padBottom}
                 mountClosed={selectedInside}
+                keepMounted={flat && uniformRows(entries)}
                 footer={<GroupTail groupId={groupId} section={section} />}
                 slide={foldSlide}
               />
