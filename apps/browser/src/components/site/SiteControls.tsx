@@ -34,7 +34,7 @@ import { copyPageUrl } from "./selection";
 import { canShare, shareTab } from "./share";
 import { ActionTile, FooterChip, gridColumns, MoreButton, SectionTitle, SettingRow, SITE_PANEL, TileRow } from "./SiteControlsParts";
 import { SiteExtensions } from "./SiteExtensions";
-import { TranslateRows } from "./TranslateControls";
+import { TranslateRows, TranslateSetting } from "./TranslateControls";
 import { ZoomStepper } from "./ZoomControls";
 
 type Permission = { type: SiteSettingType; title: string; icon: string; badge: string; choices: SiteSettingValue[] };
@@ -267,6 +267,7 @@ function SiteControlsPanel({
         {origin ? (
           <>
             <SectionTitle title="Settings" tight />
+            <TranslateSetting tabId={tabId} onClose={close} />
             <SettingRow
               icon="shield.lefthalf.filled"
               title="Block Ads & Trackers"
