@@ -260,29 +260,26 @@ function ArcTileFace({ tabId, badge, width, active, selected, hovered, pressed }
   const muted = theme.custom?.favoriteMutedColor;
   const mutedColor = muted ? colorHexAlpha(theme.dark ? muted.dark : muted.light) : theme.dark ? undefined : hex(theme.icon);
   return (
-    <AnimatedSurface style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}>
-      <AnimatedSurface
-        pointerEvents="none"
-        fill={active ? undefined : hex(tokens.fieldFill)}
-        cornerRadius={layout.rowRadius}
-        logicalWidth={!active ? width : undefined}
-        style={[StyleSheet.absoluteFill, { opacity: hover.rest }]}
-      />
-      <AnimatedSurface
-        pointerEvents="none"
-        fill={active ? undefined : hex(pressed ? theme.tabPressed : theme.tabHover)}
-        cornerRadius={layout.rowRadius}
-        borderWidth={!active && selected ? 1 : 0}
-        borderColor={selected && !active ? hex(tokens.dragBorder) : undefined}
-        logicalWidth={!active ? width : undefined}
-        style={[StyleSheet.absoluteFill, { opacity: hover.shown }]}
-      />
+    <Animated.View style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: hover.rest }]}>
+        <AnimatedSurface fill={active ? undefined : hex(tokens.fieldFill)} cornerRadius={layout.rowRadius} logicalWidth={!active ? width : undefined} style={StyleSheet.absoluteFill} />
+      </Animated.View>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: hover.shown }]}>
+        <AnimatedSurface
+          fill={active ? undefined : hex(pressed ? theme.tabPressed : theme.tabHover)}
+          cornerRadius={layout.rowRadius}
+          borderWidth={!active && selected ? 1 : 0}
+          borderColor={selected && !active ? hex(tokens.dragBorder) : undefined}
+          logicalWidth={!active ? width : undefined}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
       {active ? <AnimatedArcFavoriteBackground source={tab.customIcon ? null : shown} cornerRadius={layout.rowRadius} hovered={hovered} logicalWidth={width} dark={theme.dark} mutedColor={mutedColor} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
       <View>
         <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} onSource={setShown} />
         <TabBadges tabId={tabId} />
       </View>
       {badge}
-    </AnimatedSurface>
+    </Animated.View>
   );
 }
