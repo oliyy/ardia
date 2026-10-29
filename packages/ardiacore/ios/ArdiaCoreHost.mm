@@ -602,6 +602,7 @@ static void StartEarlyWindow() {
   ardiacore_host::InstallTestCrashGuard(scratch && ardiacore_host::Background() ? scratch.stringByStandardizingPath : nil);
   ardiacore_host::InstallActivationGuardsEarly();
   ardiacore_host::PrepareContentBlocker();
+  [NSUserDefaults.standardUserDefaults registerDefaults:@{@"NSAutoFillHeuristicsEnabled" : @NO, @"NSAutoFillSystemInsertMenuEnabled" : @NO}];
   Method finishLaunching = class_getInstanceMethod(NSApplication.class, @selector(finishLaunching));
   IMP appKitFinishLaunching = method_getImplementation(finishLaunching);
   method_setImplementation(finishLaunching, imp_implementationWithBlock(^(NSApplication *app) {
