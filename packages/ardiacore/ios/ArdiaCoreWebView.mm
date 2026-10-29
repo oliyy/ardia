@@ -797,6 +797,17 @@ void DropHeldRoutedTabs(ArdiaCoreTab *source) {
   [held dropRoutedTabs];
 }
 
+NSHashTable<ArdiaCoreTab *> *HandedOffTabs() {
+  static NSHashTable *tabs = [NSHashTable weakObjectsHashTable];
+  return tabs;
+}
+
+void HandOffOpenedTab(ArdiaCoreTab *tab, NSString *adoptId) {
+  if (tab.closed || [HandedOffTabs() containsObject:tab] || [ArdiaCoreTabs takeOffered:adoptId] != tab) return;
+  [HandedOffTabs() addObject:tab];
+  ardiacore_host::HandOffTab(tab);
+}
+
 }
 
 @implementation ArdiaCoreWebView {
@@ -1646,11 +1657,14 @@ static NSDictionary *ExternalLinkDecision(NSString *url) {
 
 - (void)announceOpenedTab:(ArdiaCoreTab *)tab adoptId:(NSString *)adoptId disposition:(NSString *)disposition tries:(int)tries {
   if (tab.closed) return;
+  if (!_tab || _tab.closed || _closing) return HandOffOpenedTab(tab, adoptId);
   NSString *url = tab.url;
   if ((!url.length || [url isEqualToString:@"about:blank"]) && tries < 20) {
     __weak ArdiaCoreWebView *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-      [weakSelf announceOpenedTab:tab adoptId:adoptId disposition:disposition tries:tries + 1];
+      ArdiaCoreWebView *view = weakSelf;
+      if (view) [view announceOpenedTab:tab adoptId:adoptId disposition:disposition tries:tries + 1];
+      else HandOffOpenedTab(tab, adoptId);
     });
     return;
   }

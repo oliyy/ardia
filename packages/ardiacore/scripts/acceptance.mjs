@@ -55,7 +55,7 @@ const usesPageA = [
   "restore-after-close", "discard-outcomes", "capture-picture", "unresponsive", "permission-dismissed",
   "save-page", "activate-request", "extension-popup-and-panel", "scroll-zoom", "print-preview",
   "extension-prompts", "traffic-lights-after-profile-switch", "extension-configure",
-  "private-windows-create", "extension-installed-bubble", "popup-window", "autofill-save-prompts",
+  "private-windows-create", "extension-installed-bubble", "popup-tab", "autofill-save-prompts",
   "settings-services", "download-navigation", "page-events", "page-background", "external-app-answer",
   "notifications", "now-playing", "media-state", "auto-picture-in-picture", "pip-window", "page-focus",
   "fullscreen-tab-switch", "fullscreen-native", "fullscreen-transition-picture", "fullscreen-hidden-page", "fullscreen-split-sibling",
@@ -2657,24 +2657,32 @@ try {
     }
   });
 
-  await check("popup-window", async () => {
+  await check("popup-tab", async () => {
     await evalApp(`ac.actions.switchToTab("${first.id}"); return true`);
     const opener = await pageFor(first.id, `${base}/a`);
-    const popups = async () => (await cef(`engineInfo()`)).popupWindows;
-    const before = await popups();
+    const before = new Set([...onScreenWindows(), ...(await cef(`chromeWindows()`)).map((w) => w.window)]);
     await cdp(opener, "Runtime.evaluate", { expression: `window.__msg = null; addEventListener("message", (e) => (window.__msg = e.data)); window.open("${base}/popup-page", "pop", "width=480,height=360"); true`, userGesture: true });
     const t = await until("the popup's page", () => pageTarget("/popup-page"));
-    await until("a popup window", async () => ((await popups()) === before + 1 ? true : null), 10000);
-    const page = (await cdp(t, "Runtime.evaluate", { expression: `JSON.stringify({ size: innerWidth + "x" + innerHeight, opener: !!window.opener })`, returnByValue: true })).result.value;
+    const shown = await until("the popup's tab in front", async () => {
+      const s = await state();
+      const tab = s.tabs.find((x) => x.url?.includes("/popup-page"));
+      return tab && s.active === tab.id ? { tabs: s.tabs.map((x) => x.id), tab: tab.id } : null;
+    }, 10000);
+    const hasOpener = (await cdp(t, "Runtime.evaluate", { expression: "!!window.opener", returnByValue: true })).result.value;
     await cdp(t, "Runtime.evaluate", { expression: `window.opener.postMessage("from-popup", "*")` });
     const message = await until("the opener's message", async () => (await cdp(opener, "Runtime.evaluate", { expression: "window.__msg", returnByValue: true })).result.value);
-    const asTab = (await state()).tabs.some((x) => x.url?.includes("/popup-page"));
+    const stray = onScreenWindows().filter((w) => !before.has(w));
     await closeFromPage(t);
-    await until("the popup window closed", async () => ((await popups()) === before && !(await pageTarget("/popup-page")) ? true : null), 10000);
-    const { size, opener: hasOpener } = JSON.parse(page);
-    if (asTab) throw new Error("the popup became a tab");
-    if (size !== "480x360" || !hasOpener) throw new Error(`popup page ${page}`);
-    return { size, opener: hasOpener, message };
+    const back = await until("the popup's tab closed", async () => {
+      const s = await state();
+      return !s.tabs.some((x) => x.id === shown.tab) && !(await pageTarget("/popup-page")) ? s.active : null;
+    }, 10000);
+    const after = shown.tabs[shown.tabs.indexOf(shown.tab) - 1];
+    if (stray.length) throw new Error(`the popup made a window: ${stray}`);
+    if (after !== first.id) throw new Error(`the popup's tab came after ${after}, not its opener ${first.id}`);
+    if (!hasOpener) throw new Error("the popup's tab lost window.opener");
+    if (back !== first.id) throw new Error(`closing the popup went to ${back}, not its opener ${first.id}`);
+    return { tab: shown.tab, after, opener: hasOpener, message, back };
   });
 
   await check("download", async () => {

@@ -1138,12 +1138,7 @@ namespace ardiacore_host {
 
 void AnnounceRoutedTab(ArdiaCoreTab *tab, ArdiaCoreWebView *view, NSDictionary *placement) {
   if (!view) return [tab closeNow];
-  const BOOL popup = [placement[@"disposition"] isEqual:@"popup"] && ![placement[@"action"] isEqual:@"little"];
-  if (popup && [tab respondsToSelector:@selector(popupFeatures)] && ardiacore_host::ShowPopupWindow(tab, view)) return;
-  if (!popup) return [view openedRoutedTab:tab placement:placement];
-  NSMutableDictionary *tabbed = [placement mutableCopy];
-  tabbed[@"disposition"] = @"foreground";
-  [view openedRoutedTab:tab placement:tabbed];
+  [view openedRoutedTab:tab placement:placement];
 }
 
 }
@@ -1163,6 +1158,10 @@ void AnnounceStrayTab(ArdiaCoreTab *tab, int tries) {
     @"window" : NSNull.null, @"extensionId" : @"", @"adoptId" : [ArdiaCoreTabs offerTab:tab prefix:@"tab"]
   });
 }
+
+}
+
+namespace ardiacore_host {
 
 void HandOffTab(ArdiaCoreTab *tab) {
   ArdiaCoreProfile *profile = tab.profile;
@@ -1247,7 +1246,7 @@ NSMutableDictionary<NSString *, ArdiaCoreWindowController *> *ChromeMadeWindows(
     tabs = [tabs arrayByAddingObjectsFromArray:[_coreWindow tabsForProfile:profile]];
   if (!tabs.count) return [_coreWindow close];
   for (ArdiaCoreTab *tab in tabs)
-    if (![ArdiaCoreTabs viewForTab:tab]) HandOffTab(tab);
+    if (![ArdiaCoreTabs viewForTab:tab]) ardiacore_host::HandOffTab(tab);
 }
 
 - (void)announceChromeMadeTab:(ArdiaCoreTab *)tab tries:(int)tries {
@@ -1386,17 +1385,14 @@ NSMapTable<ArdiaCoreProfile *, ArdiaCoreWindowController *> *StandaloneWindows()
   if ([ArdiaCoreTabs viewForTab:tab]) return;
   if (NSDictionary *placement = RoutedPlacement(tab))
     return AnnounceInsertedRoutedTab(tab, [self viewFor:opener], [self anyView], placement, opener);
-  if (_stray) return HandOffTab(tab);
+  if (_stray) return ardiacore_host::HandOffTab(tab);
   ArdiaCoreWebView *openerView = [self viewFor:opener];
-  if ([disposition isEqualToString:@"popup"] && [tab respondsToSelector:@selector(popupFeatures)]) {
-    return ardiacore_host::OpenPopupWindow(tab, openerView);
-  }
   if (openerView) {
     [openerView openedTab:tab adoptId:[ArdiaCoreTabs offerTab:tab] disposition:ardiacore_host::AppDisposition(disposition)];
   } else if (ArdiaCoreWebView *view = [self anyShownViewForProfile:tab.profile]) {
     [view openedTab:tab adoptId:[ArdiaCoreTabs offerTab:tab prefix:@"tab"] disposition:@"foreground"];
   } else {
-    HandOffTab(tab);
+    ardiacore_host::HandOffTab(tab);
   }
 }
 
@@ -1499,157 +1495,6 @@ NSMapTable<ArdiaCoreProfile *, ArdiaCoreWindowController *> *StandaloneWindows()
 
 @end
 
-@interface ArdiaCorePopupWindow : NSObject <ArdiaCoreWindowDelegate, ArdiaCoreTabDelegate>
-@end
-
-namespace {
-
-NSMutableSet<ArdiaCorePopupWindow *> *PopupWindows() {
-  static NSMutableSet *windows = [NSMutableSet set];
-  return windows;
-}
-
-NSString *HostOf(NSString *url) {
-  return [NSURL URLWithString:url ?: @""].host ?: @"";
-}
-
-}
-
-@implementation ArdiaCorePopupWindow {
-  ArdiaCoreWindow *_coreWindow;
-  ArdiaCoreTab *_tab;
-  __weak ArdiaCoreWebView *_opener;
-  id _closeObserver;
-  BOOL _adopting;
-}
-
-- (instancetype)initWithTab:(ArdiaCoreTab *)tab opener:(ArdiaCoreWebView *)opener {
-  if (!(self = [super init])) return nil;
-  _tab = tab;
-  _opener = opener;
-  NSDictionary<NSString *, NSNumber *> *features = tab.popupFeatures ?: @{};
-  const NSSize size = NSMakeSize(MAX(features[@"width"] ? features[@"width"].doubleValue : 500, 200),
-                                 MAX(features[@"height"] ? features[@"height"].doubleValue : 600, 150));
-  _coreWindow = [[ArdiaCoreWindow alloc] initWithContentRect:NSMakeRect(0, 0, size.width, size.height)];
-  NSWindow *window = _coreWindow.window;
-  if (!window) return nil;
-  _coreWindow.delegate = self;
-  window.styleMask |= NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
-                      NSWindowStyleMaskResizable;
-  window.releasedWhenClosed = NO;
-  window.tabbingMode = NSWindowTabbingModeDisallowed;
-  window.minSize = NSMakeSize(200, 150);
-  [window setContentSize:size];
-  [self placeWithFeatures:features];
-  __weak ArdiaCorePopupWindow *weakSelf = self;
-  _closeObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification
-                                                                   object:window
-                                                                    queue:nil
-                                                               usingBlock:^(NSNotification *) { [weakSelf windowWillClose]; }];
-  return self;
-}
-
-- (void)placeWithFeatures:(NSDictionary<NSString *, NSNumber *> *)features {
-  NSWindow *window = _coreWindow.window;
-  NSWindow *parent = _opener.window;
-  NSScreen *screen = parent.screen ?: NSScreen.mainScreen;
-  NSRect frame = window.frame;
-  if (features[@"x"] || features[@"y"]) {
-    const NSRect primary = NSScreen.screens.firstObject.frame;
-    const NSRect content = [window contentRectForFrameRect:frame];
-    const CGFloat left = features[@"x"] ? features[@"x"].doubleValue : NSMidX(parent.frame) - NSWidth(frame) / 2;
-    const CGFloat top = features[@"y"] ? features[@"y"].doubleValue : NSMaxY(primary) - NSMaxY(parent.frame) + 60;
-    frame.origin = NSMakePoint(left, NSMaxY(primary) - top - NSHeight(content));
-  } else if (parent) {
-    frame.origin = NSMakePoint(NSMidX(parent.frame) - NSWidth(frame) / 2, NSMaxY(parent.frame) - NSHeight(frame) - 60);
-  } else {
-    [window center];
-    frame = window.frame;
-  }
-  const NSRect visible = screen.visibleFrame;
-  frame.origin.x = MAX(NSMinX(visible), MIN(NSMinX(frame), NSMaxX(visible) - NSWidth(frame)));
-  frame.origin.y = MAX(NSMinY(visible), MIN(NSMinY(frame), NSMaxY(visible) - NSHeight(frame)));
-  [window setFrame:frame display:NO];
-}
-
-- (void)takeTab {
-  if (_tab.closed) return [_coreWindow close];
-  _adopting = YES;
-  [_coreWindow adoptTab:_tab];
-  _adopting = NO;
-  if (ArdiaCoreProfile *profile = _tab.profile) _coreWindow.activeProfile = profile;
-  _tab.delegate = self;
-  NSView *page = _tab.view;
-  [page removeFromSuperview];
-  page.frame = _coreWindow.hostView.bounds;
-  page.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-  [_coreWindow.hostView addSubview:page];
-  [self updateTitle];
-  if (ardiacore_host::Background()) [_coreWindow showInactive];
-  else [_coreWindow.window makeKeyAndOrderFront:nil];
-  [_tab focus];
-}
-
-- (void)updateTitle {
-  NSString *url = _tab.url ?: @"", *host = HostOf(url), *title = _tab.title;
-  NSWindow *window = _coreWindow.window;
-  window.title = title.length && ![title isEqualToString:url] ? title : host;
-  window.subtitle = [window.title isEqualToString:host] ? @"" : host;
-}
-
-- (void)windowWillClose {
-  if (_closeObserver) [NSNotificationCenter.defaultCenter removeObserver:_closeObserver];
-  _closeObserver = nil;
-  if (_tab.delegate == self) _tab.delegate = nil;
-  ArdiaCorePopupWindow *me = self;
-  dispatch_async(dispatch_get_main_queue(), ^{ [PopupWindows() removeObject:me]; });
-}
-
-- (void)tabDidChangeTitle:(ArdiaCoreTab *)tab {
-  [self updateTitle];
-}
-
-- (void)tabDidChangeURL:(ArdiaCoreTab *)tab {
-  [self updateTitle];
-}
-
-- (void)tab:(ArdiaCoreTab *)tab requestsActivation:(NSString *)reason {
-  if (!ardiacore_host::Background()) [_coreWindow.window makeKeyAndOrderFront:nil];
-}
-
-- (void)tab:(ArdiaCoreTab *)tab externalAppRequest:(NSDictionary<NSString *, id> *)request {
-  id<ArdiaCoreTabDelegate> opener = (id<ArdiaCoreTabDelegate>)_opener;
-  if ([opener respondsToSelector:@selector(tab:externalAppRequest:)]) [opener tab:tab externalAppRequest:request];
-}
-
-- (void)window:(ArdiaCoreWindow *)window didInsertTab:(ArdiaCoreTab *)tab opener:(ArdiaCoreTab *)opener disposition:(NSString *)disposition {
-  if (_adopting || tab == _tab) return;
-  if (NSDictionary *placement = RoutedPlacement(tab))
-    return AnnounceInsertedRoutedTab(tab, _opener, [ArdiaCoreWindowController hostingViewForProfile:tab.profile], placement, opener);
-  if ([disposition isEqualToString:@"popup"]) return ardiacore_host::OpenPopupWindow(tab, _opener);
-  ArdiaCoreWebView *view = _opener ?: [ArdiaCoreWindowController hostingViewForProfile:tab.profile];
-  if (view) [view openedTab:tab adoptId:[ArdiaCoreTabs offerTab:tab] disposition:ardiacore_host::AppDisposition(disposition)];
-  else [tab closeNow];
-}
-
-- (void)window:(ArdiaCoreWindow *)window didRemoveTab:(ArdiaCoreTab *)tab {
-  if (tab != _tab) return;
-  __weak ArdiaCoreWindow *coreWindow = _coreWindow;
-  dispatch_async(dispatch_get_main_queue(), ^{ [coreWindow close]; });
-}
-
-- (BOOL)window:(ArdiaCoreWindow *)window preHandleKeyEvent:(NSEvent *)event {
-  NSMenuItem *reserved = ReservedMenuItemForEvent(event);
-  if (!reserved) return NO;
-  if ([reserved.identifier isEqualToString:@"ardia.command.closeTab"]) {
-    [_coreWindow close];
-    return YES;
-  }
-  return [NSApp.mainMenu performKeyEquivalent:event];
-}
-
-@end
-
 namespace ardiacore_host {
 
 bool IsReservedKeyEvent(NSEvent *event) {
@@ -1659,24 +1504,6 @@ bool IsReservedKeyEvent(NSEvent *event) {
 bool IsReservedBinding(NSString *key, NSString *unshiftedKey, NSEventModifierFlags modifiers) {
   if (key.length && ReservedMenuItem(NSApp.mainMenu, key.lowercaseString, modifiers)) return true;
   return unshiftedKey.length && ReservedMenuItem(NSApp.mainMenu, unshiftedKey.lowercaseString, modifiers);
-}
-
-bool ShowPopupWindow(ArdiaCoreTab *tab, ArdiaCoreWebView *opener) {
-  ArdiaCorePopupWindow *popup = [[ArdiaCorePopupWindow alloc] initWithTab:tab opener:opener];
-  if (!popup) return false;
-  [PopupWindows() addObject:popup];
-  __weak ArdiaCorePopupWindow *weakPopup = popup;
-  dispatch_async(dispatch_get_main_queue(), ^{ [weakPopup takeTab]; });
-  return true;
-}
-
-void OpenPopupWindow(ArdiaCoreTab *tab, ArdiaCoreWebView *opener) {
-  if (ShowPopupWindow(tab, opener)) return;
-  if (opener) [opener openedTab:tab adoptId:[ArdiaCoreTabs offerTab:tab] disposition:@"foreground"];
-}
-
-NSUInteger PopupWindowCount() {
-  return PopupWindows().count;
 }
 
 void ActToggleFullScreen(NSWindow *window) {

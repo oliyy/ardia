@@ -41,8 +41,8 @@ The switch shipped in 0.2.22; this was the list it shipped against, kept for the
 5. ~~**Private-window privacy**~~: done. A private tab Chrome makes goes to a private window of the app (one
    showing its profile, else a new one that adopts it live), never into a normal window (`private-windows-create`,
    `context-menu-incognito`).
-6. **Dogfood bugs**: B1 (the sad tab after Reload), B2 (sized `window.open` popups get a window of their own),
-   B3 (window height) and B4 (`chrome://crash` keeps the tab's URL) are done (`crash-reload`, `popup-window`,
+6. **Dogfood bugs**: B1 (the sad tab after Reload), B2 (sized `window.open` popups got a window of their own; since 2026-10-29 they open as a tab right after
+   their opener, as in Arc), B3 (window height) and B4 (`chrome://crash` keeps the tab's URL) are done (`crash-reload`, `popup-tab`,
    `window-size`, `crash-debug-url`). The 0.2.22 RC's crash opening a window (a dead private profile reached
    `WindowHost::BrowserFor`) is fixed (`window-profiles`), and the content blocker's page no longer shows in
    history (`internal-pages-not-history`). A hidden test instance that crashes writes `<data dir>/crashes/crash-<pid>.txt`

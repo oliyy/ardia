@@ -38,7 +38,6 @@ export type EngineInfo = {
   engine: string;
   chromiumVersion: string;
   liveBrowsers: number;
-  popupWindows: number;
   chromeWindows: number;
 };
 

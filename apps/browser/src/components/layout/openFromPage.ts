@@ -11,11 +11,12 @@ import { openLinkInSplit, openSplitPane } from "./splitActions";
 type PageSource = { windowId: string; profileId: string; tabId?: string };
 
 export function openFromPage(request: OpenWindowRequest, page: PageSource) {
-  const { url, adoptId, disposition, profile, point } = request;
+  const { url, adoptId, requiresAdoption, disposition, profile, point } = request;
   const s = useBrowser.getState();
   const w = s.windows[page.windowId];
   if (!w) return;
   const peekSource = peekSourceOf(s, page.tabId);
+  if (peekSource && disposition === "popup" && s.peekToTab(w.id, { activate: false })) return openFromPage(request, page);
   const from = peekSource ? { ...page, tabId: peekSource } : page;
   if (request.placement) return openPlaced(request, request.placement, from);
   if (disposition === "current" || (disposition === "peek" && (peekSource || isSmall(s, w.id)))) {
@@ -26,6 +27,7 @@ export function openFromPage(request: OpenWindowRequest, page: PageSource) {
     if (page.tabId) s.openPeek(page.tabId, url, point ?? null);
     return;
   }
+  if (isSmall(s, w.id) && disposition === "popup") return void openLittleArdia(url, from.profileId, adoptId, !!requiresAdoption, false);
   if (isSmall(s, w.id) && disposition !== "window" && disposition !== "incognito") {
     return void s.newTab(w.id, { url, adoptId, openerId: from.tabId, profileId: from.profileId, background: true });
   }

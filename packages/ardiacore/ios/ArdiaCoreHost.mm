@@ -969,7 +969,6 @@ static void StartEarlyWindow() {
     @"engine" : @"ardiacore",
     @"chromiumVersion" : engine.chromiumVersion ?: @"",
     @"liveBrowsers" : @0,
-    @"popupWindows" : @(ardiacore_host::PopupWindowCount()),
     @"chromeWindows" : @(chromeWindows),
     @"keepAlive" : engine.keepAliveState ?: @"",
     @"lastUsedProfile" : engine.defaultProfile.name ?: @"",
