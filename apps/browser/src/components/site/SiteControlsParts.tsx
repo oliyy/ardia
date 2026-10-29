@@ -148,12 +148,14 @@ export function SettingRow({
   value,
   on,
   onPress,
+  accessory,
 }: {
   icon: string;
   title: string;
   value: string;
   on: boolean;
   onPress?: () => void;
+  accessory?: ReactNode;
 }) {
   const theme = useTheme();
   const { hovered, hoverProps } = useHover();
@@ -190,6 +192,7 @@ export function SettingRow({
           {value}
         </Text>
       </View>
+      {accessory ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>{accessory}</View> : null}
     </View>
   );
   if (!onPress) return <View {...hoverProps}>{content(false)}</View>;

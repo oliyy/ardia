@@ -24,7 +24,7 @@ import { engineProfile, isIncognitoProfile, tabLabel } from "../../store/model";
 import { defaultEngine, ENGINE_NAMES, ENGINE_SYMBOLS, otherEngine, ruleFor, tabEngine } from "../../store/engines";
 import { openPageIn, togglePageEngine } from "../../lib/engines";
 import { Favicon } from "../primitives";
-import { PANEL, PanelHeader, Popover, PopoverRow, PopoverSeparator, PopoverValue, Toggle, usePopoverPresence } from "../layout/controls";
+import { PANEL, PanelHeader, Popover, PopoverRow, PopoverSeparator, PopoverValue, PromptButton, Toggle, usePopoverPresence } from "../layout/controls";
 import { pageOf, patchPage, setPopover, usePage } from "../layout/pageState";
 import { showToast } from "../layout/splitActions";
 import { toggleCastPicker } from "../media/cast";
@@ -203,6 +203,7 @@ function SiteControlsPanel({
   const toggle = (section: Exclude<Expanded, null>) => setExpanded((e) => (e === section ? null : section));
 
   const findable = /^(https?|file):/i.test(url);
+  const zoomed = Math.abs(tab.zoom - 1) >= 0.001;
   const castTile = !video && !!origin;
   const tiles = [
     canShare(tab) ? <ActionTile key="share" ref={shareTile} icon="square.and.arrow.up" label="Share…" onPress={share} /> : null,
@@ -264,10 +265,11 @@ function SiteControlsPanel({
 
         <SiteExtensions windowId={tab.windowId} tabId={tab.id} columns={gridColumns(tiles.length)} onClose={close} />
 
+        {origin || zoomed ? <SectionTitle title="Settings" tight /> : null}
+        {origin ? <TranslateSetting tabId={tabId} onClose={close} /> : null}
+        {zoomed ? <ZoomSetting tabId={tabId} zoom={tab.zoom} /> : null}
         {origin ? (
           <>
-            <SectionTitle title="Settings" tight />
-            <TranslateSetting tabId={tabId} onClose={close} />
             <SettingRow
               icon="shield.lefthalf.filled"
               title="Block Ads & Trackers"
@@ -314,7 +316,7 @@ function SiteControlsPanel({
         {expanded === "more" ? (
           <>
             <PopoverSeparator />
-            <PopoverRow icon="plus.magnifyingglass" title="Zoom" accessory={<ZoomStepper tabId={tabId} zoom={tab.zoom} />} />
+            {zoomed ? null : <PopoverRow icon="plus.magnifyingglass" title="Zoom" accessory={<ZoomStepper tabId={tabId} zoom={tab.zoom} />} />}
             {origin && !castTile ? <PopoverRow icon="tv.and.mediabox" title="Cast…" onPress={cast} /> : null}
             {origin ? (
               <PopoverRow
@@ -357,6 +359,23 @@ function SiteControlsPanel({
         </View>
       </View>
     </Popover>
+  );
+}
+
+function ZoomSetting({ tabId, zoom }: { tabId: string; zoom: number }) {
+  return (
+    <SettingRow
+      icon={zoom > 1 ? "plus.magnifyingglass" : "minus.magnifyingglass"}
+      title="Zoom"
+      value={`${Math.round(zoom * 100)}%`}
+      on
+      accessory={
+        <>
+          <ZoomStepper tabId={tabId} zoom={zoom} percent={false} />
+          <PromptButton title="Reset" onPress={() => void webviews.get(tabId)?.zoomStep(0)} />
+        </>
+      }
+    />
   );
 }
 
