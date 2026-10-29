@@ -24,7 +24,7 @@ import { folderChildrenWith } from "./pinnedTree";
 import { FaviconFallback, NewTabIcon } from "../primitives";
 import { HoverSlot } from "../HoverSlot";
 import { SYMBOL_PREFIX, TabIcon } from "./TabIcon";
-import { GROUP_COLORS, useArcTitle, useSidebarTokens, withAlpha } from "./tokens";
+import { GROUP_COLORS, useArcLabel, useArcTitle, useSidebarTokens, withAlpha } from "./tokens";
 
 type TabShot = { kind: "tab"; key: string; title: string; url: string; favicon?: string | null; icon?: string | null; profileId: string; uri: string | null; template: boolean; sound: "muted" | "playing" | null; hovered: boolean };
 type SplitShot = { kind: "split"; key: string; panes: TabShot[] };
@@ -110,6 +110,19 @@ function rowShot(data: LiveData, folderId: string, row: FolderRow): LiveRowShot 
   if (row.kind === "item") return { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, 0, row.done ?? null) };
   const open = data.expandedStacks[row.id] !== false;
   return { kind: "stack", key: row.key, repo: row.repo.split("/")[1] ?? row.repo, count: row.items.length, items: open ? row.items.map((it) => itemShot(data, folderId, it, 10)) : null };
+}
+
+export function LiveRowGhost({ data, folderId, row, indent = 0 }: { data: LiveData; folderId: string; row: FolderRow; indent?: number }) {
+  const theme = useTheme();
+  const flat = useAddressBarInSidebar();
+  const label = useArcLabel() ?? theme.textTab;
+  const shot: LiveRowShot =
+    row.kind === "item"
+      ? { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, indent, row.done ?? null) }
+      : row.kind === "stack"
+        ? { kind: "stack", key: row.key, repo: row.repo.split("/")[1] ?? row.repo, count: row.items.length, items: null }
+        : rowShot(data, folderId, row);
+  return <View>{liveRowGhost(shot, theme, label, flat)}</View>;
 }
 
 function liveShot(s: BrowserState, windowId: string, profileId: string, folderId: string, data: LiveData, peek: boolean): LiveShot | null {

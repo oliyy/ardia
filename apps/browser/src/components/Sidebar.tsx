@@ -40,7 +40,7 @@ import { sidebarEntries } from "./sidebar/entries";
 import { FolderPanel } from "./sidebar/FolderPanel";
 import { GroupBlock, HierarchyEntry } from "./sidebar/GroupBlock";
 import { dismissHover, dismissHoverIn } from "./sidebar/hover";
-import { capture, GhostSlot, ListMotionContext, newCapture, useListMotion, usePinnedMotion } from "./sidebar/listMotion";
+import { capture, GhostSlot, ListMotionContext, newCapture, useListMotion, usePinnedMotion, type SlideTiming } from "./sidebar/listMotion";
 import { openLibraryMenu, openOverflowMenu, openSidebarMenu } from "./sidebar/menus";
 import { PinFieldZone, PinnedGrid, PinSlotZone } from "./sidebar/PinnedGrid";
 import { pinColumnCap, pinGridHeight } from "./sidebar/pinZone";
@@ -591,8 +591,8 @@ function PageRows({ windowId, profileId, current, rows, lazy, offScreen, tiles, 
   const liftOf = (entry: string) => rootLift(addressBar, pinned[pinned.indexOf(entry) - 1], entry);
   const fold = useMemo(
     () => ({
-      pinned: (entry: string, delta: number) => pinnedMotion.slideBelow(entry, delta, { timing: FOLD_TIMING, tail: true }),
-      list: (entry: string, delta: number) => motion.slideBelow(entry, delta, { timing: FOLD_TIMING, tail: true }),
+      pinned: (entry: string, delta: number, timing: SlideTiming = FOLD_TIMING) => pinnedMotion.slideBelow(entry, delta, { timing, tail: true }),
+      list: (entry: string, delta: number, timing: SlideTiming = FOLD_TIMING) => motion.slideBelow(entry, delta, { timing, tail: true }),
     }),
     [pinnedMotion.slideBelow, motion.slideBelow],
   );

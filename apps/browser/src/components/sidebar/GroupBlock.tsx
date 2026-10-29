@@ -75,9 +75,9 @@ export const GroupBlock = memo(function GroupBlock({ groupId, section, parentGro
   const parentChain = useContext(FoldChainContext);
   const foldChain = parentGroup ? parentChain : (scope.fold?.[section] ?? null);
   const childChain = useMemo<FoldChain>(
-    () => (entry, delta) => {
-      const inside = motion.slideBelow(entry, delta, { timing: FOLD_TIMING, tail: false });
-      const up = foldChain ? foldChain(`g:${groupId}`, delta) : null;
+    () => (entry, delta, timing = FOLD_TIMING) => {
+      const inside = motion.slideBelow(entry, delta, { timing, tail: false });
+      const up = foldChain ? foldChain(`g:${groupId}`, delta, timing) : null;
       return inside ?? up;
     },
     [motion.slideBelow, foldChain, groupId],

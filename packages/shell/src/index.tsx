@@ -140,6 +140,7 @@ export type AppEvent =
   | { type: "quitWarningSuppressed" }
   | { type: "resignActive" }
   | { type: "screenLocked" }
+  | { type: "screenUnlocked" }
   | { type: "switcherReleased" }
   | { type: "switcherKey"; key: "escape" | "next" | "previous" }
   | { type: "switcherMouseUp" }
@@ -457,6 +458,7 @@ export type FadeLabelProps = ViewProps & {
   fadeWidth?: number;
   letterSpacing?: number;
   glyphs?: FadeLabelGlyph[];
+  transitions?: boolean;
 };
 
 export type FadeLabelGlyph = { image: string; color?: string; label?: string };

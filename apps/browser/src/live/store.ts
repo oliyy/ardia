@@ -1,5 +1,6 @@
 import { readDocument, writeDocument } from "@ardia/shell";
 import { create } from "zustand";
+import { batchStoreUpdates } from "../store/browser";
 import type { CompletedItem, CompletionState, FolderStatus, LiveAccount, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId } from "./types";
 
 export type LiveConfig = {
@@ -48,6 +49,7 @@ type LiveState = {
   meetingGroups: Record<string, MeetingGroup>;
   dismissedAlerts: string[];
   generations: Record<string, number>;
+  revisions: Record<string, number>;
 };
 
 export type LiveFolderSnapshot = LiveFolder;
@@ -100,10 +102,11 @@ export const useLive = create<LiveState>()(() => ({
   meetingGroups: saved.meetingGroups ?? {},
   dismissedAlerts: saved.dismissedAlerts ?? [],
   generations: {},
+  revisions: {},
 }));
 
 export const live = () => useLive.getState();
-export const setLive = (patch: Partial<LiveState> | ((s: LiveState) => Partial<LiveState>)) => useLive.setState(patch);
+export const setLive = (patch: Partial<LiveState> | ((s: LiveState) => Partial<LiveState>)) => batchStoreUpdates(() => useLive.setState(patch));
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 useLive.subscribe((s, prev) => {
@@ -160,6 +163,21 @@ const foldersUsing = (s: LiveState, sources: LiveSourceId[]) =>
     .map((f) => f.id);
 
 type Animated = Pick<LiveState, "items" | "completing" | "completions" | "unread">;
+
+const sameItem = (a: LiveItem, b: LiveItem) => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+function reuseItems(prev: LiveItem[], next: LiveItem[]): LiveItem[] {
+  const byId = new Map(prev.map((it) => [it.id, it]));
+  const items = next.map((it) => {
+    const old = byId.get(it.id);
+    return old && sameItem(old, it) ? old : it;
+  });
+  return items.length === prev.length && items.every((it, i) => it === prev[i]) ? prev : items;
+}
+
+const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
+
+const revised = (s: Pick<LiveState, "revisions">, folderId: string) => ({ ...s.revisions, [folderId]: (s.revisions[folderId] ?? 0) + 1 });
 
 const finished = (s: Animated, folderId: string, ids: string[]): Animated => ({
   items: { ...s.items, [folderId]: (s.items[folderId] ?? []).filter((it) => !ids.includes(it.id)) },
@@ -285,18 +303,21 @@ export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<s
       ...(s.completed[folderId] ?? []).filter((c) => !ids.has(c.item.id) && !leaving.some((l) => l.id === c.item.id)),
     ].slice(0, MAX_COMPLETED);
     const stillThere = new Set(merged.map((it) => it.id));
+    const items = reuseItems(prev, merged);
+    const unread = first ? [] : [...new Set([...(s.unread[folderId] ?? []), ...unreadFresh])].filter((id) => stillThere.has(id));
     const completionChanged = leaving.length > 0 || [...animating].some((id) => ids.has(id));
     return {
-      items: { ...s.items, [folderId]: merged },
+      items: items === prev && s.items[folderId] ? s.items : { ...s.items, [folderId]: items },
       hidden: stillHidden.length === (s.hidden[folderId] ?? []).length ? s.hidden : { ...s.hidden, [folderId]: stillHidden },
-      known: { ...s.known, [folderId]: [...known, ...fresh].slice(-MAX_KNOWN) },
-      unread: { ...s.unread, [folderId]: first ? [] : [...new Set([...(s.unread[folderId] ?? []), ...unreadFresh])].filter((id) => stillThere.has(id)) },
+      known: fresh.length || !s.known[folderId] ? { ...s.known, [folderId]: [...known, ...fresh].slice(-MAX_KNOWN) } : s.known,
+      unread: s.unread[folderId] && sameIds(unread, s.unread[folderId]) ? s.unread : { ...s.unread, [folderId]: unread },
       completed: leaving.length || (s.completed[folderId] ?? []).length !== completed.length ? { ...s.completed, [folderId]: completed } : s.completed,
       completing: completionChanged ? { ...s.completing, [folderId]: [...[...animating].filter((id) => !ids.has(id)), ...leaving.map((l) => l.id)] } : s.completing,
       completions: completionChanged
         ? { ...s.completions, [folderId]: Object.fromEntries([...Object.entries(s.completions[folderId] ?? {}).filter(([id]) => !ids.has(id)), ...leaving.map((l) => [l.id, token] as const)]) }
         : s.completions,
       status: { ...s.status, [folderId]: { state: "idle", lastFetch: now, error: null } },
+      revisions: revised(s, folderId),
     };
   });
   return token;
@@ -307,7 +328,7 @@ export function finishCompleting(folderId: string, generation: number, token: nu
     const tokens = s.completions[folderId] ?? {};
     const done = (s.completing[folderId] ?? []).filter((id) => tokens[id] === token);
     if (!s.folders[folderId] || (s.generations[folderId] ?? 0) !== generation || !done.length) return {};
-    return finished(s, folderId, done);
+    return { ...finished(s, folderId, done), revisions: revised(s, folderId) };
   });
 }
 

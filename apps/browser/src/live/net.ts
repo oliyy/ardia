@@ -22,16 +22,17 @@ export const endpoints = {
   drive: mock ? `${mock}/google/drive/v3` : "https://www.googleapis.com/drive/v3",
 };
 
-export async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(url: string, init: RequestInit = {}, seen?: (headers: Headers) => void): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, { ...init, headers: { Accept: "application/json", ...init.headers } });
   } catch {
     throw new LiveError("network", "Couldn't connect");
   }
+  seen?.(res.headers);
   if (res.status === 401) throw new LiveError("signedOut", "Signed out");
   if (res.status === 403 && res.headers.get("x-github-sso")) throw new LiveError("sso", "Needs Single Sign-On");
-  if (res.status === 429 || (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0")) throw new LiveError("rateLimited", "Rate Limit Exceeded");
+  if (res.status === 429 || (res.status === 403 && (res.headers.get("x-ratelimit-remaining") === "0" || res.headers.has("retry-after")))) throw new LiveError("rateLimited", "Rate Limit Exceeded");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new LiveError(res.status === 403 ? "signedOut" : "other", `${res.status} ${text.slice(0, 200)}`.trim());

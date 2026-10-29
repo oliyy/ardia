@@ -1,18 +1,19 @@
 import { ActivitySpinner, ArcTabRowBackground, ContextMenuArea, FadeLabel, PulseDot, Surface, Symbol, type FadeLabelGlyph } from "@ardia/shell";
-import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { Animated, Easing, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
+import { memo, useContext, useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from "react";
+import { Animated, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
-import { COMPLETION_MS, errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
+import { errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
 import { githubAge, prBadge, summarizeChecks } from "../../live/github";
 import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
-import { setLive, updateFolder, useLive } from "../../live/store";
+import { live, setLive, updateFolder, useLive } from "../../live/store";
 import type { CompletedItem, CompletionState, LiveItem, PullRequestInfo } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { usePageProfileId, useWindowId } from "../../store/hooks";
 import { activeTabId, viewTabIds } from "../../store/model";
+import { liveNode } from "../../store/pinTree";
 import { openSettings } from "../settings/windows";
 import { HoverSlot } from "../HoverSlot";
 import { IconButton, useHover } from "../primitives";
@@ -22,6 +23,9 @@ import { clickMods, TabRow } from "./TabRow";
 import { useDragFolded, useDragItem, useDragging } from "./dnd";
 import { useShift, type EntryMotion } from "./entryMotion";
 import { Fold, useFold, useFoldHidden, type FoldEntry } from "./Fold";
+import { LiveRowGhost, type LiveData } from "./GhostEntry";
+import { AnimatedSurface, Morph, RowGhost, useRowMotion, type PlacedRow, type RowPlacement } from "./liveMotion";
+import { FoldChainContext, ListMotionContext, type FoldChain } from "./listMotion";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS, groupFrame } from "./geometry";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
@@ -39,6 +43,65 @@ const NONE_COMPLETED: CompletedItem[] = [];
 
 const liveRowKey = (folderId: string, itemId: string) => `live|${folderId}|${itemId}`;
 
+const ROW_HEIGHTS = { header: 22, more: 26, stackHead: 26, note: 28 } as const;
+const STACK_INDENT = 10;
+
+type MotionSource = { rows: FolderRow[]; strays: string[]; data: LiveData };
+
+function placeFolder(folderId: string, { rows, strays, data }: MotionSource): RowPlacement {
+  const gap = layout.rowGap;
+  const placed: PlacedRow[] = [];
+  let y = 0;
+  for (const row of rows) {
+    placed.push({ key: row.key, y, parent: null, ghost: () => <LiveRowGhost data={data} folderId={folderId} row={row} /> });
+    if (row.kind !== "stack") {
+      y += (row.kind === "item" ? layout.rowHeight : ROW_HEIGHTS[row.kind]) + gap;
+      continue;
+    }
+    let child = y + ROW_HEIGHTS.stackHead + gap;
+    if (data.expandedStacks[row.id] !== false) {
+      for (const item of row.items) {
+        placed.push({ key: item.id, y: child, parent: row.key, ghost: () => <LiveRowGhost data={data} folderId={folderId} row={{ kind: "item", key: item.id, item }} indent={STACK_INDENT} /> });
+        child += layout.rowHeight + gap;
+      }
+    }
+    y = Math.max(y + ROW_HEIGHTS.stackHead + gap, child);
+  }
+  if (!rows.length) {
+    placed.push({ key: "note", y, parent: null, ghost: null });
+    y += ROW_HEIGHTS.note + gap;
+  }
+  for (const id of strays) {
+    placed.push({ key: `stray:${id}`, y, parent: null, ghost: null });
+    y += layout.rowHeight + gap;
+  }
+  return { rows: placed, height: Math.max(0, y - gap) };
+}
+
+type StackKey = { key: string; members: string[] };
+
+function steadyStackKeys(rows: FolderRow[], known: Map<string, StackKey>): FolderRow[] {
+  const used = new Set<string>();
+  const next = new Map<string, StackKey>();
+  const keyed = rows.map((row) => {
+    if (row.kind !== "stack") return row;
+    const members = row.items.map((item) => item.id);
+    const same = known.get(row.id) ?? [...known.values()].find((k) => !used.has(k.key) && k.members.some((m) => members.includes(m)));
+    const key = same && !used.has(same.key) ? same.key : row.key;
+    used.add(key);
+    next.set(row.id, { key, members });
+    return key === row.key ? row : { ...row, key };
+  });
+  known.clear();
+  for (const [id, entry] of next) known.set(id, entry);
+  return keyed;
+}
+
+function ChainProbe({ into }: { into: MutableRefObject<FoldChain | null> }) {
+  into.current = useContext(FoldChainContext);
+  return null;
+}
+
 export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion = null, peek = false }: { folderId: string; motion?: EntryMotion | null; peek?: boolean }) {
   const windowId = useWindowId();
   const tokens = useSidebarTokens();
@@ -49,7 +112,8 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   const folded = useDragFolded(`l:${folderId}`);
   const collapsed = folded || !!folder?.collapsed || peek;
   const completed = useCompletedShown(folderId);
-  const rows = useMemo(() => (folder ? folderRows(folder, openItems(items, completed), showAll, completed) : []), [folder, items, showAll, completed]);
+  const stackKeys = useRef(new Map<string, StackKey>()).current;
+  const rows = useMemo(() => (folder ? steadyStackKeys(folderRows(folder, openItems(items, completed), showAll, completed), stackKeys) : []), [folder, items, showAll, completed]);
   const itemIds = useMemo(() => new Set([...items, ...completed.map((c) => c.item)].map((i) => i.id)), [items, completed]);
   const hiddenList = useLive((s) => s.hidden[folderId] ?? EMPTY);
   const hiddenIds = useMemo(() => new Set([...hiddenList, ...fetched.filter((it) => !itemIds.has(it.id))].map((i) => i.id)), [hiddenList, fetched, itemIds]);
@@ -71,13 +135,24 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   const foldedHeight = () => frame.border * 2 + layout.rowHeight + (activeTab ? layout.rowHeight + frame.padTop + frame.padBottom : 0);
   const { wrapper, handle, headerRef } = useDragItem(`l:${folderId}`, { kind: "live", tabIds: [], section: "pinned", liveId: folderId, collapsed: !!folder?.collapsed, foldedHeight }, undefined, motion?.clip);
   const [moved, movedRef] = useShift(motion?.shift ?? null);
+  const scope = useContext(ListMotionContext);
+  const chain = useRef<FoldChain | null>(null);
+  const landed = useRef({ fetched, completed });
+  const fromData = landed.current.fetched !== fetched || landed.current.completed !== completed;
+  landed.current = { fetched, completed };
+  const source = useMemo<MotionSource>(() => ({ rows, strays, data: live() }), [rows, strays]);
+  const ready = fromData && scope.enabled && !collapsed && (live().revisions[folderId] ?? 0) > 1;
+  const rowMotion = useRowMotion(source, ready, (from) => placeFolder(folderId, from), (delta, timing) => {
+    (chain.current ?? scope.fold?.pinned)?.(liveNode(folderId), delta, timing);
+  });
   useEffect(() => () => noteLiveHeight(windowId, profileId, folderId, null), [windowId, profileId, folderId]);
   if (!folder) return null;
 
-  const entries: FoldEntry[] = rows.length
-    ? rows.map((row) => ({ key: row.key, node: <FolderRowView row={row} folderId={folderId} windowId={windowId} /> }))
-    : [{ key: "note", node: <FolderNote folderId={folderId} /> }];
-  for (const id of strays) entries.push({ key: `stray:${id}`, node: <TabRow tabId={id} /> });
+  const glide = (key: string, node: ReactNode): FoldEntry => ({ key, node: <AnimatedSurface style={rowMotion.style(key)}>{node}</AnimatedSurface> });
+  const entries: FoldEntry[] = rowMotion.ghosts.map((g) => ({ key: g.key, ghost: true, node: <RowGhost top={g.y} style={g.style}>{g.node}</RowGhost> }));
+  if (rows.length) for (const row of rows) entries.push(glide(row.key, <FolderRowView row={row} folderId={folderId} windowId={windowId} glide={rowMotion.style} />));
+  else entries.push(glide("note", <FolderNote folderId={folderId} />));
+  for (const id of strays) entries.push(glide(`stray:${id}`, <TabRow tabId={id} />));
   const keep = !activeTab
     ? null
     : strays.includes(activeTab)
@@ -95,6 +170,7 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
         <View ref={headerRef} {...handle}>
           <FolderHeader folderId={folderId} windowId={windowId} collapsed={collapsed} peek={peek} flat={flat} />
         </View>
+        <ChainProbe into={chain} />
         <View style={flat ? { marginLeft: ARC_FOLDER_INDENT } : null}>
           <Fold fold={fold} collapsed={collapsed} entries={entries} keep={keep} gap={layout.rowGap} padTop={frame.padTop} padBottom={frame.padBottom} />
         </View>
@@ -103,14 +179,16 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   );
 });
 
-function FolderRowView({ row, folderId, windowId }: { row: FolderRow; folderId: string; windowId: string }) {
+type GlideStyle = (key: string) => object | null;
+
+function FolderRowView({ row, folderId, windowId, glide }: { row: FolderRow; folderId: string; windowId: string; glide: GlideStyle }) {
   switch (row.kind) {
     case "header":
       return <SectionTitle title={row.title} />;
     case "more":
       return <MoreRow folderId={folderId} section={row.section} count={row.count} />;
     case "stack":
-      return <StackRow folderId={folderId} windowId={windowId} stack={row} />;
+      return <StackRow folderId={folderId} windowId={windowId} stack={row} glide={glide} />;
     case "item":
       return <LiveItemRow folderId={folderId} item={row.item} windowId={windowId} done={row.done} />;
   }
@@ -262,7 +340,7 @@ function MoreRow({ folderId, section, count }: { folderId: string; section: stri
   );
 }
 
-function StackRow({ folderId, windowId, stack }: { folderId: string; windowId: string; stack: Extract<FolderRow, { kind: "stack" }> }) {
+function StackRow({ folderId, windowId, stack, glide }: { folderId: string; windowId: string; stack: Extract<FolderRow, { kind: "stack" }>; glide: GlideStyle }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const collapsed = useLive((s) => s.expandedStacks[stack.id] === false);
@@ -298,7 +376,14 @@ function StackRow({ folderId, windowId, stack }: { folderId: string; windowId: s
       <Fold
         fold={fold}
         collapsed={collapsed}
-        entries={stack.items.map((item) => ({ key: item.id, node: <LiveItemRow folderId={folderId} item={item} windowId={windowId} inStack /> }))}
+        entries={stack.items.map((item) => ({
+          key: item.id,
+          node: (
+            <AnimatedSurface style={glide(item.id)}>
+              <LiveItemRow folderId={folderId} item={item} windowId={windowId} inStack />
+            </AnimatedSurface>
+          ),
+        }))}
         gap={layout.rowGap}
         rowHeight={layout.rowHeight}
         padTop={layout.rowGap}
@@ -308,7 +393,7 @@ function StackRow({ folderId, windowId, stack }: { folderId: string; windowId: s
 }
 
 function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean; done?: CompletionState }) {
-  const indent = inStack ? 10 : 0;
+  const indent = inStack ? STACK_INDENT : 0;
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const arcLabel = useArcLabel();
@@ -326,20 +411,17 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
   const completion = completing ?? done ?? null;
   const reviewDue = !completion && awaitsReview(item);
   const { hovered, hoverProps } = useRowHover(windowId, completion ? null : { kind: "live", id: key });
-  const fold = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    if (!completing) return;
-    fold.setValue(1);
-    Animated.sequence([
-      Animated.delay(COMPLETION_MS - 420),
-      Animated.timing(fold, { toValue: 0, duration: 360, easing: Easing.bezier(0.2, 0.9, 0.3, 1), useNativeDriver: false }),
-    ]).start();
-  }, [completing]);
+  const scope = useContext(ListMotionContext);
+  const settled = (live().revisions[folderId] ?? 0) > 1;
+  const animates = () => settled && scope.enabled && !hidden;
+  const badge = item.pr ? prBadge(item.pr) : null;
+  const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr, done ?? null) : "doc";
+  const trailingState = completion ? (flat ? "none" : `c:${completion}`) : badge && badge !== "passed" ? badge : "none";
   const fill = active ? tokens.selectedFill : hovered ? theme.tabHover : "rgba(0,0,0,0)";
   const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
 
   return (
-    <Animated.View presentationGate style={completing ? { height: fold.interpolate({ inputRange: [0, 1], outputRange: [0, layout.rowHeight] }), opacity: fold, overflow: "hidden" } : null}>
+    <View presentationGate>
       <View
         ref={(v) => {
           registerRow(windowId, key, hidden ? null : v);
@@ -367,11 +449,13 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
                 style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}
               >
                 {(unread || reviewDue) && !flat ? <PulseDot color={colors.pip} pulsing={reviewDue} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
-                <ItemIcon item={item} completing={completing} done={done ?? null} colors={colors} />
+                <Morph state={iconState} animates={animates}>
+                  <ItemIcon item={item} completing={completing} done={done ?? null} colors={colors} animate={false} />
+                </Morph>
                 {flat && subtitle ? (
                   <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
-                    <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} style={{ height: 18 }} />
-                    <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} />
+                    <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} transitions={settled} style={{ height: 18 }} />
+                    <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} transitions={settled} />
                   </View>
                 ) : (
                   <FadeLabel
@@ -379,6 +463,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
                     fontSize={layout.rowFontSize}
                     weight={unread && !flat ? "medium" : undefined}
                     color={label}
+                    transitions={settled}
                     style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }}
                   />
                 )}
@@ -392,14 +477,16 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
                       <PulseDot color={theme.textPrimary} pulsing={reviewDue} style={{ width: 6, height: 6, opacity: 0.9 }} />
                     </View>
                   ) : null}
-                  <Trailing item={item} completion={completion} colors={colors} flat={flat} />
+                  <Morph state={trailingState} animates={animates}>
+                    <Trailing item={item} completion={completion} colors={colors} flat={flat} />
+                  </Morph>
                 </HoverSlot>
               </Surface>
             )}
           </Pressable>
         </ContextMenuArea>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -452,10 +539,10 @@ function prMeta(pr: PullRequestInfo, done: CompletionState | null, colors: LiveC
   return { text: parts.join(" · "), glyphs };
 }
 
-export function LiveSubtitle({ item, subtitle, done, colors }: { item: LiveItem; subtitle: string; done: CompletionState | null; colors: LiveColors }) {
+export function LiveSubtitle({ item, subtitle, done, colors, transitions = false }: { item: LiveItem; subtitle: string; done: CompletionState | null; colors: LiveColors; transitions?: boolean }) {
   const theme = useTheme();
   const meta = item.pr ? prMeta(item.pr, done, colors) : null;
-  return <FadeLabel text={meta?.text ?? subtitle} glyphs={meta?.glyphs} fontSize={12} color={theme.textSecondary} style={{ height: 14 }} />;
+  return <FadeLabel text={meta?.text ?? subtitle} glyphs={meta?.glyphs} fontSize={12} color={theme.textSecondary} transitions={transitions} style={{ height: 14 }} />;
 }
 
 const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: keyof LiveColors }> = {

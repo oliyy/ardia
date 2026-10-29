@@ -11,6 +11,8 @@ export type LiveSource = {
   site: string;
   fetch(folder: LiveFolder): Promise<LiveItem[]>;
   resolveGone?(items: LiveItem[]): Promise<Record<string, CompletionState>>;
+  minInterval?(now: number): number;
+  heldUntil?(): number;
 };
 
 async function secret(source: LiveSourceId): Promise<string> {
@@ -19,15 +21,72 @@ async function secret(source: LiveSourceId): Promise<string> {
   return value;
 }
 
+const GITHUB_LOW_BUDGET = 0.1;
+const GITHUB_SLOW_MS = 3 * 60_000;
+const GITHUB_RETRY_MS = 60_000;
+const githubBudget = { limit: 0, remaining: 0, resetAt: 0, heldUntil: 0 };
+
+function noteGithubBudget(headers: Headers) {
+  const read = (name: string) => {
+    const value = headers.get(name);
+    return value === null ? NaN : Number(value);
+  };
+  const [limit, remaining, reset, retry] = [read("x-ratelimit-limit"), read("x-ratelimit-remaining"), read("x-ratelimit-reset"), read("retry-after")];
+  if (limit > 0 && remaining >= 0 && reset > 0) Object.assign(githubBudget, { limit, remaining, resetAt: reset * 1000 });
+  if (remaining === 0 && reset > 0) githubBudget.heldUntil = Math.max(githubBudget.heldUntil, reset * 1000);
+  if (retry > 0) githubBudget.heldUntil = Math.max(githubBudget.heldUntil, Date.now() + retry * 1000);
+}
+
+function holdGithubAfterLimit() {
+  const exhausted = githubBudget.limit > 0 && githubBudget.remaining < githubBudget.limit * GITHUB_LOW_BUDGET && githubBudget.resetAt > Date.now();
+  githubBudget.heldUntil = Math.max(githubBudget.heldUntil, exhausted ? githubBudget.resetAt : Date.now() + GITHUB_RETRY_MS);
+}
+
 async function githubGraphql<T>(token: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
-  const json = await request<T & { errors?: { type?: string; message: string }[] }>(endpoints.githubGraphql, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables }),
+  try {
+    const json = await request<T & { errors?: { type?: string; message: string }[] }>(
+      endpoints.githubGraphql,
+      { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ query, variables }) },
+      noteGithubBudget,
+    );
+    const error = json.errors?.[0];
+    if (error && !(json as { data?: unknown }).data) throw new LiveError(error.type === "RATE_LIMITED" ? "rateLimited" : "other", error.message);
+    return json;
+  } catch (error) {
+    if (error instanceof LiveError && error.kind === "rateLimited") holdGithubAfterLimit();
+    throw error;
+  }
+}
+
+const githubFilters = (): LiveFolder["filters"] => {
+  const folders = Object.values(live().folders).filter((f) => f.sources.includes("github"));
+  return {
+    authored: folders.some((f) => f.filters.authored),
+    reviewRequests: folders.some((f) => f.filters.reviewRequests),
+    teamReviewRequests: folders.some((f) => f.filters.teamReviewRequests),
+  };
+};
+
+async function fetchGithub(token: string): Promise<GithubResponse> {
+  const json = await githubGraphql<GithubResponse>(token, GITHUB_QUERY, GITHUB_VARIABLES);
+  const ids = detailIds(json, githubFilters());
+  const pages = Array.from({ length: Math.ceil(ids.length / DETAILS_PAGE) }, (_, i) => ids.slice(i * DETAILS_PAGE, (i + 1) * DETAILS_PAGE));
+  const page = async (ids: string[]) => detailNodes(ids, await githubGraphql<DetailsResponse>(token, GITHUB_DETAILS_QUERY, { ids }));
+  const retry = (ids: string[]) => (error: unknown) =>
+    error instanceof LiveError && (error.kind === "other" || error.kind === "network") ? page(ids) : Promise.reject(error);
+  const details = await Promise.all(pages.map((ids) => page(ids).catch(retry(ids))));
+  return withDetails(json, details.flat());
+}
+
+let githubShared: { token: string; task: Promise<GithubResponse> } | null = null;
+
+function sharedGithub(token: string): Promise<GithubResponse> {
+  if (githubShared?.token === token) return githubShared.task;
+  const task = fetchGithub(token).finally(() => {
+    if (githubShared?.task === task) githubShared = null;
   });
-  const error = json.errors?.[0];
-  if (error && !(json as { data?: unknown }).data) throw new LiveError(error.type === "RATE_LIMITED" ? "rateLimited" : "other", error.message);
-  return json;
+  githubShared = { token, task };
+  return task;
 }
 
 const github: LiveSource = {
@@ -37,14 +96,7 @@ const github: LiveSource = {
   site: "https://github.com",
   async fetch(folder) {
     const token = await secret("github");
-    const json = await githubGraphql<GithubResponse>(token, GITHUB_QUERY, GITHUB_VARIABLES);
-    const ids = detailIds(json, folder.filters);
-    const pages = Array.from({ length: Math.ceil(ids.length / DETAILS_PAGE) }, (_, i) => ids.slice(i * DETAILS_PAGE, (i + 1) * DETAILS_PAGE));
-    const page = async (ids: string[]) => detailNodes(ids, await githubGraphql<DetailsResponse>(token, GITHUB_DETAILS_QUERY, { ids }));
-    const retry = (ids: string[]) => (error: unknown) =>
-      error instanceof LiveError && (error.kind === "other" || error.kind === "network") ? page(ids) : Promise.reject(error);
-    const details = await Promise.all(pages.map((ids) => page(ids).catch(retry(ids))));
-    return mapGithub(withDetails(json, details.flat()), folder.filters);
+    return mapGithub(await sharedGithub(token), folder.filters);
   },
   async resolveGone(items) {
     const prs = items.filter((it) => it.source === "github");
@@ -63,9 +115,13 @@ const github: LiveSource = {
     }
     return out;
   },
+  minInterval: (now) =>
+    githubBudget.limit > 0 && now < githubBudget.resetAt && githubBudget.remaining < githubBudget.limit * GITHUB_LOW_BUDGET ? GITHUB_SLOW_MS : 0,
+  heldUntil: () => githubBudget.heldUntil,
 };
 
 const BITBUCKET_STATE_BATCH = 10;
+const BITBUCKET_MIN_MS = 3 * 60_000;
 
 const bitbucketAuth = async () => basic(live().config.bitbucketUser, await secret("bitbucket"));
 
@@ -107,6 +163,7 @@ const bitbucket: LiveSource = {
     }
     return out;
   },
+  minInterval: () => BITBUCKET_MIN_MS,
 };
 
 const notionHeaders = (token: string) => ({ Authorization: `Bearer ${token}`, "Notion-Version": "2022-06-28", "Content-Type": "application/json" });

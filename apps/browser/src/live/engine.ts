@@ -1,14 +1,16 @@
-import { onWindowEvent } from "@ardia/shell";
+import { onAppEvent, onWindowEvent } from "@ardia/shell";
 import { everySlowly } from "../lib/slowTimers";
 import { useBrowser } from "../store/browser";
 import { activeTabId, isIncognitoProfile, viewTabIds } from "../store/model";
 import { liveNode, migrateLivePlaces } from "../store/pinTree";
 import { SOURCES } from "./sources";
 import { applyFetch, createFolder, finishCompleting, folderGeneration, live, markRead, removeFolder, setStatus, unhide, useLive, type LiveFolderSnapshot } from "./store";
-import { LiveError, type CompletionState, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
+import { LiveError, type CompletionState, type LiveFolder, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
 
-const INTERVAL_MS: Record<LiveFolderKind, number> = { pullRequests: 3 * 60_000, documents: 10 * 60_000 };
-const STALE_ON_FOCUS_MS = 60_000;
+const ACTIVE_MS: Record<LiveFolderKind, number> = { pullRequests: 30_000, documents: 10 * 60_000 };
+const IDLE_MS: Record<LiveFolderKind, number> = { pullRequests: 3 * 60_000, documents: 10 * 60_000 };
+const TICK_MS = 30_000;
+const STALE_ON_FOCUS_MS = 30_000;
 export const COMPLETION_MS = 2600;
 
 const inflight = new Map<string, { generation: number; task: Promise<void> }>();
@@ -22,11 +24,12 @@ function order(items: LiveItem[]): LiveItem[] {
   );
 }
 
-export function refreshFolder(folderId: string): Promise<void> {
+export function refreshFolder(folderId: string, background = false): Promise<void> {
   const generation = folderGeneration(folderId);
   const running = inflight.get(folderId);
   if (running?.generation === generation) return running.task;
-  const task: Promise<void> = run(folderId, generation).finally(() => {
+  const after = running ? running.task.catch(() => undefined) : Promise.resolve();
+  const task: Promise<void> = after.then(() => run(folderId, generation, background)).finally(() => {
     if (inflight.get(folderId)?.task === task) inflight.delete(folderId);
   });
   inflight.set(folderId, { generation, task });
@@ -40,11 +43,12 @@ export function manualRefresh(folderId: string): Promise<void> {
 
 const isCurrent = (folderId: string, generation: number) => !!live().folders[folderId] && folderGeneration(folderId) === generation;
 
-async function run(folderId: string, generation: number) {
+async function run(folderId: string, generation: number, background: boolean) {
   const folder = live().folders[folderId];
-  if (!folder) return;
+  if (!folder || !isCurrent(folderId, generation)) return;
   const before = live();
-  setStatus(folderId, { state: before.status[folderId]?.lastFetch ? "updating" : "initializing" });
+  const fetchedBefore = !!before.status[folderId]?.lastFetch;
+  if (!background || !fetchedBefore) setStatus(folderId, { state: fetchedBefore ? "updating" : "initializing" });
   const results = await Promise.allSettled(folder.sources.map((id) => SOURCES[id].fetch(folder)));
   if (!isCurrent(folderId, generation)) return;
 
@@ -168,7 +172,11 @@ export function deleteLiveFolder(folderId: string): LiveFolderSnapshot | null {
 }
 
 let started = false;
+let appActive = true;
 const lastNudge = new Map<string, number>();
+
+const sourcePace = (folder: LiveFolder, now: number) => Math.max(0, ...folder.sources.map((id) => SOURCES[id].minInterval?.(now) ?? 0));
+const sourceHeld = (folder: LiveFolder, now: number) => folder.sources.some((id) => (SOURCES[id].heldUntil?.() ?? 0) > now);
 
 export function startLiveEngine() {
   if (started) return;
@@ -201,22 +209,35 @@ export function startLiveEngine() {
     for (const f of Object.values(live().folders)) if (!s.profiles[f.profileId]) removeFolder(f.id);
   });
 
-  const due = (id: string, maxAge: number) => {
+  const due = (id: string, maxAge: (f: LiveFolder) => number, slack = 0) => {
     const f = live().folders[id];
     const st = live().status[id];
-    return !!f && (!st?.lastFetch || Date.now() - st.lastFetch >= maxAge);
+    const now = Date.now();
+    if (!f || sourceHeld(f, now)) return false;
+    return !st?.lastFetch || now - st.lastFetch >= Math.max(maxAge(f), sourcePace(f, now)) - slack;
+  };
+  const refreshStale = () => {
+    for (const id of live().folderOrder) if (due(id, () => STALE_ON_FOCUS_MS)) void refreshFolder(id, true);
   };
   setTimeout(() => live().folderOrder.forEach((id) => void refreshFolder(id)), 2500);
   everySlowly({
-    every: 30_000,
+    every: TICK_MS,
     run: () => {
-      for (const id of live().folderOrder) if (due(id, INTERVAL_MS[live().folders[id]!.kind])) void refreshFolder(id);
+      for (const id of live().folderOrder) if (due(id, (f) => (appActive ? ACTIVE_MS : IDLE_MS)[f.kind], TICK_MS / 2)) void refreshFolder(id, true);
     },
     needed: () => live().folderOrder.length > 0,
     watch: (changed) => useLive.subscribe((s, prev) => s.folderOrder !== prev.folderOrder && changed()),
   });
   onWindowEvent((e) => {
-    if (e.type === "focus") for (const id of live().folderOrder) if (due(id, STALE_ON_FOCUS_MS)) void refreshFolder(id);
+    if (e.type !== "focus") return;
+    appActive = true;
+    refreshStale();
+  });
+  onAppEvent((e) => {
+    if (e.type === "resignActive" || e.type === "screenLocked") appActive = false;
+    if (e.type !== "screenUnlocked") return;
+    appActive = true;
+    refreshStale();
   });
 
   useBrowser.subscribe((s, prev) => {
@@ -235,7 +256,7 @@ export function startLiveEngine() {
       const folderId = s.tabs[before]?.liveItem?.folderId;
       if (!folderId || Date.now() - (lastNudge.get(folderId) ?? 0) < 20_000) continue;
       lastNudge.set(folderId, Date.now());
-      setTimeout(() => void refreshFolder(folderId), 3000);
+      setTimeout(() => void refreshFolder(folderId, true), 3000);
     }
   });
 }

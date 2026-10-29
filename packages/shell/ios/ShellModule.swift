@@ -574,6 +574,9 @@ public class ShellModule: Module {
     sidebarObservers.append((distributed, distributed.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in
       if quiet() { emit("screenLocked") }
     }))
+    sidebarObservers.append((distributed, distributed.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
+      if NSApp.isActive { emit("screenUnlocked") }
+    }))
     SwitcherHold.onRelease = { emit("switcherReleased") }
     flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
       if SwitcherHold.released(by: event.modifierFlags) { emit("switcherReleased") }
@@ -686,6 +689,8 @@ public class FadeLabelModule: Module {
       Prop("fadeWidth") { (view: FadeLabel, v: Double) in view.fadeWidth = v }
       Prop("letterSpacing") { (view: FadeLabel, v: Double?) in view.letterSpacing = v.flatMap { $0.isFinite ? $0 : nil } ?? 0 }
       Prop("glyphs") { (view: FadeLabel, v: [[String: Any]]?) in view.glyphs = (v ?? []).map(FadeLabelGlyph.init) }
+      Prop("transitions") { (view: FadeLabel, v: Bool?) in view.transitions = v ?? false }
+      OnViewDidUpdateProps { (view: FadeLabel) in view.propsDidUpdate() }
     }
   }
 }
@@ -703,6 +708,11 @@ final class FadeLabel: ExpoView {
   private static let bidiControlScalars: Set<UInt32> = [
     0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069,
   ]
+  private static let crossfadeDuration: CFTimeInterval = 0.25
+  private static let popResponse: CGFloat = 0.38
+  private static let popDampingRatio: CGFloat = 0.62
+  private static let popFromScale: CGFloat = 0.55
+  private static let popFadeDuration: CFTimeInterval = 0.18
 
   private let field = NSTextField(labelWithString: "")
   private let label = FadeLabelText()
@@ -735,8 +745,16 @@ final class FadeLabel: ExpoView {
   var fadeWidth: Double = 24 { didSet { relayout() } }
   var letterSpacing: Double = 0 { didSet { if letterSpacing != oldValue { update() } } }
   var glyphs: [FadeLabelGlyph] = [] { didSet { if glyphs != oldValue { update() } } }
+  var transitions = false
+
+  private var committed: (text: String, images: [String])?
+  private var poppingGlyphs: Set<Int> = []
+  private var pops: [CALayer] = []
+  private var popTurn = 0
 
   private var plainText: Bool { letterSpacing == 0 && glyphs.isEmpty }
+
+  private var showsOnScreen: Bool { window != nil && !isHiddenOrHasHiddenAncestor && !visibleRect.isEmpty }
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -794,23 +812,132 @@ final class FadeLabel: ExpoView {
       field.textColor = color
       label.spokenText = text
     } else {
-      let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .kern: letterSpacing]
-      let attributed = NSMutableAttributedString()
-      var spoken = ""
-      var pending = glyphs.makeIterator()
-      for (index, part) in text.components(separatedBy: FadeLabelGlyph.placeholder).enumerated() {
-        if index > 0, let glyph = pending.next() {
-          if let mark = glyph.attachment(centeredOn: font, tint: color) { attributed.append(mark) }
-          spoken += glyph.label
-        }
-        attributed.append(NSAttributedString(string: part, attributes: attributes))
-        spoken += part
-      }
+      let (attributed, spoken) = content(font, textColor: color) { !self.poppingGlyphs.contains($0) }
       field.attributedStringValue = attributed
       label.spokenText = spoken
     }
     label.needsDisplay = true
     measure()
+  }
+
+  private func content(_ font: NSFont, textColor: NSColor, showsGlyph: (Int) -> Bool) -> (NSAttributedString, String) {
+    let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor, .kern: letterSpacing]
+    let attributed = NSMutableAttributedString()
+    var spoken = ""
+    for (index, part) in text.components(separatedBy: FadeLabelGlyph.placeholder).enumerated() {
+      if index > 0, index <= glyphs.count {
+        let glyph = glyphs[index - 1]
+        if let mark = glyph.attachment(centeredOn: font, tint: color, visible: showsGlyph(index - 1)) { attributed.append(mark) }
+        spoken += glyph.label
+      }
+      attributed.append(NSAttributedString(string: part, attributes: attributes))
+      spoken += part
+    }
+    return (attributed, spoken)
+  }
+
+  func propsDidUpdate() {
+    let images = glyphs.map(\.image)
+    defer { committed = (text, images) }
+    guard let before = committed, before.text != text || before.images != images else { return }
+    endPops()
+    guard transitions, showsOnScreen else { return }
+    let crossfade = CATransition()
+    crossfade.type = .fade
+    crossfade.duration = Self.crossfadeDuration
+    crossfade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    layer?.add(crossfade, forKey: "contentFade")
+    let fresh = Set(glyphs.indices.filter { !before.images.contains(glyphs[$0].image) })
+    if !fresh.isEmpty { pop(fresh) }
+  }
+
+  private func endPops() {
+    popTurn += 1
+    guard !pops.isEmpty || !poppingGlyphs.isEmpty else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    pops.forEach { $0.removeFromSuperlayer() }
+    CATransaction.commit()
+    pops = []
+    guard !poppingGlyphs.isEmpty else { return }
+    poppingGlyphs = []
+    update()
+    label.displayIfNeeded()
+  }
+
+  private func pop(_ fresh: Set<Int>) {
+    guard let window, let host = label.layer, let cell = field.cell?.copy() as? NSCell, let font = field.font else { return }
+    let scale = window.backingScaleFactor
+    let layers: [CALayer] = fresh.sorted().compactMap { index in
+      cell.attributedStringValue = content(font, textColor: .clear) { $0 == index }.0
+      guard let (image, rect) = Self.render(cell, in: label, scale: scale) else { return nil }
+      let pop = CALayer()
+      pop.contents = image
+      pop.contentsScale = scale
+      pop.frame = host.isGeometryFlipped ? rect : CGRect(x: rect.minX, y: label.bounds.height - rect.maxY, width: rect.width, height: rect.height)
+      return pop
+    }
+    guard !layers.isEmpty else { return }
+    poppingGlyphs = fresh
+    update()
+    let stiffness = pow(2 * .pi / Self.popResponse, 2)
+    let spring = CASpringAnimation(keyPath: "transform.scale")
+    spring.mass = 1
+    spring.stiffness = stiffness
+    spring.damping = 2 * Self.popDampingRatio * sqrt(stiffness)
+    spring.fromValue = Self.popFromScale
+    spring.toValue = 1
+    spring.duration = spring.settlingDuration
+    let appear = CABasicAnimation(keyPath: "opacity")
+    appear.fromValue = 0
+    appear.toValue = 1
+    appear.duration = Self.popFadeDuration
+    appear.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    for pop in layers {
+      host.addSublayer(pop)
+      pop.add(spring, forKey: "pop")
+      pop.add(appear, forKey: "appear")
+    }
+    CATransaction.commit()
+    pops = layers
+    let turn = popTurn
+    DispatchQueue.main.asyncAfter(deadline: .now() + spring.settlingDuration) { [weak self] in
+      guard let self, self.popTurn == turn else { return }
+      self.endPops()
+    }
+  }
+
+  private static func render(_ cell: NSCell, in view: NSView, scale: CGFloat) -> (CGImage, CGRect)? {
+    let bounds = view.bounds
+    let width = Int((bounds.width * scale).rounded(.up))
+    let height = Int((bounds.height * scale).rounded(.up))
+    guard width > 0, height > 0,
+      let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+    context.translateBy(x: 0, y: CGFloat(height))
+    context.scaleBy(x: scale, y: -scale)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+    cell.draw(withFrame: bounds, in: view)
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = context.makeImage(), let data = context.data else { return nil }
+    let stride = context.bytesPerRow
+    let pixels = data.bindMemory(to: UInt8.self, capacity: stride * height)
+    var minX = width, minY = height, maxX = -1, maxY = -1
+    for y in 0..<height {
+      for x in 0..<width where pixels[y * stride + x * 4 + 3] > 0 {
+        minX = min(minX, x)
+        maxX = max(maxX, x)
+        minY = min(minY, y)
+        maxY = max(maxY, y)
+      }
+    }
+    guard maxX >= minX else { return nil }
+    let crop = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+    guard let cropped = image.cropping(to: crop) else { return nil }
+    return (cropped, CGRect(x: bounds.minX + crop.minX / scale, y: bounds.minY + crop.minY / scale, width: crop.width / scale, height: crop.height / scale))
   }
 
   private func measure() {
@@ -892,11 +1019,12 @@ struct FadeLabelGlyph: Equatable {
     label = record["label"] as? String ?? ""
   }
 
-  func attachment(centeredOn font: NSFont, tint fallback: NSColor) -> NSAttributedString? {
+  func attachment(centeredOn font: NSFont, tint fallback: NSColor, visible: Bool = true) -> NSAttributedString? {
     guard let base = Self.load(image) else { return nil }
     let tint = color ?? fallback
     let size = base.size
     let tinted = NSImage(size: size, flipped: false) { rect in
+      guard visible else { return true }
       base.draw(in: rect)
       tint.set()
       rect.fill(using: .sourceIn)

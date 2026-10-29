@@ -23,10 +23,10 @@ const devScale = () => (__DEV__ ? ((globalThis as { sidebarMotionScale?: number 
 
 export type SlideTiming = { ms: number; easing: (t: number) => number };
 export type FoldSlideOptions = { timing: SlideTiming; tail: boolean };
-type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean; live: boolean; superseded: number; ms: number; easing: (t: number) => number };
+export type Slide = { value: Animated.Value; from: number; at: number; until: number; landed: boolean; live: boolean; superseded: number; ms: number; easing: (t: number) => number };
 type SyncedValue = { __onAnimatedValueUpdateReceived: (value: number, offset?: number) => void };
 
-function newSlide(from: number, at: number, timing: SlideTiming): Slide {
+export function newSlide(from: number, at: number, timing: SlideTiming): Slide {
   const slide: Slide = { value: new Animated.Value(from), from, at, until: 0, landed: false, live: false, superseded: 0, ms: timing.ms, easing: timing.easing };
   const value = slide.value as unknown as SyncedValue;
   const receive = value.__onAnimatedValueUpdateReceived.bind(value);
@@ -47,7 +47,7 @@ type Planner = (before: Snapshot, after: Snapshot, slides: Map<string, Slide>, g
 export type ListSlot = { entry: string } | { ghost: Ghost; top: number };
 export type Capture = { state: BrowserState | null; list: string[] | null; live: LiveData | null; pending: Snapshot | null };
 export type Boundary = (list: string[]) => { above: number; below: number };
-export type FoldChain = (entry: string, delta: number) => Animated.Value | null;
+export type FoldChain = (entry: string, delta: number, timing?: SlideTiming) => Animated.Value | null;
 export type ListMotionScope = { enabled: boolean; slideBelow: ((entry: string, delta: number) => void) | null; fold?: { pinned: FoldChain; list: FoldChain } };
 
 export const ListMotionContext = createContext<ListMotionScope>({ enabled: false, slideBelow: null });
@@ -141,7 +141,7 @@ function prefixHeight(s: BrowserState, entries: string[], count: number, height:
   return y;
 }
 
-function shiftAt(slide: Slide | undefined, t: number): number {
+export function shiftAt(slide: Slide | undefined, t: number): number {
   if (!slide) return 0;
   const p = Math.min(1, Math.max(0, (t - slide.at) / slide.ms));
   return slide.from * (1 - slide.easing(p));
