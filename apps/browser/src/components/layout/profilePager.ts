@@ -22,7 +22,7 @@ const WHEEL_COOLDOWN_MS = 250;
 
 class ProfilePager {
   readonly pos: Animated.Value;
-  readonly state = create<{ pages: PagerPage[] | null; ack: number }>(() => ({ pages: null, ack: 0 }));
+  readonly state = create<{ pages: PagerPage[] | null; ack: number; moving: boolean }>(() => ({ pages: null, ack: 0, moving: false }));
   private surfaces = 0;
   private switching = false;
   private unsubscribe: () => void;
@@ -54,6 +54,8 @@ class ProfilePager {
   }
 
   readonly onNativeState = (event: PagerStateEvent) => {
+    const moving = event.phase === "began" || (event.phase === "selected" && event.position !== event.selected);
+    if (moving !== this.state.getState().moving) this.state.setState({ moving });
     if (event.phase === "began") endResize(this.windowId);
     if (this.external) return;
     this.commitNative(pagerState(this.windowId) ?? event, event);

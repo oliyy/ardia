@@ -635,7 +635,8 @@ const TabPane = memo(function TabPane({
   useEffect(() => {
     if (visible && isNewTab && !mounted) patchPage(tabId, { wasNewTab: true });
   }, [visible, isNewTab, mounted]);
-  const prewarmed = usePrewarm(visible && isNewTab && !emptyCard && !mounted && !small && !inSplit);
+  const pagerSettled = useStoreWhile(pagerFor(windowId).state, visible && isNewTab, (s) => !s.moving);
+  const prewarmed = usePrewarm(visible && isNewTab && !emptyCard && !mounted && !small && !inSplit, pagerSettled);
   const hideBar = autoHide && visible && !fullscreen;
   const mode = useToolbarMode(tabId, windowId, hideBar);
   const bookmarksBar = bookmarksBarShown(barMode, own.exists ? own : undefined) && !fullscreen && !inSplit && !small;

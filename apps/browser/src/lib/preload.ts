@@ -26,15 +26,16 @@ const PREWARM_DELAY_MS = 120;
 let prewarmOn = true;
 export const setNewTabPrewarm = (on: boolean) => void (prewarmOn = on);
 export const newTabPrewarmOn = () => prewarmOn && engineHasPrewarmFixes() && switchOn("newTabPrewarm");
-export function usePrewarm(want: boolean) {
+export function usePrewarm(want: boolean, settled: boolean) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     if (!want || !newTabPrewarmOn()) {
       setReady(false);
       return;
     }
+    if (!settled) return;
     const timer = setTimeout(() => setReady(true), PREWARM_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [want]);
+  }, [want, settled]);
   return want && ready;
 }
