@@ -1,6 +1,6 @@
 import { ArcFavoriteBackground, DockSelection, Surface } from "@ardia/shell";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, StyleSheet, View } from "react-native";
+import { Animated, Easing, StyleSheet, View } from "react-native";
 import type { ResolvedFavicon } from "../../lib/favicons";
 import { colorHexAlpha } from "../../lib/profileTheme";
 import { hex, layout, useTheme } from "../../lib/theme";
@@ -19,6 +19,7 @@ import { useSidebarTokens } from "./tokens";
 const SELECTION_STROKE = 3;
 const GLASS_RIM = 1;
 export const TILE_RADIUS = 10;
+const TILE_HOVER_FADE = { duration: 120, easing: Easing.bezier(0.25, 0.1, 0.25, 1) } as const;
 
 const AnimatedSurface = Animated.createAnimatedComponent(Surface);
 const AnimatedDockSelection = Animated.createAnimatedComponent(DockSelection);
@@ -237,23 +238,45 @@ export function useSlotPosition(column: number, row: number, grid: TileWidth, sl
   return position;
 }
 
+function useTileHoverFade(lit: boolean) {
+  const [shown] = useState(() => new Animated.Value(lit ? 1 : 0));
+  const [rest] = useState(() => shown.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }));
+  const litFor = useRef(lit);
+  useEffect(() => {
+    if (litFor.current === lit) return;
+    litFor.current = lit;
+    Animated.timing(shown, { toValue: lit ? 1 : 0, ...TILE_HOVER_FADE, useNativeDriver: true }).start();
+  }, [lit, shown]);
+  return { shown, rest };
+}
+
 function ArcTileFace({ tabId, badge, width, active, selected, hovered, pressed }: FaceState & { tabId: string; badge?: ReactNode }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const tab = useTab(tabId);
   const [shown, setShown] = useState<ResolvedFavicon | null>(null);
+  const hover = useTileHoverFade(hovered || selected);
   if (!tab) return null;
   const muted = theme.custom?.favoriteMutedColor;
   const mutedColor = muted ? colorHexAlpha(theme.dark ? muted.dark : muted.light) : theme.dark ? undefined : hex(theme.icon);
   return (
-    <AnimatedSurface
-      fill={active ? undefined : hex(pressed ? theme.tabPressed : hovered || selected ? theme.tabHover : tokens.fieldFill)}
-      cornerRadius={layout.rowRadius}
-      borderWidth={!active && selected ? 1 : 0}
-      borderColor={selected && !active ? hex(tokens.dragBorder) : undefined}
-      logicalWidth={!active ? width : undefined}
-      style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}
-    >
+    <AnimatedSurface style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}>
+      <AnimatedSurface
+        pointerEvents="none"
+        fill={active ? undefined : hex(tokens.fieldFill)}
+        cornerRadius={layout.rowRadius}
+        logicalWidth={!active ? width : undefined}
+        style={[StyleSheet.absoluteFill, { opacity: hover.rest }]}
+      />
+      <AnimatedSurface
+        pointerEvents="none"
+        fill={active ? undefined : hex(pressed ? theme.tabPressed : theme.tabHover)}
+        cornerRadius={layout.rowRadius}
+        borderWidth={!active && selected ? 1 : 0}
+        borderColor={selected && !active ? hex(tokens.dragBorder) : undefined}
+        logicalWidth={!active ? width : undefined}
+        style={[StyleSheet.absoluteFill, { opacity: hover.shown }]}
+      />
       {active ? <AnimatedArcFavoriteBackground source={tab.customIcon ? null : shown} cornerRadius={layout.rowRadius} hovered={hovered} logicalWidth={width} dark={theme.dark} mutedColor={mutedColor} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
       <View>
         <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} onSource={setShown} />
