@@ -2962,7 +2962,7 @@ index 3d7cb7a1d9e107d7c6f26911cccef91f55eb47dc..c60380dbb9ca72e7edf1133f4a65a176
  }
  - (YGValue)left
 diff --git a/React/Views/RCTView.h b/React/Views/RCTView.h
-index 152e76da136756ebc962ece4cc84e84df7cfce0e..be082c8e159a4cd333c9a9c1e3abaee8bc4dee4b 100644
+index 152e76da136756ebc962ece4cc84e84df7cfce0e..3ca579b52ea91186f62abcbd435d2a2585403115 100644
 --- a/React/Views/RCTView.h
 +++ b/React/Views/RCTView.h
 @@ -71,6 +71,17 @@ extern const UIAccessibilityTraits SwitchAccessibilityTrait;
@@ -2983,7 +2983,7 @@ index 152e76da136756ebc962ece4cc84e84df7cfce0e..be082c8e159a4cd333c9a9c1e3abaee8
  /**
   * Hide subviews if they are outside the view bounds.
   * This is an optimisation used predominantly with RKScrollViews
-@@ -194,3 +205,49 @@ extern const UIAccessibilityTraits SwitchAccessibilityTrait;
+@@ -194,3 +205,50 @@ extern const UIAccessibilityTraits SwitchAccessibilityTrait;
  #endif // macOS]
  
  @end
@@ -3002,6 +3002,7 @@ index 152e76da136756ebc962ece4cc84e84df7cfce0e..be082c8e159a4cd333c9a9c1e3abaee8
 +RCT_EXTERN void ArdiaPresentationGateGeometryDidChange(void);
 +RCT_EXTERN void ArdiaPresentationGateTransformDidChange(RCTPlatformView *view);
 +RCT_EXTERN void ArdiaViewDidCreate(RCTPlatformView *view);
++RCT_EXTERN BOOL ArdiaAnyViewRemovesClippedSubviews(void);
 +RCT_EXTERN void ArdiaPresentationGateWillMount(void);
 +RCT_EXTERN void ArdiaPresentationGateDidMount(void);
 +RCT_EXTERN void ArdiaMountReceiptsDidMount(BOOL landed);
@@ -3034,7 +3035,7 @@ index 152e76da136756ebc962ece4cc84e84df7cfce0e..be082c8e159a4cd333c9a9c1e3abaee8
 +RCT_EXTERN NSDictionary<NSNumber *, NSDictionary<NSNumber *, NSNumber *> *> *ArdiaPresentationFreezePostedGenerations(void);
 +#endif
 diff --git a/React/Views/RCTView.m b/React/Views/RCTView.m
-index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3de8ad8f07 100644
+index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..8361ede3860627bee5c1203dfd2682274119e1c5 100644
 --- a/React/Views/RCTView.m
 +++ b/React/Views/RCTView.m
 @@ -12,6 +12,7 @@
@@ -3045,7 +3046,15 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
  #import <React/RCTMockDef.h>
  
  #import "RCTAutoInsetsProtocol.h"
-@@ -136,1661 +137,4296 @@ - (RCTPlatformView *)react_findClipView // [macOS]
+@@ -27,6 +28,7 @@
+ #import "RCTViewKeyboardEvent.h"
+ #if TARGET_OS_OSX // [macOS
+ #import "RCTTextView.h"
++#import <stdatomic.h>
+ #endif // macOS]
+ 
+ RCT_MOCK_DEF(RCTView, RCTContentInsets);
+@@ -136,1661 +138,4318 @@ - (RCTPlatformView *)react_findClipView // [macOS]
    return str;
  }
  
@@ -3088,6 +3097,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +static NSUInteger ArdiaPresentationFoldDetached;
 +static NSUInteger ArdiaPresentationFoldAttached;
 +static NSMapTable<NSView *, RCTView *> *ArdiaPresentationOwners;
++static _Atomic NSUInteger ArdiaViewsRemovingClippedSubviews;
 +@interface ArdiaPresentationFrame : NSObject
 +@property (nonatomic, assign) CGRect rect;
 +@end
@@ -6003,8 +6013,24 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +  if (!removeClippedSubviews && _removeClippedSubviews) {
 +    [self react_remountAllSubviews];
 +  }
++#if TARGET_OS_OSX
++  if (removeClippedSubviews && !_removeClippedSubviews) {
++    atomic_fetch_add_explicit(&ArdiaViewsRemovingClippedSubviews, 1, memory_order_relaxed);
++  } else if (!removeClippedSubviews && _removeClippedSubviews) {
++    atomic_fetch_sub_explicit(&ArdiaViewsRemovingClippedSubviews, 1, memory_order_relaxed);
++  }
++#endif
 +  _removeClippedSubviews = removeClippedSubviews;
 +}
++
++#if TARGET_OS_OSX
++- (void)dealloc
++{
++  if (_removeClippedSubviews) {
++    atomic_fetch_sub_explicit(&ArdiaViewsRemovingClippedSubviews, 1, memory_order_relaxed);
++  }
++}
++#endif
 +
 +- (void)didUpdateReactSubviews
 +{
@@ -6965,11 +6991,11 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +    } else {
 +      [entering addObject:view];
 +    }
-+  }
+   }
 +  ArdiaHoverHeld = held;
 +  for (RCTView *view in [self ardia_byDepth:leaving deepestFirst:YES]) {
 +    [view ardia_setMouseOver:NO atScreenPoint:screen];
-   }
++  }
 +  for (RCTView *view in [self ardia_byDepth:entering deepestFirst:NO]) {
 +    [view ardia_setMouseOver:YES atScreenPoint:screen];
 +  }
@@ -7464,7 +7490,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +{
 +  if (_presentationGate == presentationGate) {
 +    return;
-   }
++  }
 +  _presentationGate = presentationGate;
 +  ArdiaPresentationSetUp();
 +  if (presentationGate) {
@@ -7485,7 +7511,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +    [ArdiaPresentationDormantGates removeObject:self];
 +    ArdiaPresentationStale = YES;
 +    ArdiaPresentationGateGeometryDidChange();
-+  }
+   }
 +}
  
 -                setBorderRadius() setBorderRadius(TopLeft) setBorderRadius(TopRight) setBorderRadius(TopStart)
@@ -7621,12 +7647,12 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +{
 +  if (_presentationShiftBound == presentationShiftBound) {
 +    return;
-   }
++  }
 +  _presentationShiftBound = presentationShiftBound;
 +  if (_presentationSession) {
 +    ArdiaPresentationStale = YES;
 +    ArdiaPresentationGateGeometryDidChange();
-+  }
+   }
 +}
  
 -                                    setBorderStyle()
@@ -7727,13 +7753,13 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +  ArdiaPresentationFreezeState *frozen = ArdiaPresentationFreezeStateHolding(self);
 +  if (frozen != nil) {
 +    ArdiaPresentationFreezeScheduleThaw(frozen, self);
-+  }
+   }
 +  RCTView *inner = [ArdiaPresentationSessions containsObject:self] ? self : session;
 +  [ArdiaPresentationClosedGates removeObject:self];
 +  for (RCTPlatformView *child in self.reactSubviews) {
 +    [ArdiaPresentationOwners removeObjectForKey:child];
 +    ArdiaPresentationReplay(child, YES, inner);
-   }
++  }
 +  [self didUpdateReactSubviews];
  }
  
@@ -8083,10 +8109,10 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 +      if ([ArdiaPresentationClosedGates containsObject:ancestor]) {
 +        outermost = (RCTView *)ancestor;
 +      }
-+    }
+     }
 +    if (outermost == nil || ArdiaPresentationFreezeKeepsClosed(outermost)) {
 +      return;
-     }
++    }
 +    [outermost ardia_openPresentation];
 +    ArdiaPresentationStale = YES;
    }
@@ -8292,7 +8318,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
  }
  
 -- (NSDictionary*)dataTransferInfoFromPasteboard:(NSPasteboard*)pasteboard
-+void ArdiaViewDidCreate(RCTPlatformView *view)
++BOOL ArdiaAnyViewRemovesClippedSubviews(void)
  {
 -  NSArray *fileNames = [pasteboard propertyListForType:NSFilenamesPboardType] ?: @[];
 -  NSMutableArray *files = [[NSMutableArray alloc] initWithCapacity:fileNames.count];
@@ -8340,8 +8366,12 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..37ce3badf50f6068c2dfcb3c41ee6f3d
 -      [items addObject:@{@"kind": @"file",
 -                         @"type": RCTNullIfNil(MIMETypeString),
 -                         }];
--
++  return atomic_load_explicit(&ArdiaViewsRemovingClippedSubviews, memory_order_relaxed) > 0;
++}
+ 
 -      [types addObject:RCTNullIfNil(MIMETypeString)];
++void ArdiaViewDidCreate(RCTPlatformView *view)
++{
 +  if (![ArdiaRNFramedClasses() containsObject:[view class]] || ArdiaUsesAutoLayout(view)) {
 +    return;
 +  }
@@ -8662,7 +8692,7 @@ index d6a40e42d9328fbc2f82c5e2ee1a00666a246aa5..dd6868aec42405ab5d9a613b2968248f
  RCT_EXPORT_SHADOW_PROPERTY(borderRightWidth, float)
  RCT_EXPORT_SHADOW_PROPERTY(borderBottomWidth, float)
 diff --git a/React/Views/ScrollView/RCTScrollView.m b/React/Views/ScrollView/RCTScrollView.m
-index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..09028d6278581014f3287bc575d9ce532e773e4e 100644
+index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..2101237c39a374d13436d10f822b239f0f1402e6 100644
 --- a/React/Views/ScrollView/RCTScrollView.m
 +++ b/React/Views/ScrollView/RCTScrollView.m
 @@ -8,6 +8,7 @@
@@ -8978,7 +9008,20 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..09028d6278581014f3287bc575d9ce53
  #endif // macOS]
    CGRect _lastClippedToRect;
    uint16_t _coalescingKey;
-@@ -740,13 +1016,26 @@ - (void)viewDidMoveToWindow
+@@ -726,6 +1002,12 @@ - (void)updateClippedSubviews
+        (bounds.size.height < leeway || fabs(_lastClippedToRect.origin.y - bounds.origin.y) >= leeway));
+ 
+   if (shouldClipAgain) {
++#if TARGET_OS_OSX // [macOS
++    if (!ArdiaAnyViewRemovesClippedSubviews()) {
++      _lastClippedToRect = bounds;
++      return;
++    }
++#endif // macOS]
+     const CGRect clipRect = CGRectInset(clipView.bounds, -leeway, -leeway);
+     [self react_updateClippedSubviewsWithClipRect:clipRect relativeToView:clipView];
+     _lastClippedToRect = bounds;
+@@ -740,13 +1022,26 @@ - (void)viewDidMoveToWindow
    NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
    if ([self window] == nil) {
      // Unregister for bounds change notifications
@@ -9006,7 +9049,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..09028d6278581014f3287bc575d9ce53
      // Register for bounds change notifications so we can track scrolling
      [defaultCenter addObserver:self
                        selector:@selector(scrollViewDocumentViewBoundsDidChange:)
-@@ -756,9 +1045,18 @@ - (void)viewDidMoveToWindow
+@@ -756,9 +1051,18 @@ - (void)viewDidMoveToWindow
                        selector:@selector(preferredScrollerStyleDidChange:)
                            name:NSPreferredScrollerStyleDidChangeNotification
                          object:nil];
@@ -9025,7 +9068,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..09028d6278581014f3287bc575d9ce53
  }
  #endif // macOS]
  
-@@ -888,6 +1186,7 @@ - (void)flashScrollIndicators
+@@ -888,6 +1192,7 @@ - (void)flashScrollIndicators
  #if TARGET_OS_OSX // [macOS
  - (void)scrollViewDocumentViewBoundsDidChange:(__unused NSNotification *)notification
  {
@@ -9033,7 +9076,7 @@ index eb79ff32614392cb16e6eb3dbec6cc5b037fe27a..09028d6278581014f3287bc575d9ce53
    if (_disableScrollEvents) {
      return;
    }
-@@ -901,6 +1200,28 @@ - (void)scrollViewDocumentViewBoundsDidChange:(__unused NSNotification *)notific
+@@ -901,6 +1206,28 @@ - (void)scrollViewDocumentViewBoundsDidChange:(__unused NSNotification *)notific
      [self scrollViewDidScroll:_scrollView];
    }
  }
