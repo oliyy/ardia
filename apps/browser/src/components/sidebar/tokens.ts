@@ -1,6 +1,6 @@
 import { colorHexAlpha } from "../../lib/profileTheme";
 import { layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
+import { useBrowser, type BrowserState } from "../../store/browser";
 import type { GroupColor } from "../../store/types";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { useSidebarUi } from "./state";
@@ -135,13 +135,18 @@ export function withAlpha(hex: string, alpha: number): string {
 }
 
 export const SIDEBAR_MIN_WIDTH = 160;
-export const SIDEBAR_MAX_WIDTH = 500;
+export const SIDEBAR_MAX_WIDTH = 700;
+const PAGE_ROOM = 220;
+
+export const widestSidebar = (windowWidth: number | undefined) => Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, (windowWidth ?? Infinity) - PAGE_ROOM));
+
+export const fittedSidebarWidth = (s: BrowserState, windowId: string) => Math.min(s.settings.sidebarWidth ?? layout.sidebarWidth, widestSidebar(s.windows[windowId]?.frame?.[2]));
 
 export function useSidebarWidth(windowId: string): number {
   return useSidebarWidthOf(windowId, (width) => width);
 }
 
 export function useSidebarWidthOf<T>(windowId: string, of: (width: number) => T): T {
-  const saved = useBrowser((s) => s.settings.sidebarWidth ?? layout.sidebarWidth);
-  return useSidebarUi((u) => of(u.dragWidth[windowId] ?? saved));
+  const fitted = useBrowser((s) => fittedSidebarWidth(s, windowId));
+  return useSidebarUi((u) => of(u.dragWidth[windowId] ?? fitted));
 }

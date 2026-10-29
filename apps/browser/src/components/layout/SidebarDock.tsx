@@ -3,12 +3,13 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
 import { switchOn } from "../../lib/killSwitches";
-import { hex, layout, useTheme } from "../../lib/theme";
+import { hex, useTheme } from "../../lib/theme";
 import { useBrowser } from "../../store/browser";
 import { useWindowId } from "../../store/hooks";
 import { Sidebar } from "../Sidebar";
 import { dismissHoverIn } from "../sidebar/hover";
 import { useSidebarUi } from "../sidebar/state";
+import { fittedSidebarWidth } from "../sidebar/tokens";
 import { peekHeld, watchPeekHolds } from "./peekHold";
 import { ProfileSwipe } from "./ProfileSwipe";
 import {
@@ -212,18 +213,18 @@ export function DockedLayout({
   children: ReactNode;
 }) {
   const windowId = useWindowId();
-  const [open, savedWidth, addressBar] = useBrowser(
+  const [open, fittedWidth, addressBar] = useBrowser(
     useShallow(
       (s) =>
         [
           s.windows[windowId]?.sidebarOpen ?? true,
-          s.settings.sidebarWidth ?? layout.sidebarWidth,
+          fittedSidebarWidth(s, windowId),
           s.settings.addressBar === "sidebar",
         ] as const,
     ),
   );
   const [dragged, receipt] = useSidebarUi(useShallow((u) => [u.dragWidth[windowId], u.dragReceipt[windowId]] as const));
-  const width = dragged ?? savedWidth;
+  const width = dragged ?? fittedWidth;
   const resizing = dragged !== undefined;
   const arc = addressBar && !topTabs && switchOn("sidebarSlide");
   const lights = addressBar && !topTabs ? ARC_LIGHTS_CENTER : LIGHTS_CENTER;

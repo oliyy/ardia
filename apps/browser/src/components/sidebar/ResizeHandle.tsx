@@ -3,7 +3,7 @@ import { findNodeHandle, View, type NativeSyntheticEvent } from "react-native";
 import { useBrowser } from "../../store/browser";
 import { useResizeDrag } from "../layout/useResizeDrag";
 import { registerResize, setSidebarUi, sidebarUi } from "./state";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./tokens";
+import { fittedSidebarWidth, SIDEBAR_MIN_WIDTH, widestSidebar } from "./tokens";
 import { useHandleArming } from "./useHandleArming";
 
 type Binding = { view: View; window: string };
@@ -122,11 +122,12 @@ export function ResizeHandle({ windowId, receipt, onArming }: { windowId: string
   });
   useEffect(() => flow.abandon, [flow, windowId]);
   useEffect(() => useBrowser.subscribe((s, prev) => void (s.windows !== prev.windows && flow.watch(s.windows))), [flow]);
+  const windowWidth = useBrowser((s) => s.windows[windowId]?.frame?.[2]);
   const { handlers, cancel } = useResizeDrag({
     min: SIDEBAR_MIN_WIDTH,
-    max: SIDEBAR_MAX_WIDTH,
+    max: widestSidebar(windowWidth),
     direction: 1,
-    saved: () => useBrowser.getState().settings.sidebarWidth ?? 190,
+    saved: () => fittedSidebarWidth(useBrowser.getState(), windowId),
     onLive: flow.live,
     onCommit: flow.commit,
   });
