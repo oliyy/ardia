@@ -1,30 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Easing } from "react-native";
-import { useBrowser, type BrowserState } from "../../store/browser";
-import { libraryAvailable } from "./state";
-import { libraryVisible, useLibraryView } from "./store";
+import { Animated } from "react-native";
+import { libraryInvalid, libraryScope, whenLibraryInvalid } from "../../state/library/actions";
+import { useLibraryView } from "../../state/library/hooks";
+import { reduceMotion } from "../ui";
+import { curve } from "../ui/motion";
 
 const SLIDE_MS = 400;
 const FACE_OUT_MS = 100;
 const FACE_IN_MS = 285;
 const FACE_IN_DELAY_MS = 38;
-const MOTION_EASING = Easing.out(Easing.exp);
+const MOTION_EASING = curve.outExpo;
 const FACE_SCALE = 0.955;
 const FACE_ANCHOR_PAST = 31;
 
-let reduceMotion = false;
-AccessibilityInfo.isReduceMotionEnabled().then(
-  (on) => (reduceMotion = on),
-  () => {},
-);
-AccessibilityInfo.addEventListener("reduceMotionChanged", (on) => (reduceMotion = on));
-
 type Phase = { present: boolean; entered: boolean; rested: boolean; faded: boolean };
-
-const scopeOf = (s: BrowserState, windowId: string) => {
-  const w = s.windows[windowId];
-  return w ? `${w.profileId}\n${w.incognito ? 1 : 0}` : null;
-};
 
 export function useLibraryMotion(windowId: string, library: boolean, width: number, onFaceRest: () => void) {
   const live = useLibraryView(windowId);
@@ -32,11 +21,11 @@ export function useLibraryMotion(windowId: string, library: boolean, width: numb
   if (live) kept.current = live;
   const [slide] = useState(() => new Animated.Value(library ? 1 : 0));
   const [face] = useState(() => new Animated.Value(library ? 1 : 0));
-  const [phase, setPhase] = useState<Phase>(() => ({ present: library, entered: library, rested: !library, faded: reduceMotion }));
+  const [phase, setPhase] = useState<Phase>(() => ({ present: library, entered: library, rested: !library, faded: !!reduceMotion() }));
   const rest = useRef(!library);
   const generation = useRef(0);
   const shown = useRef(library);
-  const activeScope = useRef(library ? scopeOf(useBrowser.getState(), windowId) : null);
+  const activeScope = useRef(library ? libraryScope(windowId) : null);
   const unwatch = useRef<(() => void) | null>(null);
   const faceRested = useRef(onFaceRest);
   faceRested.current = onFaceRest;
@@ -63,8 +52,7 @@ export function useLibraryMotion(windowId: string, library: boolean, width: numb
     face.stopAnimation();
     rest.current = false;
     const scope = activeScope.current;
-    const invalid = (s: BrowserState) => !libraryAvailable(windowId) || scopeOf(s, windowId) !== scope;
-    if (!library && invalid(useBrowser.getState())) return settle();
+    if (!library && libraryInvalid(windowId, scope)) return settle();
     const current = () => generation.current === mine;
     const completed =
       (apply: () => void) =>
@@ -74,7 +62,7 @@ export function useLibraryMotion(windowId: string, library: boolean, width: numb
           if (current()) apply();
         });
       };
-    setPhase({ present: true, entered: false, rested: false, faded: reduceMotion });
+    setPhase({ present: true, entered: false, rested: false, faded: !!reduceMotion() });
     const slid = Animated.timing(slide, { toValue: library ? 1 : 0, duration: SLIDE_MS, easing: MOTION_EASING, useNativeDriver: true });
     if (library) {
       slid.start(completed(() => setPhase((p) => ({ ...p, entered: true }))));
@@ -88,9 +76,7 @@ export function useLibraryMotion(windowId: string, library: boolean, width: numb
       unwatch.current?.();
       unwatch.current = null;
     };
-    unwatch.current = useBrowser.subscribe((s) => {
-      if (current() && !libraryVisible(windowId) && invalid(s)) settle();
-    });
+    unwatch.current = whenLibraryInvalid(windowId, scope, () => current() && settle());
     slid.start(
       completed(() => {
         slidOut = true;
@@ -110,7 +96,7 @@ export function useLibraryMotion(windowId: string, library: boolean, width: numb
   }, [library]);
 
   useLayoutEffect(() => {
-    if (library) activeScope.current = scopeOf(useBrowser.getState(), windowId);
+    if (library) activeScope.current = libraryScope(windowId);
   });
 
   useEffect(

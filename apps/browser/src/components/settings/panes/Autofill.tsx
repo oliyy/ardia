@@ -5,29 +5,26 @@ import {
   revealCardNumber,
   saveAddress,
   saveCard,
-  setAutofillSettings,
   type SavedAddress,
   type SavedCard,
-} from "@ardia/ardiacore";
-import { confirm, copyText, Symbol } from "@ardia/shell";
+} from "../../../state/site/autofill";
+import { orWarn } from "../../../lib/fallback";
+import { confirm, copyText } from "../../../state/app/system";
+import { Symbol, Button, font, type Option, PopUp, Sheet, TextField, Toggle } from "../../ui";
 import { useState } from "react";
 import { Text, View } from "react-native";
-import { useTheme } from "../../../lib/theme";
-import { useBrowser } from "../../../store/browser";
-import { useProfiles } from "../../../store/hooks";
-import { engineProfile } from "../../../store/model";
-import { IconButton } from "../../primitives";
+import { useTheme } from "../../ui/theme";
+import { currentEngineProfile } from "../../../state/browser/current";
+import { Group, ProfilePicker, Row, SectionHeader, SheetActions, SheetTitle, useSettingsProfile } from "../Form";
 import { NetworkBadge } from "../../site/Autofill";
-import { Button, Group, PopUp, Row, SectionHeader, Sheet, TextField, Toggle, type Option } from "../controls";
-import { addresses as addressList, autofillEnabled, cards as cardList } from "../paneData";
-import { store, useResource } from "../resources";
-import { closeSettingsSheet, showSettingsSheet } from "../sheet";
+import { addresses as addressList, autofillEnabled, cards as cardList, setAutofillFor } from "../../../state/settings/paneData";
+import { useResource } from "../../../state/settings/resources";
+import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
 
 export function AutofillPane({ profileId: initial }: { profileId?: string | null }) {
   const theme = useTheme();
-  const profiles = useProfiles();
-  const [profileId, setProfileId] = useState(() => initial ?? useBrowser.getState().settings.defaultProfileId);
-  const profile = engineProfile(profileId);
+  const [profileId, setProfileId] = useSettingsProfile(initial);
+  const profile = currentEngineProfile(profileId);
   const [addresses, reloadAddresses] = useResource(addressList, profile);
   const [cards, reloadCards] = useResource(cardList, profile);
   const [enabled] = useResource(autofillEnabled, profile);
@@ -36,19 +33,14 @@ export function AutofillPane({ profileId: initial }: { profileId?: string | null
     void reloadAddresses();
     void reloadCards();
   };
-  const toggle = (key: "addresses" | "cards", value: boolean) =>
-    void setAutofillSettings({ [key]: value }, profile).then(() => enabled && store(autofillEnabled, [profile], { ...enabled, [key]: value }));
+  const toggle = (kind: "addresses" | "cards", on: boolean) => void setAutofillFor(profile, kind, on);
 
   return (
     <View>
       <SectionHeader
         title="Autofill"
         description="Addresses and cards you save are offered when you fill in a form, separately for each profile. Card numbers are kept in your macOS Keychain."
-        action={
-          profiles.length > 1 ? (
-            <PopUp value={profileId} options={profiles.map((p) => ({ value: p.id, title: p.name }))} onChange={setProfileId} />
-          ) : undefined
-        }
+        action={<ProfilePicker value={profileId} onChange={setProfileId} />}
       />
       <Group>
         <Row anchor="autofill.addresses">
@@ -146,12 +138,10 @@ async function confirmDelete(title: string, message: string) {
 
 function SheetButtons({ canDelete, onDelete, onSave, saveDisabled }: { canDelete: boolean; onDelete: () => void; onSave: () => void; saveDisabled?: boolean }) {
   return (
-    <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
-      {canDelete ? <Button title="Delete" kind="destructive" onPress={onDelete} /> : null}
-      <View style={{ flex: 1 }} />
+    <SheetActions destructive={canDelete ? <Button title="Delete" kind="destructive" onPress={onDelete} /> : null}>
       <Button title="Cancel" onPress={closeSettingsSheet} />
       <Button title="Save" kind="primary" disabled={saveDisabled} onPress={onSave} />
-    </View>
+    </SheetActions>
   );
 }
 
@@ -169,7 +159,6 @@ const ADDRESS_FIELDS: { key: keyof SavedAddress | "line1" | "line2"; title: stri
 ];
 
 function AddressSheet({ profile, saved, onChanged }: { profile: string; saved?: SavedAddress; onChanged: () => void }) {
-  const theme = useTheme();
   const [lines] = useState(() => (saved?.street ?? "").split("\n"));
   const [values, setValues] = useState<Record<string, string>>(() => ({
     name: saved?.name ?? "",
@@ -189,20 +178,20 @@ function AddressSheet({ profile, saved, onChanged }: { profile: string; saved?: 
   const save = async () => {
     const { line1, line2, ...rest } = values;
     const street = [line1, line2].map((l) => l!.trim()).filter(Boolean).join("\n");
-    await saveAddress(profile, { ...rest, street, id: saved?.id });
+    await saveAddress(profile, { ...rest, street, id: saved?.id }).catch(orWarn(null));
     onChanged();
     closeSettingsSheet();
   };
   const remove = async () => {
     if (!saved || !(await confirmDelete("Delete this address?", "It won't be offered in forms any more."))) return;
-    await deleteAddress(profile, saved.id);
+    await deleteAddress(profile, saved.id).catch(orWarn(undefined));
     onChanged();
     closeSettingsSheet();
   };
 
   return (
     <Sheet width={460} onClose={closeSettingsSheet}>
-      <Text style={{ fontSize: 15, fontWeight: "600", color: theme.textPrimary }}>{saved ? "Edit Address" : "Add Address"}</Text>
+      <SheetTitle>{saved ? "Edit Address" : "Add Address"}</SheetTitle>
       <View style={{ marginTop: 14 }}>
         <Group>
           {ADDRESS_FIELDS.map((f, i) => (
@@ -236,19 +225,19 @@ function CardSheet({ profile, saved, onChanged }: { profile: string; saved?: Sav
 
   const reveal = async () => {
     if (!saved) return;
-    const full = await revealCardNumber(profile, saved.id);
+    const full = await revealCardNumber(profile, saved.id).catch(() => null);
     if (full) setNumber(formatCardNumber(full));
   };
   const save = async () => {
     const card = { id: saved?.id, name: name.trim(), expMonth: month ? Number(month) : undefined, expYear: year ? Number(year) : undefined };
-    const id = await saveCard(profile, card, number === null ? undefined : digits);
+    const id = await saveCard(profile, card, number === null ? undefined : digits).catch(orWarn(null));
     if (!id) return setError("That isn't a valid card number.");
     onChanged();
     closeSettingsSheet();
   };
   const remove = async () => {
     if (!saved || !(await confirmDelete("Delete this card?", "Its number is removed from your Keychain too."))) return;
-    await deleteCard(profile, saved.id);
+    await deleteCard(profile, saved.id).catch(orWarn(undefined));
     onChanged();
     closeSettingsSheet();
   };
@@ -257,17 +246,17 @@ function CardSheet({ profile, saved, onChanged }: { profile: string; saved?: Sav
     <Sheet width={460} onClose={closeSettingsSheet}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         {saved ? <NetworkBadge network={saved.network} /> : null}
-        <Text style={{ fontSize: 15, fontWeight: "600", color: theme.textPrimary }}>
+        <SheetTitle>
           {saved ? `${cardNetworkName(saved.network)} •••• ${saved.last4}` : "Add Card"}
-        </Text>
+        </SheetTitle>
       </View>
       <View style={{ marginTop: 14 }}>
         <Group>
           <FormRow title="Card Number">
             {number === null ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text style={{ fontSize: 13, color: theme.textPrimary }}>{`•••• •••• •••• ${saved?.last4 ?? ""}`}</Text>
-                <IconButton icon="eye" size={11} box={24} radius={6} onPress={() => void reveal()} tooltip="Show Card Number" />
+                <Text style={{ ...font.body, color: theme.textPrimary }}>{`•••• •••• •••• ${saved?.last4 ?? ""}`}</Text>
+                <Button variant="icon" icon="eye" size={11} box={24} radius={6} onPress={() => void reveal()} tooltip="Show Card Number" />
               </View>
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -281,7 +270,7 @@ function CardSheet({ profile, saved, onChanged }: { profile: string; saved?: Sav
                   autoFocus={!saved}
                   style={{ width: saved ? 222 : 250 }}
                 />
-                {saved ? <IconButton icon="doc.on.doc" size={11} box={24} radius={6} onPress={() => copyText(digits)} tooltip="Copy Card Number" /> : null}
+                {saved ? <Button variant="icon" icon="doc.on.doc" size={11} box={24} radius={6} onPress={() => copyText(digits)} tooltip="Copy Card Number" /> : null}
               </View>
             )}
           </FormRow>
@@ -296,7 +285,7 @@ function CardSheet({ profile, saved, onChanged }: { profile: string; saved?: Sav
           </FormRow>
         </Group>
       </View>
-      {error ? <Text style={{ fontSize: 12, color: "#FF453A", marginTop: 10 }}>{error}</Text> : null}
+      {error ? <Text style={{ ...font.small, color: theme.destructive, marginTop: 10 }}>{error}</Text> : null}
       <SheetButtons
         canDelete={!!saved}
         onDelete={() => void remove()}

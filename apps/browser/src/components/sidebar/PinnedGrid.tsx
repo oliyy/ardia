@@ -1,32 +1,35 @@
-import { ContextMenuArea, MouseArea, Symbol } from "@ardia/shell";
 import { memo, useMemo } from "react";
-import { Animated, Pressable, View } from "react-native";
-import { closeTab } from "../../lib/actions";
-import { layout, useTheme } from "../../lib/theme";
-import { listTopGap, useAddressBarInSidebar } from "../layout/windowLayout";
-import { useBrowser } from "../../store/browser";
-import { useIsActiveTab, useTab, useTabLive, useWindowId } from "../../store/hooks";
-import { activeTabId } from "../../store/model";
+import { Animated, View } from "react-native";
+import { Symbol } from "../ui";
+import { layout, useTheme } from "../ui/theme";
+import { useAddressBarInSidebar } from "../../state/windows/layout";
+import { listTopGap } from "./geometry";
+import { useIsActiveTab, useSettings, useTab, useTabLive, useWindowId } from "../../state/browser/hooks";
+import { useIsSelected } from "../../state/pins/hooks";
+import { useMuteState } from "../../state/tabs/hooks";
+import { useSidebarWidthOf } from "../../state/sidebar/hooks";
 import { NextMeetingBadge } from "../live/NextMeetingBadge";
-import { clickTab, tabTitle } from "./actions";
-import { cellKey, PIN_SLOT, useDragController, useDragging, useDragItem, useDropPins, useFolderTarget, usePinnedCount, usePinSlots } from "./dnd";
+import { returnShownTabToPinnedUrl } from "../../state/sidebar/actions";
+import { tabTitle } from "../../state/browser/model";
+import { cellKey, PIN_SLOT, tailKey } from "./dragModel";
+import { useDragController, useDragging, useDragItem, useDropPins, useFolderTarget, usePinnedCount, usePinSlots } from "./DragProvider";
 import { FolderTile } from "./FolderTile";
-import { dismissHover, useRowHover } from "./hover";
-import { openTabMenu } from "./menus";
+import { useRowHover } from "./hoverController";
 import { pinColumnCap, pinGrid, pinGridHeight } from "./pinZone";
-import { registerRow } from "./state";
+import { registerRow } from "../../state/sidebar/sidebarUi";
 import { tabHasCard } from "./tabCard";
-import { clickMods } from "./TabRow";
 import { FolderDropRing, TileFace, useSlotPosition } from "./TileFace";
-import { folderIdOfCell } from "../../store/tileFolders";
+import { folderIdOfCell } from "../../state/pins/tileFolders";
 import { tileWidthNode, useTileInner, type TileWidth } from "./tileWidth";
-import { useSidebarTokens, useSidebarWidthOf } from "./tokens";
+import { useSidebarTokens } from "./tokens";
+import { TabPressArea } from "./TabPressArea";
+import { entryKey } from "../../state/sidebar/entryKey";
 
 export const PinnedGrid = memo(function PinnedGrid({ tabs, flush = false }: { tabs: string[]; flush?: boolean }) {
   const windowId = useWindowId();
   const controller = useDragController();
   const count = usePinnedCount(tabs);
-  const balanced = useBrowser((s) => s.settings.balancedTopApps);
+  const balanced = useSettings((st) => st.balancedTopApps);
   const addressBar = useAddressBarInSidebar();
   const maxColumns = pinColumnCap(addressBar);
   const columns = useSidebarWidthOf(windowId, (width) => pinGrid(count, width - layout.sidebarInset * 2, maxColumns, balanced).columns);
@@ -35,7 +38,7 @@ export const PinnedGrid = memo(function PinnedGrid({ tabs, flush = false }: { ta
   const exact = maxColumns === pinColumnCap(true);
   const grid = useMemo(() => tileWidthNode(inner, columns, exact), [inner, columns, exact]);
   const slots = usePinSlots(tabs);
-  const tail = useDragItem("tail:tiles", { kind: "tail", tabIds: [], section: "tiles" });
+  const tail = useDragItem(tailKey("tiles"), { kind: "tail", tabIds: [], section: "tiles" });
   const dragging = useDragging();
   const topGap = listTopGap(addressBar);
   if (!tabs.length) return dragging && !addressBar && tail.gap ? <Animated.View style={{ height: tail.gap }} /> : null;
@@ -99,7 +102,7 @@ export function PinSlotZone() {
   const theme = useTheme();
   const controller = useDragController();
   const active = useDropPins();
-  const gap = controller?.items.get("tail:tiles")?.gap;
+  const gap = controller?.items.get(tailKey("tiles"))?.gap;
   const opacity = gap ? gap.interpolate({ inputRange: [0, PIN_SLOT], outputRange: [0, 1], extrapolate: "clamp" }) : active ? 1 : 0;
   return (
     <>
@@ -130,7 +133,7 @@ export function PinSlotZone() {
           borderWidth: 1.5,
           borderStyle: "dashed",
           borderColor: theme.accent,
-          backgroundColor: theme.dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+          backgroundColor: theme.dropZoneFill,
           alignItems: "center",
           justifyContent: "center",
         }}
@@ -145,21 +148,17 @@ function PinGlyph({ color }: { color: string }) {
   return <Symbol name="pin" size={13} color={color} style={{ width: 16, height: 16 }} />;
 }
 
-function backToPinnedUrl(windowId: string, tabId: string) {
-  const s = useBrowser.getState();
-  if (activeTabId(s, windowId) === tabId) s.returnToPinnedUrl(tabId);
-}
-
 const PinnedTile = memo(function PinnedTile({ tabId, grid, sliding, column, row }: { tabId: string; grid: TileWidth; sliding: boolean; column: number; row: number }) {
   const theme = useTheme();
   const windowId = useWindowId();
   const tab = useTab(tabId);
   const active = useIsActiveTab(tabId);
-  const selected = useBrowser((s) => (s.selection[windowId] ?? []).includes(tabId));
+  const selected = useIsSelected(windowId, tabId);
   const playing = useTabLive(tabId, (l) => l.playingAudio);
+  const mute = useMuteState(tabId);
   const { hovered, hoverProps } = useRowHover(windowId, { kind: "tab", id: tabId }, tabHasCard);
-  const { wrapper, handle, dragging } = useDragItem(`t:${tabId}`, { kind: "tile", tabIds: [tabId], section: "tiles" }, () => useBrowser.getState().selection[windowId] ?? []);
-  const target = useFolderTarget(`t:${tabId}`);
+  const { wrapper, handle, dragging } = useDragItem(entryKey("tab", tabId), { kind: "tile", tabIds: [tabId], section: "tiles" });
+  const target = useFolderTarget(entryKey("tab", tabId));
   const position = useSlotPosition(column, row, grid, sliding, dragging);
   if (!tab) return null;
 
@@ -169,30 +168,15 @@ const PinnedTile = memo(function PinnedTile({ tabId, grid, sliding, column, row 
       <View
         ref={(v) => registerRow(windowId, tabId, v)}
         {...hoverProps}
-        onDoubleClick={() => backToPinnedUrl(windowId, tabId)}
+        onDoubleClick={() => returnShownTabToPinnedUrl(windowId, tabId)}
       >
-        <MouseArea onMiddleClick={() => void closeTab(tabId)}>
-          <ContextMenuArea
-            onContextMenu={() => {
-              dismissHover();
-              void openTabMenu(windowId, tab);
-            }}
-          >
-            <Pressable
-              tooltip={tabTitle(tab)}
-              onPress={(e) => {
-                dismissHover();
-                clickTab(windowId, tabId, clickMods(e));
-              }}
-            >
-              {({ pressed }) => <TileFace tabId={tabId} width={grid} active={active} selected={selected} hovered={hovered} pressed={pressed} />}
-            </Pressable>
-          </ContextMenuArea>
-        </MouseArea>
+        <TabPressArea windowId={windowId} tab={tab} tooltip={tabTitle(tab)}>
+          {({ pressed }) => <TileFace tabId={tabId} width={grid} active={active} selected={selected} hovered={hovered} pressed={pressed} />}
+        </TabPressArea>
         <NextMeetingBadge tabId={tabId} />
-        {playing || tab.muted ? (
+        {playing || mute ? (
           <View pointerEvents="none" style={{ position: "absolute", bottom: 3, right: 4 }}>
-            <Symbol name={tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill"} size={8} color={theme.textSecondary} style={{ width: 12, height: 10 }} />
+            <Symbol name={mute ? "speaker.slash.fill" : "speaker.wave.2.fill"} size={8} color={theme.textSecondary} style={{ width: 12, height: 10 }} />
           </View>
         ) : null}
       </View>

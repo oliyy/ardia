@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { findNodeHandle, View, type NativeSyntheticEvent } from "react-native";
-import { useBrowser } from "../../store/browser";
-import { useResizeDrag } from "../layout/useResizeDrag";
-import { registerResize, setSidebarUi, sidebarUi } from "./state";
-import { fittedSidebarWidth, SIDEBAR_MIN_WIDTH, widestSidebar } from "./tokens";
+import { currentWindow } from "../../state/browser/current";
+import { useWindow } from "../../state/browser/hooks";
+import { updateSettings } from "../../state/settings/actions";
+import { resetSidebarWidth } from "../../state/sidebar/actions";
+import { registerResize, setSidebarUi, sidebarUi } from "../../state/sidebar/sidebarUi";
+import { fittedSidebarWidthNow, SIDEBAR_MIN_WIDTH, widestSidebar } from "../../state/sidebar/sidebarWidth";
+import { watchWindows } from "../../state/windows/windowWatch";
 import { useHandleArming } from "./useHandleArming";
+import { useResizeDrag } from "./useResizeDrag";
 
 type Binding = { view: View; window: string };
 type MountReceipt = { receipt: number; target: number; x: number; y: number; width: number; height: number };
@@ -30,7 +34,7 @@ export function ResizeHandle({ windowId, receipt, onArming }: { windowId: string
     const tickets = new Set<number>();
     let submitted: number | null = null;
     let pending: number | null = null;
-    const exists = (id: string) => !!useBrowser.getState().windows[id];
+    const exists = (id: string) => !!currentWindow(id);
     const permitted = () => (binding && binding.view === view && binding.window === latestWindow.current && exists(binding.window) ? binding : null);
     const invalidate = () => {
       tickets.clear();
@@ -103,7 +107,7 @@ export function ResizeHandle({ windowId, receipt, onArming }: { windowId: string
     const commit = (width: number) => {
       if (!permitted()) return;
       invalidate();
-      useBrowser.getState().updateSettings({ sidebarWidth: width });
+      updateSettings({ sidebarWidth: width });
     };
     const grant = () => {
       invalidate();
@@ -121,13 +125,13 @@ export function ResizeHandle({ windowId, receipt, onArming }: { windowId: string
     return { live, commit, grant, attach, abandon, watch, received };
   });
   useEffect(() => flow.abandon, [flow, windowId]);
-  useEffect(() => useBrowser.subscribe((s, prev) => void (s.windows !== prev.windows && flow.watch(s.windows))), [flow]);
-  const windowWidth = useBrowser((s) => s.windows[windowId]?.frame?.[2]);
+  useEffect(() => watchWindows(flow.watch), [flow]);
+  const windowWidth = useWindow(windowId, (w) => w?.frame?.[2]);
   const { handlers, cancel } = useResizeDrag({
     min: SIDEBAR_MIN_WIDTH,
     max: widestSidebar(windowWidth),
     direction: 1,
-    saved: () => fittedSidebarWidth(useBrowser.getState(), windowId),
+    saved: () => fittedSidebarWidthNow(windowId),
     onLive: flow.live,
     onCommit: flow.commit,
   });
@@ -144,7 +148,7 @@ export function ResizeHandle({ windowId, receipt, onArming }: { windowId: string
         flow.grant();
         handlers.onResponderGrant?.(e);
       }}
-      onDoubleClick={() => useBrowser.getState().updateSettings({ sidebarWidth: 190 })}
+      onDoubleClick={resetSidebarWidth}
       style={{ position: "absolute", top: 46, bottom: 0, right: 0, width: 4, cursor: "col-resize" }}
     />
   );

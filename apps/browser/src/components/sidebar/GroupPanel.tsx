@@ -1,31 +1,22 @@
-import { discardKeyResponder, FadeLabel, restoreKeyResponder, saveKeyResponder, Symbol } from "@ardia/shell";
+import { discardKeyResponder, restoreKeyResponder, saveKeyResponder } from "../../state/windows/nativeWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
-import { useShallow } from "zustand/react/shallow";
-import { useTheme } from "../../lib/theme";
-import { ago } from "../../lib/timeAgo";
-import { webviews } from "../../lib/webviews";
-import { useBrowser } from "../../store/browser";
-import { openLiveItem } from "../../live/engine";
-import { inHiddenRepo, openItems, shownCompleted } from "../../live/rows";
-import { useLive } from "../../live/store";
-import type { CompletionState, LiveItem } from "../../live/types";
-import { displayedSubtree, groupNode, isLiveNode, isTabNode, keyOfNode, pinKeyOf } from "../../store/pinTree";
-import { activeTabId, viewTabIds } from "../../store/model";
-import { sharedTabsIn, sharesTabs } from "../../store/tabShare";
-import type { Tab } from "../../store/types";
-import { PANEL, PopoverSeparator, PopoverSurface, popoverRowFill } from "../layout/controls";
-import { focusHeroBar } from "../omnibox/barState";
-import { libraryOpenings, libraryVisible } from "../library/store";
-import { windowHierarchy } from "./entries";
-import { clickTab, tabTitle } from "./actions";
-import { byRecentUse, groupTabIds, matchingRows, type GroupPanelTab } from "./groupPanelRows";
-import { cardHoverProps, dismissHover, holdHover } from "./hover";
+import { useTheme } from "../ui/theme";
+import { ago } from "../../lib/time";
+import { useGroup } from "../../state/browser/hooks";
+import { FadeLabel, menuRowFill, MenuSeparator, PANEL, PopoverSurface, Symbol } from "../ui";
+import { clickTab, returnFocusToPage } from "../../state/sidebar/actions";
+import { matchingRows } from "../../state/sidebar/groupPanelRows";
+import { useFolderPanelRows, type FolderPanelRow } from "../../state/sidebar/folderPanelRows";
+import { openLiveItem } from "../../state/live/engine";
+import { libraryOpenings, libraryVisible } from "../../state/library/store";
+import { useLiveColors } from "../live/tokens";
+import { ItemIcon } from "./LiveItemRow";
+import { dismissHover, holdHover } from "../../state/sidebar/hover";
+import { cardHoverProps } from "./hoverController";
 import { hoverCardOrigin } from "./hoverMotion";
-import { useSidebarUi, type Anchor } from "./state";
+import { useSidebarUi, type Anchor } from "../../state/sidebar/sidebarUi";
 import { TabIcon } from "./TabIcon";
-import { ItemIcon } from "./LiveFolderBlock";
-import { useLiveColors } from "../live/colors";
 
 const WIDTH = 264;
 const SEARCH_ROW = 44;
@@ -36,79 +27,12 @@ const MAX_ROWS = 7;
 const EDGE = 8;
 const NOW_TICK_MS = 30_000;
 
-type Row = GroupPanelTab & { favicon: string | null; icon: string | null; profileId: string; tabId?: string; liveItem?: { folderId: string; item: LiveItem; done: CompletionState | null } };
-
-function returnFocusToPage(windowId: string) {
-  const s = useBrowser.getState();
-  const active = activeTabId(s, windowId);
-  if (!active) return;
-  if (s.tabs[active]?.url) void webviews.get(active)?.focus();
-  else focusHeroBar(windowId, active);
-}
-
-function useGroupRows(groupId: string, windowId: string): Row[] {
-  const members = useBrowser(useShallow((s) => {
-    const group = s.groups[groupId];
-    if (!group || group.windowId !== windowId) return [];
-    const h = windowHierarchy(s, windowId, group.profileId);
-    const node = groupNode(pinKeyOf(group));
-    if (!group.pinned || !h.tree.parent.has(node)) return groupTabIds(s.groups, groupId).map((id) => `t:${id}`);
-    return displayedSubtree(h.tree, node).flatMap((child) => {
-      if (isLiveNode(child)) return s.windows[windowId]?.incognito ? [] : [child];
-      const id = isTabNode(child) ? h.tabs.get(child) : undefined;
-      return id ? [`t:${id}`] : [];
-    });
-  }));
-  const tabs = useBrowser(useShallow((s) => {
-    const folders = new Set(members.filter(isLiveNode).map(keyOfNode));
-    const ids = [...new Set([
-      ...members.filter(isTabNode).map(keyOfNode),
-      ...viewTabIds(s, windowId).filter((id) => !s.tabs[id]?.pinned && folders.has(s.tabs[id]?.liveItem?.folderId ?? "")),
-    ])];
-    return ids.map((id) => s.tabs[id]).filter((t): t is Tab => !!t);
-  }));
-  const data = useLive(useShallow((s) => ({ folders: s.folders, items: s.items, hidden: s.hidden, completed: s.completed })));
-  return useMemo(() => {
-    const s = useBrowser.getState();
-    const group = s.groups[groupId];
-    const shared = sharesTabs(s) ? sharedTabsIn(s.tabs, windowId) : null;
-    const folderIds = members.filter(isLiveNode).map(keyOfNode);
-    const regular = (t: Tab): Row => ({ id: t.id, tabId: t.id, title: tabTitle(t), url: t.url, usedAt: shared?.lastUsed(t) ?? t.lastActiveAt, favicon: t.favicon, icon: t.customIcon, profileId: t.profileId });
-    const rows: Row[] = tabs.filter((t) => t.pinned || !t.liveItem || !folderIds.includes(t.liveItem.folderId)).map(regular);
-    for (const folderId of folderIds) {
-      const folder = data.folders[folderId];
-      if (!folder || folder.profileId !== group?.profileId) continue;
-      const hidden = new Set([...(data.hidden[folderId] ?? []), ...(data.items[folderId] ?? []).filter((item) => inHiddenRepo(folder, item))].map((item) => item.id));
-      const done = shownCompleted(folder, data.completed[folderId] ?? []);
-      const items = [...openItems(data.items[folderId] ?? [], done).filter((item) => !hidden.has(item.id)), ...done.map((c) => c.item)];
-      const doneStates = new Map(done.map((c) => [c.item.id, c.state]));
-      const loaded = new Map(tabs.filter((t) => !t.pinned && t.liveItem?.folderId === folderId).map((t) => [t.liveItem!.itemId, t]));
-      for (const item of items) {
-        const tab = loaded.get(item.id);
-        const imageIcon = !!item.icon && /^https?:/.test(item.icon);
-        rows.push({
-          id: `live|${folderId}|${item.id}`,
-          tabId: tab?.id,
-          title: item.title,
-          url: item.url,
-          usedAt: tab ? (shared?.lastUsed(tab) ?? tab.lastActiveAt) : item.updatedAt,
-          favicon: tab?.favicon ?? (imageIcon ? item.icon : null),
-          icon: imageIcon ? null : item.icon,
-          profileId: folder.profileId,
-          liveItem: { folderId, item, done: doneStates.get(item.id) ?? null },
-        });
-      }
-      const known = new Set(items.map((item) => item.id));
-      for (const [id, tab] of loaded) if (!known.has(id) && !hidden.has(id)) rows.push(regular(tab));
-    }
-    return byRecentUse(rows);
-  }, [tabs, members, data, groupId, windowId]);
-}
+type Row = FolderPanelRow;
 
 export function GroupPanel({ groupId, windowId, anchor, windowHeight }: { groupId: string; windowId: string; anchor: Anchor; windowHeight: number }) {
   const theme = useTheme();
-  const exists = useBrowser((s) => !!s.groups[groupId]);
-  const all = useGroupRows(groupId, windowId);
+  const exists = useGroup(groupId, (g) => !!g);
+  const all = useFolderPanelRows(groupId, windowId);
   const live = useSidebarUi((u) => u.hover?.kind === "group" && u.hover.id === groupId && u.hover.windowId === windowId);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
@@ -237,7 +161,7 @@ export function GroupPanel({ groupId, windowId, anchor, windowHeight }: { groupI
           style={{ flex: 1, fontSize: PANEL.titleSize, color: theme.textPrimary, paddingVertical: 0 }}
         />
       </View>
-      <PopoverSeparator />
+      <MenuSeparator />
       <ScrollView
         ref={scroll}
         style={{ height: listHeight }}
@@ -277,7 +201,7 @@ function PanelRow({ row, now, selected, onHover, onPress }: { row: Row; now: num
             flexDirection: "row",
             alignItems: "center",
             gap: PANEL.iconGap,
-            backgroundColor: pressed || selected ? popoverRowFill(theme.dark, pressed) : undefined,
+            backgroundColor: pressed || selected ? menuRowFill(theme, pressed) : undefined,
           }}
         >
           <View style={{ width: PANEL.iconSlot, height: PANEL.iconSlot, alignItems: "center", justifyContent: "center" }}>

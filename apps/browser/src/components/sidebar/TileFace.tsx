@@ -1,25 +1,24 @@
-import { ArcFavoriteBackground, DockSelection, Surface } from "@ardia/shell";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, StyleSheet, View } from "react-native";
-import type { ResolvedFavicon } from "../../lib/favicons";
-import { colorHexAlpha } from "../../lib/profileTheme";
-import { hex, layout, useTheme } from "../../lib/theme";
-import { useTileTheme, type TileTheme } from "../../lib/tileTheme";
-import { useSettings, useTab } from "../../store/hooks";
-import { GlassFill, liquidGlass } from "../glass";
-import { useAddressBarInSidebar } from "../layout/windowLayout";
-import { SLIDE } from "../layout/stripReorder";
+import { Animated, StyleSheet, View } from "react-native";
+import { ArcFavoriteBackground, DockSelection, radius, Surface } from "../ui";
+import { hex, layout, useTheme } from "../ui/theme";
+import { colorHexAlpha } from "../../lib/profileLook";
+import { useTileTheme, type TileTheme } from "../../state/favicons/tileTheme";
+import type { ResolvedFavicon } from "../../state/favicons/favicons";
+import { useTab } from "../../state/browser/hooks";
+import { useAddressBarInSidebar } from "../../state/windows/layout";
+import { GlassFill, liquidGlass } from "../ui/Glass";
+import { SLIDE } from "../tabstrip/stripReorder";
 import { TabBadges } from "../media/TabBadges";
-import { PIN_SLOT } from "./dnd";
+import { PIN_SLOT } from "./dragModel";
 import { TILE_GAP } from "./pinZone";
 import { TabIcon } from "./TabIcon";
 import { tileWidthNow, useTileInner, type TileWidth } from "./tileWidth";
-import { useSidebarTokens } from "./tokens";
+import { sidebarTokens, TILE_GLOW, TILE_HOVER_FADE, useSidebarTokens } from "./tokens";
 
 const SELECTION_STROKE = 3;
-const GLASS_RIM = 1;
-export const TILE_RADIUS = 10;
-const TILE_HOVER_FADE = { duration: 120, easing: Easing.bezier(0.25, 0.1, 0.25, 1) } as const;
+const GLASS_RING = 2;
+export const TILE_RADIUS = radius.card;
 
 const AnimatedSurface = Animated.createAnimatedComponent(Surface);
 const AnimatedDockSelection = Animated.createAnimatedComponent(DockSelection);
@@ -31,7 +30,6 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
   const theme = useTheme();
   const tab = useTab(tabId);
   const tileTheme = useTileTheme(tab?.url ?? "", tab?.favicon, tab?.customIcon, tab?.profileId ?? "");
-  const iconRing = useSettings((s) => s.pinnedTabIconRing);
   const arcLayout = useAddressBarInSidebar();
   if (!tab) return null;
   const { width, active } = state;
@@ -42,7 +40,7 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
       <TabBadges tabId={tabId} />
     </View>
   );
-  if (liquidGlass && !(iconRing && active && tileTheme))
+  if (liquidGlass)
     return (
       <GlassTile {...state} tileTheme={tileTheme}>
         {icon}
@@ -78,10 +76,10 @@ export function TileFace({ tabId, badge, ...state }: FaceState & { tabId: string
       <AnimatedSurface
         fill={hex(theme.pinnedSelectedRim)}
         cornerRadius={TILE_RADIUS}
-        shadowColor={theme.dark ? "#FFFFFF" : "#000000"}
-        shadowOpacity={theme.dark ? 0.15 : 0.12}
-        shadowRadius={1.5}
-        shadowOffset={[0, 0.5]}
+        shadowColor={sidebarTokens(theme).tileGlow}
+        shadowOpacity={theme.dark ? TILE_GLOW.opacity.dark : TILE_GLOW.opacity.light}
+        shadowRadius={TILE_GLOW.radius}
+        shadowOffset={TILE_GLOW.offset}
         style={{ width, height: layout.pinnedHeight, padding: 1 }}
       >
         <View
@@ -123,7 +121,7 @@ export function RestingTile({ width, selected, hovered, pressed, children }: Omi
         width,
         height: layout.pinnedHeight,
         borderRadius: TILE_RADIUS,
-        borderWidth: selected ? 1 : 0.5,
+        borderWidth: selected ? 1 : StyleSheet.hairlineWidth,
         borderColor: selected ? tokens.dragBorder : theme.pinnedRestingStroke,
         backgroundColor: pressed ? theme.tabPressed : hovered || selected ? theme.tabHover : theme.pinnedResting,
         alignItems: "center",
@@ -141,7 +139,7 @@ function GlassTile({ width, active, selected, hovered, pressed, tileTheme, child
   const fill = active ? theme.pinnedSelectedFill : pressed ? theme.tabPressed : hovered || selected ? theme.tabHover : theme.pinnedResting;
   return (
     <Animated.View style={{ width, height: layout.pinnedHeight, alignItems: "center", justifyContent: "center" }}>
-      <GlassFill radius={TILE_RADIUS} fill={fill} raised={active && !pressed} />
+      <GlassFill radius={TILE_RADIUS} fill={fill} state={pressed ? "rest" : active ? "active" : hovered || selected ? "lit" : "rest"} />
       {active ? (
         <DockSelection
           image={tileTheme?.image}
@@ -149,9 +147,10 @@ function GlassTile({ width, active, selected, hovered, pressed, tileTheme, child
           theme={tileTheme?.theme.kind}
           fill={tileTheme?.theme.kind === "template" ? tileTheme.theme.fill : undefined}
           cornerRadius={TILE_RADIUS}
-          strokeWidth={GLASS_RIM}
+          strokeWidth={GLASS_RING}
           dark={theme.dark}
           glass
+          colorRing
           style={StyleSheet.absoluteFill}
         />
       ) : selected ? (
@@ -184,7 +183,7 @@ export function FolderDropRing({ on }: { on: boolean }) {
         borderRadius: TILE_RADIUS + RING_OUTSET,
         borderWidth: 2,
         borderColor: theme.accent,
-        backgroundColor: theme.dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+        backgroundColor: sidebarTokens(theme).folderDropFill,
         opacity: shown,
         transform: [{ scale: shown.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }],
       }}

@@ -257,14 +257,22 @@ index 9973da7611fc92df7e66010350504bf077a9f2d9..31773c5420d3c7475890318d71fcdfdb
    [super setEnableFocusRing:enableFocusRing];
    if ([_backedTextInputView respondsToSelector:@selector(setEnableFocusRing:)]) {
 diff --git a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm
-index 386405335b411e70a82909033febc7dd5b4adabe..23b663148a3e897f836a18b7841249c915a09262 100644
+index 386405335b411e70a82909033febc7dd5b4adabe..52efc756c723c2843f7df913961f51fb81c94197 100644
 --- a/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm
 +++ b/Libraries/Text/TextInput/Singleline/RCTSinglelineTextInputViewManager.mm
-@@ -29,5 +29,6 @@ - (RCTPlatformView *)view // [macOS]
+@@ -29,5 +29,14 @@ - (RCTPlatformView *)view // [macOS]
  }
  
  RCT_REMAP_OSX_VIEW_PROPERTY(secureTextEntry, useSecureTextField, BOOL) // [macOS]
 +RCT_EXPORT_OSX_VIEW_PROPERTY(ardiaEditorStyle, NSDictionary)
++
++#if TARGET_OS_OSX // [Ardia: pastedTypes reached only multiline fields
++RCT_CUSTOM_VIEW_PROPERTY(pastedTypes, NSArray<NSPasteboardType>*, RCTSinglelineTextInputView)
++{
++  NSArray<NSPasteboardType> *types = json ? [RCTConvert NSPasteboardTypeArray:json] : nil;
++  [view.backedTextInputView setReadablePasteBoardTypes:types];
++}
++#endif // Ardia]
  
  @end
 diff --git a/Libraries/Text/TextInput/Singleline/RCTUITextField.h b/Libraries/Text/TextInput/Singleline/RCTUITextField.h
@@ -280,10 +288,10 @@ index 61242af88da2f235e5ae506e79dfb9898742eb51..d942993deacd63a73a361fdb9f559c76
  @property (nonatomic, assign) CGFloat pointScaleFactor;
  
 diff --git a/Libraries/Text/TextInput/Singleline/RCTUITextField.mm b/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
-index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b6f027e19 100644
+index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d476b12e82861ba314d5b559221d61ddb1d9233e 100644
 --- a/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
 +++ b/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
-@@ -15,6 +15,8 @@
+@@ -15,10 +15,119 @@
  
  #import <React/RCTTouchHandler.h> // [macOS]
  
@@ -291,8 +299,119 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
 +
  #if TARGET_OS_OSX // [macOS
  
++// [Ardia: a single-line field given pastedTypes pastes only those as plain text, with line breaks folded the way
++// Chrome's omnibox folds them (OmniboxView::SanitizeTextForPaste): leading and trailing whitespace goes, and a
++// whitespace run holding a line break becomes one space when the text has other spaces (prose), or nothing when it
++// doesn't (a URL wrapped over lines). A rich paste instead took the source's look, and a link copied with its title
++// pasted the title.
++static NSString *RCTUISingleLinePastedText(NSString *text)
++{
++  NSCharacterSet *space = NSCharacterSet.whitespaceAndNewlineCharacterSet;
++  NSCharacterSet *lineBreak = [NSCharacterSet characterSetWithCharactersInString:@"\r\n"];
++  NSUInteger length = text.length;
++  NSUInteger index = 0;
++  while (index < length && [space characterIsMember:[text characterAtIndex:index]]) {
++    index++;
++  }
++  if (length == 0) {
++    return @"";
++  }
++  if (index == length) {
++    return @" ";
++  }
++  NSMutableString *joined = [NSMutableString string];
++  NSMutableArray<NSNumber *> *lineGaps = [NSMutableArray array];
++  BOOL spaced = NO;
++  while (index < length) {
++    NSUInteger word = index;
++    while (index < length && ![space characterIsMember:[text characterAtIndex:index]]) {
++      index++;
++    }
++    [joined appendString:[text substringWithRange:NSMakeRange(word, index - word)]];
++    NSUInteger gap = index;
++    while (index < length && [space characterIsMember:[text characterAtIndex:index]]) {
++      index++;
++    }
++    if (index == length) {
++      break;
++    }
++    NSRange gapRange = NSMakeRange(gap, index - gap);
++    if ([text rangeOfCharacterFromSet:lineBreak options:0 range:gapRange].location == NSNotFound) {
++      spaced = YES;
++      [joined appendString:[text substringWithRange:gapRange]];
++    } else {
++      [lineGaps addObject:@(joined.length)];
++    }
++  }
++  NSString *fill = spaced ? @" " : @"";
++  for (NSNumber *at in lineGaps.reverseObjectEnumerator) {
++    [joined insertString:fill atIndex:at.unsignedIntegerValue];
++  }
++  return joined;
++}
++
++@interface RCTUIPlainPasteFieldEditor : NSTextView
++
++@property (nonatomic, copy) NSArray<NSPasteboardType> *pasteTypes;
++
++@end
++
++@implementation RCTUIPlainPasteFieldEditor
++
++- (void)paste:(id)sender
++{
++  [self pasteFrom:NSPasteboard.generalPasteboard];
++}
++
++- (void)pasteAsPlainText:(id)sender
++{
++  [self pasteFrom:NSPasteboard.generalPasteboard];
++}
++
++- (void)pasteAsRichText:(id)sender
++{
++  [self pasteFrom:NSPasteboard.generalPasteboard];
++}
++
++- (void)pasteFrom:(NSPasteboard *)pasteboard
++{
++  NSMutableArray<NSPasteboardType> *types = [self.pasteTypes mutableCopy];
++  if ([types containsObject:NSPasteboardTypeString]) {
++    [types addObject:NSPasteboardTypeURL];
++  }
++  NSString *text = nil;
++  for (NSPasteboardType type in types) {
++    text = [pasteboard stringForType:type];
++    if (text) {
++      break;
++    }
++  }
++  if (!text) {
++    NSBeep();
++    return;
++  }
++  NSString *pasted = RCTUISingleLinePastedText(text);
++  NSRange range = self.selectedRange;
++  if (![self shouldChangeTextInRange:range replacementString:pasted]) {
++    return;
++  }
++  [self.textStorage replaceCharactersInRange:range
++                        withAttributedString:[[NSAttributedString alloc] initWithString:pasted attributes:self.typingAttributes]];
++  [self setSelectedRange:NSMakeRange(range.location + pasted.length, 0)];
++  [self didChangeText];
++  [self scrollRangeToVisible:self.selectedRange];
++}
++
++@end
++// Ardia]
++
  @interface RCTUITextFieldCell : NSTextFieldCell
-@@ -26,9 +28,74 @@ @interface RCTUITextFieldCell : NSTextFieldCell
+ 
++@property (nonatomic, copy, nullable) NSArray<NSPasteboardType> *pasteTypes; // [Ardia Ardia]
+ @property (nonatomic, assign) UIEdgeInsets textContainerInset;
+ @property (nonatomic, getter=isAutomaticTextReplacementEnabled) BOOL automaticTextReplacementEnabled;
+ @property (nonatomic, getter=isAutomaticSpellingCorrectionEnabled) BOOL automaticSpellingCorrectionEnabled;
+@@ -26,10 +135,96 @@ @interface RCTUITextFieldCell : NSTextFieldCell
  @property (nonatomic, getter=isGrammarCheckingEnabled) BOOL grammarCheckingEnabled;
  @property (nonatomic, strong, nullable) RCTUIColor *selectionColor;
  @property (nonatomic, strong, nullable) RCTUIColor *insertionPointColor;
@@ -307,6 +426,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
  
  @end
  
+-@implementation RCTUITextFieldCell
 +static NSArray<NSNumber *> *RCTArdiaEditorComponents(id value)
 +{
 +  if (![value isKindOfClass:[NSDictionary class]]) {
@@ -364,10 +484,32 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
 +                }];
 +}
 +
- @implementation RCTUITextFieldCell
++@implementation RCTUITextFieldCell {
++  RCTUIPlainPasteFieldEditor *_plainPasteEditor; // [Ardia Ardia]
++}
++
++- (void)setPasteTypes:(NSArray<NSPasteboardType> *)pasteTypes // [Ardia
++{
++  _pasteTypes = [pasteTypes copy];
++  _plainPasteEditor.pasteTypes = _pasteTypes;
++}
++
++- (NSTextView *)fieldEditorForView:(NSView *)controlView
++{
++  if (_pasteTypes.count == 0) {
++    return [super fieldEditorForView:controlView];
++  }
++  if (!_plainPasteEditor) {
++    _plainPasteEditor = [[RCTUIPlainPasteFieldEditor alloc] initWithFrame:NSZeroRect];
++    _plainPasteEditor.fieldEditor = YES;
++    _plainPasteEditor.pasteTypes = _pasteTypes;
++  }
++  return _plainPasteEditor;
++} // Ardia]
  
  - (NSRect)titleRectForBounds:(NSRect)rect
-@@ -63,11 +130,42 @@ - (NSText *)setUpFieldEditorAttributes:(NSText *)textObj
+ {
+@@ -63,11 +258,42 @@ - (NSText *)setUpFieldEditorAttributes:(NSText *)textObj
    fieldEditor.automaticTextReplacementEnabled = self.isAutomaticTextReplacementEnabled;
    fieldEditor.continuousSpellCheckingEnabled = self.isContinuousSpellCheckingEnabled;
    fieldEditor.grammarCheckingEnabled = self.isGrammarCheckingEnabled;
@@ -411,7 +553,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
  }
  
  @end
-@@ -84,6 +182,9 @@ @implementation RCTUITextField {
+@@ -84,6 +310,9 @@ @implementation RCTUITextField {
  #if TARGET_OS_OSX // [macOS
    BOOL _isUpdatingPlaceholderText;
    NSArray<NSPasteboardType> *_readablePasteboardTypes;
@@ -421,7 +563,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
  #endif // macOS]
  }
  
-@@ -155,6 +256,11 @@ - (BOOL)hasMarkedText
+@@ -155,6 +384,11 @@ - (BOOL)hasMarkedText
  	return ((NSTextView *)self.currentEditor).validAttributesForMarkedText ?: @[];
  }
  
@@ -433,7 +575,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
  #endif // macOS]
  
  #pragma mark - Accessibility
-@@ -281,9 +387,63 @@ - (BOOL)isGrammarCheckingEnabled
+@@ -281,9 +515,63 @@ - (BOOL)isGrammarCheckingEnabled
    return ((RCTUITextFieldCell*)self.cell).isGrammarCheckingEnabled;
  }
  
@@ -497,7 +639,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
  }
  
  - (RCTUIColor*)selectionColor
-@@ -330,7 +490,9 @@ - (void)setPlaceholder:(NSString *)placeholder
+@@ -330,7 +618,9 @@ - (void)setPlaceholder:(NSString *)placeholder
  #if !TARGET_OS_OSX // [macOS]
    [super setPlaceholder:placeholder];
  #else // [macOS
@@ -507,17 +649,28 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
  #endif // macOS]
    [self _updatePlaceholder];
  }
-@@ -385,6 +547,9 @@ - (void)_updatePlaceholder
+@@ -385,6 +675,20 @@ - (void)_updatePlaceholder
    _isUpdatingPlaceholderText = YES;
    self.placeholderAttributedString = [[NSAttributedString alloc] initWithString:self.placeholder ?: @""
  																	 attributes:[self _placeholderTextAttributes]];
-+  if (self.currentEditor) { // [Ardia: the field editor keeps the placeholder it was set up with while it holds text, so a colour change (dark to light) left the old one, invisible, once the field was emptied Ardia]
-+    [self.cell setUpFieldEditorAttributes:self.currentEditor];
++  NSTextView *editor = (NSTextView *)self.currentEditor;
++  if (editor) { // [Ardia: the field editor keeps the placeholder it was set up with while it holds text, so a colour change (dark to light) left the old one, invisible, once the field was emptied. Setting it up again also paints its text and typing attributes in the cell's textColor (the system one, not this field's), so they are put back as they were Ardia]
++    NSAttributedString *shown = [editor.textStorage copy];
++    NSDictionary<NSAttributedStringKey, id> *typing = editor.typingAttributes;
++    [self.cell setUpFieldEditorAttributes:editor];
++    [editor.textStorage beginEditing];
++    [shown enumerateAttributesInRange:NSMakeRange(0, shown.length)
++                              options:0
++                           usingBlock:^(NSDictionary<NSAttributedStringKey, id> *attributes, NSRange range, __unused BOOL *stop) {
++                             [editor.textStorage setAttributes:attributes range:range];
++                           }];
++    [editor.textStorage endEditing];
++    editor.typingAttributes = typing;
 +  } // [Ardia]
    _isUpdatingPlaceholderText = NO;
  #endif // macOS]
  }
-@@ -541,6 +706,8 @@ - (void)textDidEndEditing:(NSNotification *)notification
+@@ -541,6 +845,8 @@ - (void)textDidEndEditing:(NSNotification *)notification
      return;
    }
  
@@ -526,6 +679,16 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..b1ea31050090c392763ac65ac042879b
    id<RCTUITextFieldDelegate> delegate = self.delegate;
    if ([delegate respondsToSelector:@selector(textFieldEndEditing:)]) {
      [delegate textFieldEndEditing:self];
+@@ -710,6 +1016,9 @@ - (void)keyUp:(NSEvent *)event {
+ - (void)setReadablePasteBoardTypes:(NSArray<NSPasteboardType> *)readablePasteboardTypes
+ {
+   _readablePasteboardTypes = readablePasteboardTypes;
++  if ([self.cell isKindOfClass:RCTUITextFieldCell.class]) { // [Ardia
++    ((RCTUITextFieldCell *)self.cell).pasteTypes = readablePasteboardTypes;
++  } // Ardia]
+ }
+ #endif // macOS]
+ 
 diff --git a/Libraries/Text/TextInput/Singleline/macOS/RCTUISecureTextField.mm b/Libraries/Text/TextInput/Singleline/macOS/RCTUISecureTextField.mm
 index 6f332dc1701cada0aff0e9a2678fa7bdcea0ef85..462853ec8b76f004cd5b9e92291473bc673a7ed1 100644
 --- a/Libraries/Text/TextInput/Singleline/macOS/RCTUISecureTextField.mm

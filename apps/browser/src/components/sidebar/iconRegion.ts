@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from "react";
 import type { GestureResponderEvent, NativeTouchEvent, View } from "react-native";
-import { markHoverProps } from "../../lib/hoverShift";
-import { layout } from "../../lib/theme";
-import { pointed, rowsCovered } from "./hover";
+import { markHoverProps } from "../../lib/hoverMarks";
+import { layout } from "../ui/theme";
+import { rowsCovered, watchCovered } from "../../state/sidebar/hover";
 
 export const ICON_WIDTH = 16;
 export const ICON_REGION_WIDTH = 2 * layout.rowPadding + ICON_WIDTH;
@@ -30,7 +30,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
   const released = useRef<boolean | null>(null);
   const lastPress = useRef(false);
   const overlay = useRef(false);
-  const watch = useCallback((on: boolean) => pointed(windowId, rerender, on), [windowId]);
+  const watch = useCallback((on: boolean) => watchCovered(windowId, rerender, on), [windowId]);
   const clearReleased = useCallback(() => {
     if (released.current === null) return false;
     released.current = null;

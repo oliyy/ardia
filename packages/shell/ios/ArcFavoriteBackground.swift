@@ -1,4 +1,5 @@
 import AppKit
+import ArdiaCore
 import CoreImage
 import ExpoModulesCore
 import React
@@ -24,7 +25,7 @@ public class ArcFavoriteBackgroundModule: Module {
         view.dark = value ?? true
       }
       Prop("mutedColor") { (view: ArcFavoriteBackground, value: String?) in
-        view.mutedColor = value.flatMap(NSColor.init(hex:))
+        view.mutedColor = value.flatMap { RGBA(hex: $0)?.srgb }
       }
     }
   }

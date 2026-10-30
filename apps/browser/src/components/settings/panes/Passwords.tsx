@@ -2,29 +2,27 @@ import {
   deletePassword,
   exportPasswords,
   getNeverSavePasswordOrigins,
-  getPassword,
   listPasswords,
-  savePassword,
   setNeverSavePasswords,
-  setPasswordAutofill,
-  unlockPasswords,
   updatePassword,
+  type PasswordExportStatus,
   type SavedPassword,
-} from "@ardia/ardiacore";
-import { confirm, copyText, Symbol, systemInfo } from "@ardia/shell";
+} from "../../../state/site/passwords";
+import { orWarn } from "../../../lib/fallback";
+import { confirm, copyText, systemInfo } from "../../../state/app/system";
+import { Symbol, Button, font, SearchField, Sheet, TextField, Toggle, weight } from "../../ui";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
-import { useTheme } from "../../../lib/theme";
-import { useBrowser } from "../../../store/browser";
-import { useProfiles } from "../../../store/hooks";
-import { engineProfile, plural } from "../../../store/model";
-import { importModule } from "../../import/module";
+import { useTheme } from "../../ui/theme";
+import { currentEngineProfile } from "../../../state/browser/current";
+import { plural } from "../../../state/browser/model";
+import { importPasswordsCsv, revealPassword, unlockPasswordsFor, usePasswordsUnlocked } from "../../../state/site/savedPasswords";
 import { hostLabel, matchesQuery } from "../../pages/PageLayout";
-import { Favicon, IconButton } from "../../primitives";
-import { Button, Group, PopUp, Row, SearchField, SectionHeader, Sheet, TextField, Toggle } from "../controls";
-import { passwordAutofill } from "../paneData";
-import { store, useResource } from "../resources";
-import { closeSettingsSheet, showSettingsSheet } from "../sheet";
+import { Favicon } from "../../favicon/Favicon";
+import { Group, ProfilePicker, Row, SectionHeader, SheetActions, SheetTitle, useSettingsProfile } from "../Form";
+import { passwordAutofill, setPasswordAutofillFor } from "../../../state/settings/paneData";
+import { useResource } from "../../../state/settings/resources";
+import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
 
 function passwordManagerAppsNote() {
   const apps = "1Password, Bitwarden, KeePassXC and Proton Pass extensions connect to their Mac apps.";
@@ -33,48 +31,31 @@ function passwordManagerAppsNote() {
     : `${apps} For 1Password, add Ardia once: in the 1Password app, open Settings › Browser › Add Browser and choose Ardia.`;
 }
 
-const UNLOCK_MS = 5 * 60_000;
-const unlockedUntil = new Map<string, number>();
-const isUnlocked = (profile: string) => Date.now() < (unlockedUntil.get(profile) ?? 0);
-
 export function PasswordsPane({ profileId: initial }: { profileId?: string | null }) {
   const theme = useTheme();
-  const profiles = useProfiles();
-  const [profileId, setProfileId] = useState(() => initial ?? useBrowser.getState().settings.defaultProfileId);
-  const [, setUnlockedAt] = useState(0);
+  const [profileId, setProfileId] = useSettingsProfile(initial);
   const [list, setList] = useState<SavedPassword[] | null>(null);
   const [never, setNever] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
-  const profile = engineProfile(profileId);
-  const unlocked = isUnlocked(profile);
+  const profile = currentEngineProfile(profileId);
+  const unlocked = usePasswordsUnlocked(profile);
   const [autofill = true] = useResource(passwordAutofill, profile);
 
   const load = () => {
-    void listPasswords(profile).then(setList).catch(() => setList([]));
-    void getNeverSavePasswordOrigins(profile).then(setNever).catch(() => {});
+    void listPasswords(profile).catch(orWarn<SavedPassword[]>([])).then(setList);
+    void getNeverSavePasswordOrigins(profile).catch(orWarn<string[]>([])).then(setNever);
   };
   useEffect(() => {
     if (unlocked) load();
   }, [unlocked, profileId]);
 
-  const unlock = async () => {
-    if (!(await unlockPasswords(profile))) return;
-    unlockedUntil.set(profile, Date.now() + UNLOCK_MS);
-    setUnlockedAt(Date.now());
-  };
-
   const importCsv = async () => {
-    const mod = importModule();
-    if (!mod) return setImportStatus("Importing isn't available in this build.");
-    const path = await mod.chooseImportFile("passwordsCSV");
-    if (!path) return;
     try {
-      const creds = await mod.importPasswordsCSV(path);
-      let saved = 0;
-      for (const c of creds) if (c.url && c.password && (await savePassword(profile, originOf(c.url), c.username, c.password))) saved++;
-      setImportStatus(`Imported ${plural(saved, "password")}.`);
+      const result = await importPasswordsCsv(profile);
+      if (result === "cancelled") return;
+      setImportStatus(`Imported ${plural(result.saved, "password")}.`);
       load();
     } catch (e) {
       setImportStatus(`Couldn't import that file: ${(e as Error).message}`);
@@ -82,7 +63,7 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
   };
 
   const exportCsv = async () => {
-    const { status, path } = await exportPasswords(profile);
+    const { status, path } = await exportPasswords(profile).catch(orWarn<{ status: PasswordExportStatus; path?: string }>({ status: "writeFailed" }));
     const folder = path ? path.split("/").slice(-2, -1)[0] : "";
     if (status === "succeeded") setExportStatus(`Saved to “${folder}”. Delete the file once you're done with it.`);
     else if (status === "writeFailed") setExportStatus("Couldn't write the file. Try another folder.");
@@ -97,20 +78,16 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
       <SectionHeader
         title="Passwords"
         description="Saved on this Mac, separately for each profile, and encrypted with a key in your Keychain."
-        action={
-          profiles.length > 1 ? (
-            <PopUp value={profileId} options={profiles.map((p) => ({ value: p.id, title: p.name }))} onChange={setProfileId} />
-          ) : undefined
-        }
+        action={<ProfilePicker value={profileId} onChange={setProfileId} />}
       />
       <Group>
         <Row anchor="passwords.offerToSave">
-          <Toggle value={autofill} onChange={(v) => void setPasswordAutofill(v, profile).then(() => store(passwordAutofill, [profile], v))} />
+          <Toggle value={autofill} onChange={(v) => void setPasswordAutofillFor(profile, v)} />
         </Row>
-        <Row anchor="passwords.importPasswords" description={importStatus || "From a CSV exported by Chrome, Safari, Firefox, 1Password, Bitwarden…"}>
+        <Row anchor="passwords.importPasswords" description={importStatus || undefined}>
           <Button title="Import CSV…" onPress={() => void importCsv()} />
         </Row>
-        <Row anchor="passwords.exportPasswords" description={exportStatus || "To a CSV file. Anyone who can open the file can read your passwords."}>
+        <Row anchor="passwords.exportPasswords" description={exportStatus || undefined}>
           <Button title="Export CSV…" onPress={() => void exportCsv()} />
         </Row>
         <Row anchor="passwords.managerApps" description={passwordManagerAppsNote()} />
@@ -119,9 +96,9 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
       {!unlocked ? (
         <View style={{ alignItems: "center", gap: 10, marginTop: 40 }}>
           <Symbol name="lock.fill" size={26} color={theme.textTertiary} style={{ width: 36, height: 36 }} />
-          <Text style={{ fontSize: 14, fontWeight: "500", color: theme.textPrimary }}>Passwords are locked</Text>
-          <Text style={{ fontSize: 12, color: theme.textSecondary }}>Unlock with Touch ID or your login password to see them.</Text>
-          <Button title="Unlock" kind="primary" onPress={() => void unlock()} style={{ marginTop: 6 }} />
+          <Text style={{ ...font.title, fontWeight: weight.medium, color: theme.textPrimary }}>Passwords are locked</Text>
+          <Text style={{ ...font.small, color: theme.textSecondary }}>Unlock with Touch ID or your login password to see them.</Text>
+          <Button title="Unlock" kind="primary" onPress={() => void unlockPasswordsFor(profile)} style={{ marginTop: 6 }} />
         </View>
       ) : (
         <>
@@ -147,7 +124,7 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
               <Group>
                 {never.map((origin) => (
                   <Row key={origin} icon={<Favicon url={origin} />} title={hostLabel(origin)}>
-                    <Button title="Remove" onPress={() => void setNeverSavePasswords(profile, origin, false).then(load)} />
+                    <Button title="Remove" onPress={() => void setNeverSavePasswords(profile, origin, false).catch(orWarn(undefined)).then(load)} />
                   </Row>
                 ))}
               </Group>
@@ -159,24 +136,25 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
   );
 }
 
-function originOf(url: string) {
-  const m = /^([a-z][a-z0-9+.-]*:\/\/[^/?#]+)/i.exec(url);
-  return m ? m[1]! : url;
-}
-
 function PasswordSheet({ profile, saved, onChanged }: { profile: string; saved: SavedPassword; onChanged: () => void }) {
   const theme = useTheme();
   const [username, setUsername] = useState(saved.username);
   const [password, setPassword] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [editing, setEditing] = useState(false);
-  useEffect(() => void getPassword(profile, saved.origin, saved.username).then(setPassword), []);
+  const unlocked = usePasswordsUnlocked(profile);
+  useEffect(() => void revealPassword(profile, saved.origin, saved.username).then(setPassword), []);
+  useEffect(() => {
+    if (unlocked) return;
+    setPassword(null);
+    closeSettingsSheet();
+  }, [unlocked]);
 
   const save = async () => {
     await updatePassword(profile, saved.origin, saved.username, {
       username: username !== saved.username ? username : undefined,
       password: password ?? undefined,
-    });
+    }).catch(orWarn(false));
     onChanged();
     closeSettingsSheet();
   };
@@ -188,7 +166,7 @@ function PasswordSheet({ profile, saved, onChanged }: { profile: string; saved: 
       destructive: true,
     });
     if (!confirmed) return;
-    await deletePassword(profile, saved.origin, saved.username);
+    await deletePassword(profile, saved.origin, saved.username).catch(orWarn(false));
     onChanged();
     closeSettingsSheet();
   };
@@ -197,7 +175,7 @@ function PasswordSheet({ profile, saved, onChanged }: { profile: string; saved: 
     <Sheet width={440} onClose={closeSettingsSheet}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <Favicon url={saved.origin} size={22} />
-        <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: theme.textPrimary }}>{hostLabel(saved.origin)}</Text>
+        <SheetTitle style={{ flex: 1 }}>{hostLabel(saved.origin)}</SheetTitle>
       </View>
       <View style={{ marginTop: 14 }}>
         <Group>
@@ -207,10 +185,10 @@ function PasswordSheet({ profile, saved, onChanged }: { profile: string; saved: 
               <TextField value={username} onChangeText={setUsername} style={{ width: 220 }} />
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text selectable style={{ fontSize: 13, color: theme.textPrimary }}>
+                <Text selectable style={{ ...font.body, color: theme.textPrimary }}>
                   {saved.username}
                 </Text>
-                <IconButton icon="doc.on.doc" size={11} box={24} radius={6} onPress={() => copyText(saved.username)} tooltip="Copy Username" />
+                <Button variant="icon" icon="doc.on.doc" size={11} box={24} radius={6} onPress={() => copyText(saved.username)} tooltip="Copy Username" />
               </View>
             )}
           </Row>
@@ -219,19 +197,17 @@ function PasswordSheet({ profile, saved, onChanged }: { profile: string; saved: 
               <TextField value={password ?? ""} onChangeText={setPassword} secure={!revealed} style={{ width: 220 }} />
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Text selectable style={{ fontSize: 13, color: theme.textPrimary, fontFamily: revealed ? "Menlo" : undefined }}>
+                <Text selectable style={{ ...font.body, color: theme.textPrimary, fontFamily: revealed ? "Menlo" : undefined }}>
                   {password === null ? "…" : revealed ? password : "•".repeat(Math.min(password.length, 12))}
                 </Text>
-                <IconButton icon={revealed ? "eye.slash" : "eye"} size={11} box={24} radius={6} onPress={() => setRevealed(!revealed)} tooltip={revealed ? "Hide" : "Show"} />
-                <IconButton icon="doc.on.doc" size={11} box={24} radius={6} onPress={() => password && copyText(password)} tooltip="Copy Password" />
+                <Button variant="icon" icon={revealed ? "eye.slash" : "eye"} size={11} box={24} radius={6} onPress={() => setRevealed(!revealed)} tooltip={revealed ? "Hide" : "Show"} />
+                <Button variant="icon" icon="doc.on.doc" size={11} box={24} radius={6} onPress={() => password && copyText(password)} tooltip="Copy Password" />
               </View>
             )}
           </Row>
         </Group>
       </View>
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
-        <Button title="Delete" kind="destructive" onPress={() => void remove()} />
-        <View style={{ flex: 1 }} />
+      <SheetActions destructive={<Button title="Delete" kind="destructive" onPress={() => void remove()} />}>
         {editing ? (
           <>
             <Button title="Cancel" onPress={() => setEditing(false)} />
@@ -243,7 +219,7 @@ function PasswordSheet({ profile, saved, onChanged }: { profile: string; saved: 
             <Button title="Done" kind="primary" onPress={closeSettingsSheet} />
           </>
         )}
-      </View>
+      </SheetActions>
     </Sheet>
   );
 }

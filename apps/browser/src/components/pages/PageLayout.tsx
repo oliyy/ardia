@@ -1,8 +1,9 @@
-import { appUrlOrigin, displayHost, urlForDisplay } from "@ardia/core";
+import { appUrlOrigin, urlForDisplay } from "@ardia/core";
+import { displayHostOf } from "../../lib/url";
 import type { ReactNode } from "react";
-import { Text, View } from "react-native";
-import { useTheme } from "../../lib/theme";
-import { SearchField } from "../settings/controls";
+import { View } from "react-native";
+import { Box, SearchField, Text } from "../ui";
+import { emptyState, pageHeader, pageType } from "./tokens";
 
 export const PAGE_WIDTH = 880;
 
@@ -19,28 +20,45 @@ export function PageHeader({
   placeholder: string;
   actions?: ReactNode;
 }) {
-  const theme = useTheme();
   return (
-    <View style={{ height: 64, flexDirection: "row", alignItems: "center", paddingHorizontal: 24, gap: 16 }}>
-      <Text style={{ width: 200, fontSize: 22, fontWeight: "600", color: theme.textPrimary }}>{title}</Text>
-      <View style={{ flex: 1, alignItems: "center" }}>
-        <SearchField value={query} onChangeText={onQuery} placeholder={placeholder} style={{ width: "100%", maxWidth: 480 }} />
+    <Box row padX="xxxl" gap="xl" style={HEADER_ROW}>
+      <Text weight="semibold" style={HEADER_TITLE}>
+        {title}
+      </Text>
+      <View style={HEADER_SEARCH}>
+        <SearchField value={query} onChangeText={onQuery} placeholder={placeholder} style={SEARCH_FIELD} />
       </View>
-      <View style={{ width: 200, flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>{actions}</View>
-    </View>
+      <Box row gap="m" style={HEADER_ACTIONS}>
+        {actions}
+      </Box>
+    </Box>
   );
 }
 
+const HEADER_ROW = { height: pageHeader.height, alignItems: "center" } as const;
+const HEADER_TITLE = { width: pageHeader.sideWidth, fontSize: pageType.title } as const;
+const HEADER_SEARCH = { flex: 1, alignItems: "center" } as const;
+const SEARCH_FIELD = { width: "100%", maxWidth: pageHeader.searchMaxWidth } as const;
+const HEADER_ACTIONS = { width: pageHeader.sideWidth, justifyContent: "flex-end", alignItems: "center" } as const;
+
 export function EmptyState({ icon, title, subtitle }: { icon?: ReactNode; title: string; subtitle?: string }) {
-  const theme = useTheme();
   return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 80, gap: 8 }}>
+    <Box gap="m" center style={EMPTY}>
       {icon}
-      <Text style={{ fontSize: 15, fontWeight: "500", color: theme.textSecondary }}>{title}</Text>
-      {subtitle ? <Text style={{ fontSize: 13, color: theme.textTertiary, textAlign: "center", maxWidth: 360 }}>{subtitle}</Text> : null}
-    </View>
+      <Text size="heading" weight="medium" tone="textSecondary">
+        {title}
+      </Text>
+      {subtitle ? (
+        <Text tone="textTertiary" style={EMPTY_SUBTITLE}>
+          {subtitle}
+        </Text>
+      ) : null}
+    </Box>
   );
 }
+
+const EMPTY = { flex: 1, paddingBottom: emptyState.liftBottom } as const;
+const EMPTY_SUBTITLE = { textAlign: "center", maxWidth: emptyState.subtitleMaxWidth } as const;
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -65,12 +83,7 @@ export function timeLabel(ms: number): string {
   return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
-export function hostLabel(url: string): string {
-  const app = appUrlOrigin(url);
-  if (app) return app;
-  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:]+)/i.exec(url);
-  return m ? displayHost(m[1]!.toLowerCase()).replace(/^www\./, "") : url;
-}
+export const hostLabel = (url: string) => appUrlOrigin(url) || displayHostOf(url) || url;
 
 export const queryWords = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
 

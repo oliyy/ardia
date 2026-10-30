@@ -1,9 +1,12 @@
-import { Surface } from "@ardia/shell";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing } from "react-native";
+import { Animated } from "react-native";
+import { Surface } from "../ui";
+import { curve } from "../ui/motion";
+import { FoldedAway } from "./hoverController";
+import { SIDEBAR_MOTION } from "./tokens";
 
-import { FOLD_MS } from "./geometry";
-export const FOLD_EASING = Easing.bezier(0.2, 0.9, 0.3, 1);
+const FOLD_MS = SIDEBAR_MOTION.fold;
+export const FOLD_EASING = curve.fold;
 export const FOLD_TIMING = { ms: FOLD_MS, easing: FOLD_EASING };
 
 export type FoldSlide = { shift: Animated.Value; delta: number; expand: boolean; kept: string | null };
@@ -20,10 +23,6 @@ const FoldHidden = createContext(false);
 export const useFoldHidden = () => useContext(FoldHidden);
 
 type FoldState = { open: Animated.Value; moving: boolean; settled: boolean };
-
-const FoldedAway = createContext(false);
-
-export const useFoldedAway = () => useContext(FoldedAway);
 
 export function useFold(collapsed: boolean): FoldState {
   const open = useRef(new Animated.Value(collapsed ? 0 : 1)).current;
@@ -68,6 +67,7 @@ export function Fold({
   keep,
   gap,
   rowHeight,
+  estimate,
   padTop = 0,
   padBottom = 0,
   indent = 0,
@@ -82,6 +82,7 @@ export function Fold({
   keep?: string | null;
   gap: number;
   rowHeight?: number | ((key: string) => number);
+  estimate?: (key: string) => number;
   padTop?: number;
   padBottom?: number;
   indent?: number;
@@ -92,7 +93,7 @@ export function Fold({
 }) {
   const { open, moving, settled: restCollapsed } = fold;
   const outerHidden = useFoldHidden();
-  const parentAway = useFoldedAway();
+  const parentAway = useContext(FoldedAway);
   const measuring = rowHeight === undefined;
   const [measured, setMeasured] = useState<Record<string, number>>({});
   const styles = useRef(new Map<number, object>()).current;
@@ -102,7 +103,7 @@ export function Fold({
   const folding = !!kept && (collapsed || moving) && !sliding;
   const state = useRef({ moving, folding, kept });
   state.current = { moving, folding, kept };
-  const heightOf = (key: string) => (typeof rowHeight === "function" ? rowHeight(key) : (rowHeight ?? measured[key] ?? 0));
+  const heightOf = (key: string) => (typeof rowHeight === "function" ? rowHeight(key) : (rowHeight ?? measured[key] ?? estimate?.(key) ?? 0));
   const rows = entries.filter((e) => !e.ghost);
   const total = rows.reduce((sum, e) => sum + heightOf(e.key), 0) + gap * Math.max(0, rows.length - 1) + padTop + padBottom;
   const above = rows.slice(0, Math.max(0, rows.findIndex((e) => e.key === kept))).reduce((sum, e) => sum + heightOf(e.key) + gap, 0);
@@ -153,7 +154,7 @@ export function Fold({
           : null;
   if (!keepMounted || measuring || mountClosed) retained.current = false;
   else if (!collapsed || moving) retained.current = true;
-  const mountAll = !collapsed || moving || mountClosed || measuring || retained.current;
+  const mountAll = !collapsed || moving || mountClosed || (measuring && !estimate) || retained.current;
   const footerHidden = outerHidden || restCollapsed;
 
   return (

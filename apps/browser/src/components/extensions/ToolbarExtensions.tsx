@@ -1,27 +1,30 @@
-import { terminateCastRoute, type ActionState, type CastRoute, type InstalledExtension } from "@ardia/ardiacore";
-import { ContextMenuArea, showMenu, Symbol } from "@ardia/shell";
+import { terminateCastRoute, type CastRoute, toggleCastPicker, useCastRoutes } from "../../state/media/cast";
+import type { ActionState, InstalledExtension } from "../../state/extensions/store";
+import { ContextMenuArea, Symbol, Button, Text, useHover } from "../ui";
+import { chooseFromMenu } from "../../state/app/menuChoice";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Pressable, Text, View } from "react-native";
-import { useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { toggleCastPicker, useCastRoutes } from "../media/cast";
-import type { ToolbarPalette } from "../layout/toolbarColors";
-import { usePages } from "../layout/pageState";
-import { useHover } from "../primitives";
-import { dropToolbarAnchor, setToolbarAnchor } from "./bridge";
+import { Image, Pressable, View } from "react-native";
+import { useTheme } from "../ui/theme";
+import type { ToolbarPalette } from "../ui/toolbarColors";
+import { usePages } from "../../state/tabs/pageState";
+import { ink, opacity, radius, weight } from "../ui/tokens";
+import { BADGE_FALLBACK_FILL, BADGE_TEXT } from "./tokens";
+import { isLight } from "../../lib/color";
+import { dropToolbarAnchor, setToolbarAnchor } from "../../state/extensions/toolbarAnchors";
 import {
   activateExtension,
-  openManageExtensions,
-  openPinDialog,
-  openWebStore,
+  EXTENSION_LIST_ITEMS,
+  type ExtensionListChoice,
+  runExtensionListChoice,
   showExtensionMenu,
   useExtensions,
   useWindowExtensions,
-  windowExtensions,
+  currentWindowExtensions,
   type Anchor,
-} from "./state";
+} from "../../state/extensions/actions";
 
 const BUTTON = 28;
+const GLYPH_BOX = 18;
 const GAP = 2;
 const PITCH = BUTTON + GAP;
 
@@ -39,10 +42,10 @@ function useToolbarExtensions(windowId: string, limit: number) {
 
 export const extensionsFitting = (room: number) => Math.max(1, Math.floor((room + GAP) / PITCH));
 
-export function useToolbarExtensionsWidth(windowId: string, limit = Infinity): number {
+export function useToolbarExtensionsWidth(windowId: string, limit = Infinity, button = BUTTON): number {
   const { pinned, overflow, casting } = useToolbarExtensions(windowId, limit);
   const count = pinned.length + (overflow ? 1 : 0) + (casting ? 1 : 0);
-  return count ? count * PITCH - GAP + 6 : 0;
+  return count ? count * (button + GAP) - GAP + 6 : 0;
 }
 
 type ToolbarExtensionsProps = {
@@ -52,6 +55,7 @@ type ToolbarExtensionsProps = {
   top: number;
   right: number;
   limit?: number;
+  button?: number;
 };
 
 export const ToolbarExtensions = memo(function ToolbarExtensions(props: ToolbarExtensionsProps) {
@@ -65,27 +69,29 @@ function TabToolbarExtensions({
   top,
   right,
   limit = Infinity,
+  button = BUTTON,
 }: ToolbarExtensionsProps) {
   const { pinned, overflow, routes } = useToolbarExtensions(windowId, limit);
-  const browserId = usePages((p) => {
-    for (const [id, tab] of Object.entries(p.browsers)) if (tab === tabId) return Number(id);
-    return 0;
-  });
-  if (!pinned.length && !overflow && !routes.length) return <EmptyAnchor windowId={windowId} tabId={tabId} top={top} right={right} />;
+  const ready = usePages((p) => !!p.ready[tabId]);
+  if (!pinned.length && !overflow && !routes.length) return <EmptyAnchor windowId={windowId} tabId={tabId} top={top} right={right} button={button} />;
   return (
     <View style={{ position: "absolute", top, right, flexDirection: "row", gap: GAP }}>
-      {routes.length ? <CastButton windowId={windowId} tabId={tabId} routes={routes} palette={palette} /> : null}
+      {routes.length ? <CastButton windowId={windowId} tabId={tabId} routes={routes} palette={palette} button={button} /> : null}
       {pinned.map((ext) => (
-        <ExtensionButton key={ext.id} ext={ext} windowId={windowId} tabId={tabId} browserId={browserId} palette={palette} />
+        <ExtensionButton key={ext.id} ext={ext} windowId={windowId} tabId={tabId} ready={ready} palette={palette} button={button} />
       ))}
-      {overflow && <OverflowButton windowId={windowId} tabId={tabId} palette={palette} />}
+      {overflow && <OverflowButton windowId={windowId} tabId={tabId} palette={palette} button={button} />}
     </View>
   );
 }
 
-function EmptyAnchor({ windowId, tabId, top, right }: { windowId: string; tabId: string; top: number; right: number }) {
+export function ToolbarPopupAnchor(props: { windowId: string; tabId: string; top: number; right: number }) {
+  return <EmptyAnchor key={`${props.windowId}|${props.tabId}`} {...props} />;
+}
+
+function EmptyAnchor({ windowId, tabId, top, right, button = BUTTON }: { windowId: string; tabId: string; top: number; right: number; button?: number }) {
   const { ref, measure } = useAnchor(windowId, tabId, "*");
-  return <View ref={ref} pointerEvents="none" style={{ position: "absolute", top, right, width: BUTTON, height: BUTTON }} onLayout={() => void measure()} />;
+  return <View ref={ref} pointerEvents="none" style={{ position: "absolute", top, right, width: button, height: button }} onLayout={() => void measure()} />;
 }
 
 function useAnchor(windowId: string, tabId: string, slot: string) {
@@ -115,8 +121,8 @@ function useAnchor(windowId: string, tabId: string, slot: string) {
   return { ref, measure };
 }
 
-function ExtensionButton({ ext, windowId, tabId, browserId, palette }: { ext: InstalledExtension; windowId: string; tabId: string; browserId: number; palette: ToolbarPalette }) {
-  const fetched = useExtensions((e) => (browserId ? e.actions[browserId] : undefined));
+function ExtensionButton({ ext, windowId, tabId, ready, palette, button }: { ext: InstalledExtension; windowId: string; tabId: string; ready: boolean; palette: ToolbarPalette; button: number }) {
+  const fetched = useExtensions((e) => (ready ? e.actions[tabId] : undefined));
   const held = useRef<ActionState | undefined>(undefined);
   if (fetched) held.current = fetched[ext.id];
   const state = held.current;
@@ -134,9 +140,9 @@ function ExtensionButton({ ext, windowId, tabId, browserId, palette }: { ext: In
           {({ pressed }) => (
             <View
               style={{
-                width: BUTTON,
-                height: BUTTON,
-                borderRadius: 7,
+                width: button,
+                height: button,
+                borderRadius: radius.button,
                 alignItems: "center",
                 justifyContent: "center",
                 backgroundColor: pressed || open ? palette.pressed : hovered ? palette.hover : undefined,
@@ -144,7 +150,7 @@ function ExtensionButton({ ext, windowId, tabId, browserId, palette }: { ext: In
             >
               {icon ? (
                 <View pointerEvents="none">
-                  <Image source={{ uri: icon }} style={{ width: 16, height: 16, opacity: dimmed ? 0.45 : 1 }} />
+                  <Image source={{ uri: icon }} style={{ width: 16, height: 16, opacity: dimmed ? opacity.disabled : 1 }} />
                 </View>
               ) : (
                 <Symbol name="puzzlepiece.extension" size={14} color={palette.icon} style={{ width: 18, height: 18 }} />
@@ -159,7 +165,7 @@ function ExtensionButton({ ext, windowId, tabId, browserId, palette }: { ext: In
 }
 
 function Badge({ text, color, textColor }: { text: string; color?: string | null; textColor?: string | null }) {
-  const fill = color && color !== "#000000" ? color : "#5F6368";
+  const fill = color && color !== ink.black ? color : BADGE_FALLBACK_FILL;
   return (
     <View
       pointerEvents="none"
@@ -176,93 +182,50 @@ function Badge({ text, color, textColor }: { text: string; color?: string | null
         justifyContent: "center",
       }}
     >
-      <Text numberOfLines={1} style={{ fontSize: 8.5, lineHeight: 11, fontWeight: "700", color: textColor ?? contrastText(fill) }}>
+      <Text numberOfLines={1} weight="bold" style={[BADGE_TEXT, { color: textColor ?? contrastText(fill) }]}>
         {text.slice(0, 4)}
       </Text>
     </View>
   );
 }
 
-function contrastText(hex: string) {
-  const n = parseInt(hex.slice(1, 7), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? "#000000" : "#FFFFFF";
-}
+const contrastText = (fill: string) => (isLight(fill) ? ink.black : ink.white);
 
-function CastButton({ windowId, tabId, routes, palette }: { windowId: string; tabId: string; routes: CastRoute[]; palette: ToolbarPalette }) {
+function CastButton({ windowId, tabId, routes, palette, button }: { windowId: string; tabId: string; routes: CastRoute[]; palette: ToolbarPalette; button: number }) {
   const theme = useTheme();
-  const { hovered, hoverProps } = useHover();
   const tooltip = routes.map((r) => (r.description ? `${r.description} on ${r.sink}` : `Casting to ${r.sink}`)).join("\n");
   const menu = async () => {
-    const choice = await showMenu([
-      ...routes.map((r) => ({ id: `stop:${r.id}`, title: `Stop Casting to ${r.sink}`, symbol: "stop.circle" })),
+    const choice = await chooseFromMenu<CastRoute, "open">([
+      ...routes.map((r) => ({ value: r, title: `Stop Casting to ${r.sink}`, symbol: "stop.circle" })),
       { separator: true as const },
       { id: "open", title: "Cast…", symbol: "tv.and.mediabox" },
     ]);
     if (choice === "open") void toggleCastPicker(windowId);
-    else if (choice?.startsWith("stop:")) void terminateCastRoute(choice.slice(5));
+    else if (choice) void terminateCastRoute(choice.id);
   };
   return (
-    <View tooltip={tooltip} {...hoverProps}>
-      <ContextMenuArea onContextMenu={() => void menu()}>
-        <Pressable onPress={() => void toggleCastPicker(windowId, tabId)}>
-          {({ pressed }) => (
-            <View
-              style={{
-                width: BUTTON,
-                height: BUTTON,
-                borderRadius: 7,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: pressed ? palette.pressed : hovered ? palette.hover : undefined,
-              }}
-            >
-              <Symbol name="tv.and.mediabox.fill" size={14} color={theme.accent} style={{ width: 18, height: 18 }} />
-            </View>
-          )}
-        </Pressable>
-      </ContextMenuArea>
-    </View>
+    <ContextMenuArea onContextMenu={() => void menu()}>
+      <Button variant="icon" icon="tv.and.mediabox.fill" size={14} box={button} glyphBox={GLYPH_BOX} radius={radius.button} color={theme.accent} palette={palette} tooltip={tooltip} onPress={() => void toggleCastPicker(windowId, tabId)} />
+    </ContextMenuArea>
   );
 }
 
-function OverflowButton({ windowId, tabId, palette }: { windowId: string; tabId: string; palette: ToolbarPalette }) {
-  const { hovered, hoverProps } = useHover();
+function OverflowButton({ windowId, tabId, palette, button }: { windowId: string; tabId: string; palette: ToolbarPalette; button: number }) {
   const { ref, measure } = useAnchor(windowId, tabId, "*");
   const onPress = async () => {
     const anchor = await measure();
-    const enabled = windowExtensions(useBrowser.getState(), windowId);
-    const choice = await showMenu([
-      ...enabled.map((x) => ({ id: `open:${x.id}`, title: x.name, symbol: x.pinned ? "pin.fill" : undefined })),
+    const enabled = currentWindowExtensions(windowId);
+    const choice = await chooseFromMenu<InstalledExtension, ExtensionListChoice>([
+      ...enabled.map((x) => ({ value: x, title: x.name, symbol: x.pinned ? "pin.fill" : undefined })),
       ...(enabled.length ? [{ separator: true as const }] : []),
-      { id: "pin", title: "Pin Extensions…", symbol: "pin" },
-      { id: "manage", title: "Manage Extensions…", symbol: "puzzlepiece.extension" },
-      { id: "add", title: "Add Extension…", symbol: "plus" },
+      ...EXTENSION_LIST_ITEMS,
     ]);
-    if (choice === "pin") return openPinDialog(windowId);
-    if (choice === "manage") return openManageExtensions(windowId);
-    if (choice === "add") return openWebStore(windowId);
-    const ext = choice?.startsWith("open:") ? enabled.find((x) => x.id === choice.slice(5)) : undefined;
-    if (ext) void activateExtension(windowId, ext, anchor, undefined, tabId);
+    if (choice && typeof choice === "object") void activateExtension(windowId, choice, anchor, undefined, tabId);
+    else runExtensionListChoice(choice, windowId);
   };
   return (
-    <View ref={ref} tooltip="Extensions" {...hoverProps} onLayout={() => void measure()}>
-      <Pressable onPress={onPress}>
-        {({ pressed }) => (
-          <View
-            style={{
-              width: BUTTON,
-              height: BUTTON,
-              borderRadius: 7,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: pressed ? palette.pressed : hovered ? palette.hover : undefined,
-            }}
-          >
-            <Symbol name="puzzlepiece.extension" size={14} color={palette.icon} style={{ width: 18, height: 18 }} />
-          </View>
-        )}
-      </Pressable>
+    <View ref={ref} onLayout={() => void measure()}>
+      <Button variant="icon" icon="puzzlepiece.extension" size={14} box={button} glyphBox={GLYPH_BOX} radius={radius.button} palette={palette} tooltip="Extensions" onPress={() => void onPress()} />
     </View>
   );
 }

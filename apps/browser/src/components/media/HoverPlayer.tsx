@@ -1,25 +1,21 @@
-import { Surface } from "@ardia/shell";
-import { hex, layout, useTheme } from "../../lib/theme";
-import { useBrowser, type BrowserState } from "../../store/browser";
-import { clickTab } from "../sidebar/actions";
-import { cardHoverProps, dismissHover } from "../sidebar/hover";
+import { devRegister } from "../dev/devRegister";
+import { Panel } from "../ui";
+import { layout } from "../ui/theme";
+import { clickTab } from "../../state/sidebar/actions";
+import { dismissHover } from "../../state/sidebar/hover";
+import { cardHoverProps } from "../sidebar/hoverController";
 import { hoverCardOrigin } from "../sidebar/hoverMotion";
-import { measureRow, setSidebarUi, type Anchor } from "../sidebar/state";
-import { useSidebarWidth } from "../sidebar/tokens";
+import { measureRow, setSidebarUi, type Anchor } from "../../state/sidebar/sidebarUi";
+import { useSidebarWidth } from "../../state/sidebar/hooks";
 import { MINI_PLAYER_HEIGHT, MINI_PLAYER_WIDTH, MiniPlayer } from "./MiniPlayer";
-import { useMedia, type Session } from "./state";
-import { useMediaTokens } from "./tokens";
-
-const pinnedWithControls = (s: BrowserState, tabId: string | undefined) => !!tabId && !!s.tabs[tabId]?.pinned && s.settings.sidebarMediaControls;
-const playable = (session: Session | undefined) => !!session && session.controllable && session.playbackState !== "none" && !!(session.title || session.artwork);
+import { playableSession, useMedia, usePinnedWithMediaControls } from "../../state/media/media";
+import { HOVER_CARD, useMediaTokens } from "./tokens";
 
 export function useShowsMiniPlayer(tabId: string | undefined): boolean {
-  const pinned = useBrowser((s) => pinnedWithControls(s, tabId));
-  const hasSession = useMedia((s) => playable(tabId ? s.sessions[tabId] : undefined));
+  const pinned = usePinnedWithMediaControls(tabId);
+  const hasSession = useMedia((s) => playableSession(tabId ? s.sessions[tabId] : undefined));
   return pinned && hasSession;
 }
-
-export const showsMiniPlayer = (tabId: string) => pinnedWithControls(useBrowser.getState(), tabId) && playable(useMedia.getState().sessions[tabId]);
 
 export function usePlayerEdge(windowId: string, anchor: Anchor | undefined): number {
   const sidebarWidth = useSidebarWidth(windowId);
@@ -27,20 +23,15 @@ export function usePlayerEdge(windowId: string, anchor: Anchor | undefined): num
 }
 
 export function HoverPlayer({ tabId, windowId, anchor }: { tabId: string; windowId: string; anchor: Anchor }) {
-  const theme = useTheme();
   const tokens = useMediaTokens();
   const edge = usePlayerEdge(windowId, anchor);
   return (
-    <Surface
+    <Panel
       {...cardHoverProps}
       fill={tokens.background}
-      cornerRadius={12}
-      borderColor={hex(tokens.border)}
-      borderWidth={0.5}
-      shadowColor="#000000"
-      shadowOpacity={theme.panelShadowOpacity * 0.8}
-      shadowRadius={16}
-      shadowOffset={[0, 6]}
+      radius={HOVER_CARD.radius}
+      border={tokens.border}
+      shadow={HOVER_CARD.shadow}
       style={{ position: "absolute", ...hoverCardOrigin(anchor, edge), width: MINI_PLAYER_WIDTH, height: MINI_PLAYER_HEIGHT }}
     >
       <MiniPlayer
@@ -50,15 +41,13 @@ export function HoverPlayer({ tabId, windowId, anchor }: { tabId: string; window
           clickTab(windowId, tabId);
         }}
       />
-    </Surface>
+    </Panel>
   );
 }
 
-if (__DEV__) {
-  (globalThis as { acMediaHover?: unknown }).acMediaHover = async (windowId: string, tabId: string | null) => {
-    if (!tabId) return setSidebarUi({ hover: null });
-    const anchor = await measureRow(windowId, tabId);
-    if (anchor) setSidebarUi({ hover: { windowId, kind: "tab", id: tabId, anchor } });
-    return anchor;
-  };
-}
+devRegister("acMediaHover", null, async (windowId: string, tabId: string | null) => {
+  if (!tabId) return setSidebarUi({ hover: null });
+  const anchor = await measureRow(windowId, tabId);
+  if (anchor) setSidebarUi({ hover: { windowId, kind: "tab", id: tabId, anchor } });
+  return anchor;
+});

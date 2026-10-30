@@ -1,22 +1,31 @@
-import { showMenu, Symbol } from "@ardia/shell";
-import { SyncNative, type FolderInfo } from "@ardia/sync";
+import { showMenu } from "../../../state/app/system";
+import { Symbol, Button, Checkbox, font, ink, Sheet } from "../../ui";
+import {
+  copyRecoveryKit,
+  copyRecoveryPhrase,
+  recoveryKitPreview,
+  recoveryQrCode,
+  recoveryWords,
+  saveRecoveryKit,
+  shareRecoveryKit,
+  type FolderInfo,
+} from "../../../state/sync/recoveryKit";
 import { useEffect, useState, type ReactNode } from "react";
 import { Image, StyleSheet, Text, TextInput, View } from "react-native";
-import { useTheme } from "../../../lib/theme";
-import { enterRecoveryPhrase, stopSync } from "../../../sync/engine";
-import { Button, Checkbox, Sheet, useFormColors } from "../controls";
-import { closeSettingsSheet, showSettingsSheet } from "../sheet";
+import { useTheme } from "../../ui/theme";
+import { addRemoteProfile, enterRecoveryPhrase, stopSync, useSync } from "../../../state/sync/engine";
+import type { RemoteProfile } from "../../../state/sync/syncDoc";
+import { ProfileBadge } from "../../profiles/ProfileIcons";
+import { Group, Row, SheetTitle } from "../Form";
+import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
+import { settingsType } from "../tokens";
+import { useSettingsColors } from "../useSettingsColors";
 
 const WORDS = 24;
 
-function Title({ children }: { children: string }) {
-  const theme = useTheme();
-  return <Text style={{ fontSize: 15, fontWeight: "600", color: theme.textPrimary }}>{children}</Text>;
-}
-
 function Body({ children, style }: { children: ReactNode; style?: object }) {
   const theme = useTheme();
-  return <Text style={[{ fontSize: 12.5, lineHeight: 17, marginTop: 6, color: theme.textSecondary }, style]}>{children}</Text>;
+  return <Text style={[{ ...settingsType.lead, lineHeight: 17, marginTop: 6, color: theme.textSecondary }, style]}>{children}</Text>;
 }
 
 function Buttons({ children, left }: { children: ReactNode; left?: ReactNode }) {
@@ -35,12 +44,12 @@ export function showRecoveryKit() {
 
 function RecoveryKitSheet() {
   const theme = useTheme();
-  const colors = useFormColors();
+  const look = useSettingsColors();
   const [preview, setPreview] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  useEffect(() => void SyncNative?.recoveryKitPreview(168).then(setPreview), []);
+  useEffect(() => void recoveryKitPreview(168)?.then(setPreview), []);
   const save = async (format: "pdf" | "text") => {
-    const path = await SyncNative?.saveRecoveryKit(format);
+    const path = await saveRecoveryKit(format);
     if (path) setSaved(path);
   };
   const more = async () => {
@@ -50,15 +59,15 @@ function RecoveryKitSheet() {
       { separator: true },
       { id: "text", title: "Save as Text…", symbol: "doc.plaintext" },
     ]);
-    if (choice === "copy") await SyncNative?.copyRecoveryKit();
-    else if (choice === "share") await SyncNative?.shareRecoveryKit();
+    if (choice === "copy") await copyRecoveryKit();
+    else if (choice === "share") await shareRecoveryKit();
     else if (choice === "text") await save("text");
   };
   return (
     <Sheet width={460} onClose={closeSettingsSheet}>
       <View style={{ flexDirection: "row", gap: 18 }}>
         <View style={{ flex: 1 }}>
-          <Title>Save Your Recovery Kit</Title>
+          <SheetTitle>Save Your Recovery Kit</SheetTitle>
           <Body>Your Recovery Kit contains all you need to recover your data should you lose access to this device.</Body>
           <View
             style={{
@@ -67,11 +76,11 @@ function RecoveryKitSheet() {
               marginTop: 14,
               padding: 10,
               borderRadius: 8,
-              backgroundColor: theme.dark ? "rgba(255,159,10,0.12)" : "rgba(255,149,0,0.1)",
+              backgroundColor: look.warningFill,
             }}
           >
-            <Symbol name="exclamationmark.triangle.fill" size={12} color="#FF9500" style={{ width: 16, height: 16 }} />
-            <Text style={{ flex: 1, fontSize: 12, lineHeight: 16, color: theme.textPrimary }}>
+            <Symbol name="exclamationmark.triangle.fill" size={12} color={theme.warning} style={{ width: 16, height: 16 }} />
+            <Text style={{ flex: 1, ...font.small, lineHeight: 16, color: theme.textPrimary }}>
               Save a copy of your Recovery Kit to{" "}
               <Text style={{ textDecorationLine: "underline" }}>another</Text> device or to the cloud. You’ll need it if you lose access to this device.
             </Text>
@@ -80,7 +89,7 @@ function RecoveryKitSheet() {
         </View>
         <View
           accessibilityLabel="Recovery kit preview"
-          style={{ width: 168, height: 217, borderRadius: 4, overflow: "hidden", borderWidth: 1, borderColor: colors.groupBorder, backgroundColor: "#FFFFFF" }}
+          style={{ width: 168, height: 217, borderRadius: 4, overflow: "hidden", borderWidth: 1, borderColor: theme.groupBorder, backgroundColor: ink.white }}
         >
           {preview ? <Image source={{ uri: preview }} style={{ width: 168, height: 217 }} /> : null}
         </View>
@@ -119,24 +128,28 @@ const phraseError = (r: Awaited<ReturnType<typeof enterRecoveryPhrase>>): string
 
 function PhraseSheet({ folder, onChooseFolder }: { folder: FolderInfo | null; onChooseFolder?: () => void }) {
   const theme = useTheme();
-  const colors = useFormColors();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [joined, setJoined] = useState(false);
+  const syncing = useSync((s) => s.enabled);
   const count = text.toLowerCase().split(/[^a-z]+/).filter(Boolean).length;
   const submit = async () => {
     if (!folder || busy) return;
     setBusy(true);
     setError(null);
+    const joining = !syncing;
     const result = await enterRecoveryPhrase(folder.path, text);
     setBusy(false);
     const message = phraseError(result);
     if (message) setError(message);
+    else if (joining) setJoined(true);
     else closeSettingsSheet();
   };
+  if (joined) return <JoinedSheet />;
   return (
     <Sheet width={440} onClose={closeSettingsSheet}>
-      <Title>Connect with Recovery Phrase</Title>
+      <SheetTitle>Connect with Recovery Phrase</SheetTitle>
       <Body>Enter your 24-word recovery phrase to sync with another device.</Body>
       <View
         style={{
@@ -144,9 +157,9 @@ function PhraseSheet({ folder, onChooseFolder }: { folder: FolderInfo | null; on
           height: 96,
           borderRadius: 7,
           padding: 8,
-          backgroundColor: colors.field,
+          backgroundColor: theme.field,
           borderWidth: StyleSheet.hairlineWidth * 2,
-          borderColor: error ? colors.destructive : colors.fieldBorder,
+          borderColor: error ? theme.destructive : theme.fieldBorder,
         }}
       >
         <TextInput
@@ -163,19 +176,19 @@ function PhraseSheet({ folder, onChooseFolder }: { folder: FolderInfo | null; on
           enableFocusRing={false}
           autoCorrect={false}
           spellCheck={false}
-          style={{ flex: 1, fontSize: 13, lineHeight: 18, color: theme.textPrimary, fontFamily: "Menlo" }}
+          style={{ flex: 1, ...font.body, lineHeight: 18, color: theme.textPrimary, fontFamily: "Menlo" }}
         />
       </View>
       <View style={{ flexDirection: "row", marginTop: 6 }}>
-        <Text style={{ flex: 1, fontSize: 11.5, lineHeight: 15, color: error ? colors.destructive : theme.textSecondary }}>{error ?? ""}</Text>
-        <Text style={{ fontSize: 11.5, color: count > WORDS ? colors.destructive : theme.textTertiary, fontVariant: ["tabular-nums"] }}>
+        <Text style={{ flex: 1, ...font.footnote, lineHeight: 15, color: error ? theme.destructive : theme.textSecondary }}>{error ?? ""}</Text>
+        <Text style={{ ...font.footnote, color: count > WORDS ? theme.destructive : theme.textTertiary, fontVariant: ["tabular-nums"] }}>
           {count > WORDS ? "too many words" : `${count}/${WORDS} words`}
         </Text>
       </View>
       {folder ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10 }}>
           <Symbol name="folder" size={11} color={theme.textSecondary} style={{ width: 14, height: 14 }} />
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 11.5, color: theme.textSecondary }}>
+          <Text numberOfLines={1} style={{ flex: 1, ...font.footnote, color: theme.textSecondary }}>
             {folderLabel(folder)}
           </Text>
           {onChooseFolder ? <Button title="Change…" kind="plain" onPress={onChooseFolder} /> : null}
@@ -189,35 +202,93 @@ function PhraseSheet({ folder, onChooseFolder }: { folder: FolderInfo | null; on
   );
 }
 
+export function remoteProfileDescription(p: Pick<RemoteProfile, "sharesWith" | "waiting">): string {
+  if (p.waiting) return "On your other devices. Waiting for the profile it shares data with to sync.";
+  if (!p.sharesWith) return "On your other devices";
+  const { name, added } = p.sharesWith;
+  return added ? `On your other devices. Shares data with ${name}, which is added too.` : `On your other devices. Shares data with ${name}.`;
+}
+
+export function addAllRemoteProfiles(profiles: RemoteProfile[]) {
+  for (const p of profiles) if (!p.waiting) addRemoteProfile(p.syncId);
+}
+
+export function RemoteProfileRow({ profile }: { profile: RemoteProfile }) {
+  return (
+    <Row
+      icon={<ProfileBadge profile={{ name: profile.name, color: profile.color, icon: profile.icon }} size={24} />}
+      title={profile.name}
+      description={remoteProfileDescription(profile)}
+    >
+      <Button title="Add to This Mac" disabled={!!profile.waiting} onPress={() => addRemoteProfile(profile.syncId)} />
+    </Row>
+  );
+}
+
+export function lookingForProfiles(pending: number): string {
+  const looking = "Looking for the profiles on your other devices…";
+  return pending ? `${looking} Waiting for ${pending === 1 ? "1 file" : `${pending} files`} to download.` : looking;
+}
+
+function joinedMessage(found: number, joining: boolean, pending: number, error: string | null): string {
+  if (found) return "These profiles are on your other devices. Add them to this Mac to sync their pinned tabs, bookmarks, history and passwords here too.";
+  if (error) return error;
+  if (joining) return lookingForProfiles(pending);
+  return "Every profile on your other devices is on this Mac too.";
+}
+
+function JoinedSheet() {
+  const remote = useSync((s) => s.remoteProfiles);
+  const joining = useSync((s) => s.joining);
+  const pending = useSync((s) => s.pending);
+  const error = useSync((s) => (s.status === "stalled" ? s.error : null));
+  const addable = remote.filter((p) => !p.waiting).length;
+  return (
+    <Sheet width={460} onClose={closeSettingsSheet}>
+      <SheetTitle>This Mac Is Syncing</SheetTitle>
+      <Body>{joinedMessage(remote.length, joining, pending, error)}</Body>
+      {remote.length ? (
+        <Group style={{ marginTop: 14 }}>
+          {remote.map((p) => (
+            <RemoteProfileRow key={p.syncId} profile={p} />
+          ))}
+        </Group>
+      ) : null}
+      <Buttons>
+        <Button title="Done" kind={addable > 1 ? "default" : "primary"} onPress={closeSettingsSheet} />
+        {addable > 1 ? <Button title="Add All" kind="primary" onPress={() => addAllRemoteProfiles(remote)} /> : null}
+      </Buttons>
+    </Sheet>
+  );
+}
+
 export function showConnectDevice() {
   showSettingsSheet(<ConnectDeviceSheet />);
 }
 
 function ConnectDeviceSheet() {
   const theme = useTheme();
-  const colors = useFormColors();
   const [qr, setQr] = useState<string | null>(null);
   const [words, setWords] = useState<string[] | null>(null);
-  useEffect(() => void SyncNative?.qrCode().then(setQr), []);
   return (
     <Sheet width={480} onClose={closeSettingsSheet}>
-      <Title>Connect Another Device</Title>
+      <SheetTitle>Connect Another Device</SheetTitle>
       <Body>
         On your other Mac, open Ardia › Settings › Sync and choose the same sync folder. Then click Enter Recovery Phrase and enter the 24 words
         of your recovery phrase.
       </Body>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 16 }}>
-        <View style={{ width: 132, height: 132, borderRadius: 8, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" }}>
-          {qr ? <Image source={{ uri: qr }} style={{ width: 120, height: 120 }} /> : null}
+        <View style={{ width: 132, height: 132, borderRadius: 8, backgroundColor: ink.white, alignItems: "center", justifyContent: "center" }}>
+          {qr ? <Image source={{ uri: qr }} style={{ width: 120, height: 120 }} /> : <Button title="Show Code" onPress={() => void recoveryQrCode()?.then(setQr)} />}
         </View>
-        <Text style={{ flex: 1, fontSize: 12, lineHeight: 16, color: theme.textSecondary }}>
+        <Text style={{ flex: 1, ...font.small, lineHeight: 16, color: theme.textSecondary }}>
           Or scan this code with your iPhone’s camera to copy the words, then paste them on your other Mac with Universal Clipboard.
         </Text>
       </View>
       {words ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 14, padding: 10, borderRadius: 8, backgroundColor: colors.group }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 14, padding: 10, borderRadius: 8, backgroundColor: theme.groupFill }}>
           {words.map((w, i) => (
-            <Text key={i} style={{ width: "25%", paddingVertical: 3, fontSize: 12.5, color: theme.textPrimary, fontFamily: "Menlo" }}>
+            <Text key={i} style={{ width: "25%", paddingVertical: 3, ...settingsType.lead, color: theme.textPrimary, fontFamily: "Menlo" }}>
               <Text style={{ color: theme.textTertiary }}>{`${i + 1}`.padStart(2, " ")} </Text>
               {w}
             </Text>
@@ -227,8 +298,8 @@ function ConnectDeviceSheet() {
       <Buttons
         left={
           <>
-            <Button title={words ? "Hide Words" : "Show Words"} onPress={() => (words ? setWords(null) : void SyncNative?.recoveryWords().then(setWords))} />
-            <Button title="Copy Words" onPress={() => void SyncNative?.copyRecoveryPhrase()} />
+            <Button title={words ? "Hide Words" : "Show Words"} onPress={() => (words ? setWords(null) : void recoveryWords()?.then(setWords))} />
+            <Button title="Copy Words" onPress={() => void copyRecoveryPhrase()} />
           </>
         }
       >
@@ -245,7 +316,7 @@ export function showStopSync() {
 function StopSheet() {
   return (
     <Sheet width={420} onClose={closeSettingsSheet}>
-      <Title>Stop Syncing This Device?</Title>
+      <SheetTitle>Stop Syncing This Device?</SheetTitle>
       <Body>
         Syncing will stop on this device. To re-enable sync, you’ll need another device that is currently syncing, or the recovery phrase from your
         Recovery Kit. Everything on this Mac stays as it is.
@@ -268,7 +339,7 @@ function DeleteDataSheet() {
   };
   return (
     <Sheet width={420} onClose={() => void finish(false)}>
-      <Title>Delete Sync Data?</Title>
+      <SheetTitle>Delete Sync Data?</SheetTitle>
       <Body>
         Would you also like to permanently delete your synced data from the sync folder? This will stop syncing on all your other devices too. To sync
         again, you’ll need to set up each device from scratch. Your data on each Mac stays.

@@ -26,6 +26,8 @@ Code:
   - `order.ts`: fractional positions.
 - `apps/browser/src/sync`:
   - `adapters.ts`: store ↔ records.
+  - `pinned.ts`: the pinned area (`pt:n:`, `tilefold:`). `pinnedAreaAdapters` gives its two adapters in the order they
+    run: the pinned tree, then tile folders.
   - `engine.ts`: state, setup flows, the cycle.
   - `menu.ts`: the overflow menu's synced devices.
 - `apps/browser/src/components/settings/panes/Sync.tsx` and `SyncSheets.tsx`: Settings › Sync.
@@ -88,6 +90,13 @@ reset by email, because there's no one to email.
     shows "not syncing" with Enter Recovery Phrase…, and the same device carries on.
 - The key never crosses to JS. The words do, only for the Recovery Kit and Connect Another Device
   sheets, or when the user types them.
+- Every native call that hands out the phrase (Show Words, the QR code, Save, Save as Text, Copy
+  and Share of the kit, Copy Words, Copy Recovery Code) first asks macOS for device-owner
+  authentication (Touch ID or the login password). A success is good for 60 s, like the
+  Passwords pane; Stop Syncing ends it early. Cancelling returns nothing and changes nothing.
+  The kit preview in the sheet is drawn with dots instead of the words. Hidden test instances
+  never prompt: `ARDIA_TEST=reauth=granted` grants, anything else denies (#241).
+- The temporary kit for Copy and Share (`$TMPDIR/Ardia Recovery Kit/`) is deleted at launch.
 
 A wrong phrase is caught in one of two ways. A typo fails the checksum. A valid but different
 phrase derives a chain tag that isn't in the folder: "This recovery phrase doesn’t match the
@@ -129,7 +138,14 @@ Writing:
   saved state and the next cycle writes them again, byte for byte, before anything new. If the
   first write did land, the folder has the same batch twice, which reads as a no-op on every
   version. The journal is local only (no format change) and is emptied once the saved state
-  has its batches.
+  has its batches. Every journal and state write goes through one queue (`syncFiles.ts`), so a
+  state save takes its snapshot, the last part it covers and the clock when its turn comes, and
+  removes the parts only after it has landed. Quitting waits for that queue, with the state saved
+  last, for up to 3 s before the app answers the quit (`saveBeforeQuit`). From the moment the app starts quitting,
+  sync applies nothing (`holdApply`; no pairing or extension installs either, and an apply already waiting on Chrome, an
+  extension install or a password save, checks again after each wait and stops, leaving its records unapplied): what a pull brings during the wait
+  stays unapplied and the scope doesn't switch to joined, so the saved state never holds a base ahead of the session
+  saved when quitting began (tested).
 
 Reading (`SyncVault.read`) handles files that aren't there in full yet:
 - iCloud placeholders (`.<id>.nns.icloud` stubs, or dataless files whose
@@ -226,7 +242,16 @@ separated on the next publish.
 Per profile: each synced profile is its own scope, with its own opt-in (Settings › Sync ›
 Profiles).
 - On joining, Personal pairs with the synced default profile and other profiles pair by name.
-- A synced profile this Mac lacks is offered as "Add to This Mac".
+  - Pairing waits until the folder shows what to pair with: the synced default profile's record, or other profiles'
+    records with nothing left downloading or damaged in the app scope. A Mac that joined while the other Mac hadn't
+    written its profiles yet, or while iCloud Drive was still downloading that file, used to pair with what it had
+    read so far: Personal got an id of its own, received none of the other Mac's Personal data, and both Macs then
+    offered the other's Personal as a new profile (#514). A day after joining it pairs with whatever it has, so a folder
+    whose other devices sync no profile doesn't keep it waiting. Until it pairs, no profile is offered to add. Known
+    residuals: once the default record is in, other profiles pair by name with what has arrived, even while a file
+    with a later profile is still downloading; and a Mac that paired early before this fix keeps its pairing, with two
+    default records left in the folder.
+- A synced profile this Mac lacks is offered as "Add to This Mac", with "Add All" when there are several.
 - Profiles that share another's data (Dia's "Share data with another profile") sync their tabs;
   the shared data syncs with the profile that owns it.
 - Which profile's data a profile shares travels as `share:<sync id>` (the owner's sync id), so "Add to This Mac" makes
@@ -237,10 +262,13 @@ Profiles).
   alike. A profile already here keeps the data it has.
 - A profile's sharing is fixed for its life, so `share:` is written once: a Mac publishes it for a profile that shares a
   synced owner's data only while the scope has no record of that key (one a 0.2.38 Mac kept unapplied counts), and
-  only once this session has pulled the app scope with no download and no damaged file still unresolved
-  (`publishAfterPull`; either stops counting after a day, a download from when the scope first saw it pending, kept as
-  `pendingSince`; a time ahead of the clock counts as now, so a file iCloud never brings down can't hold it back for good), so a Mac back on an older saved
-  state sees what's out there first. A sharing profile's `prof:` goes out with its `share:`, in the same batch, so no
+  only after the cycle's own pull of the app scope, and only when that pull left no download and no damaged file
+  unresolved (`publishAfterPull`, decided in `fileHealth.ts`; a download stops counting a day after the scope first saw
+  it pending, kept as `pendingSince`, and a damaged file is set aside a day after it was first damaged, kept in
+  `damaged`, whatever it did in between; a time ahead of the clock counts as now, so a file iCloud never brings down
+  can't hold it back for good), so a Mac back on an older saved state sees what's out there first. Such an adapter
+  still takes its timestamps in the cycle's first pass, before the pull, so a newer edit from another Mac pulled in
+  the same cycle beats an older one held back here. A sharing profile's `prof:` goes out with its `share:`, in the same batch, so no
   Mac offers it without its sharing. Never as a tombstone, so a deleted profile offered again by "Add to This Mac"
   shares as before, and never over a value this Mac has. Known residual: a value another Mac published that this Mac
   hasn't pulled yet can lose to this Mac's, when a profile's owner starts syncing here mid-session (the cycle's first
@@ -251,9 +279,9 @@ Profiles).
 
 | Key | Scope | What | Notes |
 |---|---|---|---|
-| `set:<name>` | app | the settings that follow the user (`SYNCED_SETTINGS`: search engine and custom engines, appearance, address bar, tab layout and behaviour, bookmarks bar, full URL, muted sites, clean-up, keyboard shortcuts…) | not window sizes, battery saver, extension engines or the default profile id |
+| `set:<name>` | app | the settings that follow the user (`SYNCED_SETTINGS`: search engine and custom engines, appearance, address bar, tab layout and behaviour, bookmarks bar, full URL, muted sites, clean-up, keyboard shortcuts…) | not window sizes, battery saver, extension engines or the default profile id. A setting this Mac doesn't follow yet (one added in a newer version, received while it ran an older one, which counted it applied) takes the synced value once it does, unless it was chosen on this Mac: each time the saved state loads (an update always relaunches), any synced setting whose value differs from this Mac's and that this Mac never chose goes back to the settings adapter, and waits there while settings sync is off (tested) |
 | `prof:<sync id>` | app | a profile's name, colour, icon (`d` for the default) | deleting a profile on one Mac doesn't delete it on another. A `th` field written by development builds of 0.2.40 is read once, as the profile's theme, when it has none |
-| `pth:<sync id>` | app | a profile's custom theme `{ t }`, or `{ preset: true }` after going back to a preset colour | its own record, so a rename and a theme change on two Macs both survive, and Macs before 0.2.40, which rebuild `prof:` from what they know, never strip or republish it (tested with a 0.2.38 adapter). Written once a profile has had a custom theme. A profile paired on joining takes the synced theme (or a legacy `th`) before it can publish its own, and a legacy `th` never applies once a `pth:` record is known (tested). A profile paired on joining or added from sync is adopting (`themeAdopting` on its link in `sync-v2.json`, so a restart keeps it): its theme isn't published, with no time limit, until its `pth:` record is applied (also by an older build: a valid `pth:` already in the base ends it at launch and on each cycle), a pull with nothing downloading, damaged or given up as bad shows there is none, or the user edits its theme or picks a preset on this Mac. Turning the profile's sync off and on keeps it adopting. Other profiles, and links from before this flag, publish edits at once, whatever else is still downloading; none publishes over a `pth:` record that has arrived but isn't applied yet (tested). Older Macs keep showing the preset colour, which choosing a custom theme doesn't change |
+| `pth:<sync id>` | app | a profile's custom theme `{ t }`, or `{ preset: true }` after going back to a preset colour | its own record, so a rename and a theme change on two Macs both survive, and Macs before 0.2.40, which rebuild `prof:` from what they know, never strip or republish it (tested with a 0.2.38 adapter). Written once a profile has had a custom theme. A profile paired on joining takes the synced theme (or a legacy `th`) before it can publish its own, and a legacy `th` never applies once a `pth:` record is known (tested). A profile paired on joining or added from sync is adopting (`themeAdopting` on its link in `sync-v2.json`, so a restart keeps it): its theme isn't published, with no time limit, until its `pth:` record is applied (also by an older build: a valid `pth:` already in the base ends it when the state loads and after each app-scope sync), a pull with nothing downloading, damaged or given up as bad shows there is none, or the user edits its theme or picks a preset on this Mac. Every change to the flag is made in `syncThemes.ts`, the same as v0.2.43-nightly.4 would (tested against its code). Turning the profile's sync off and on keeps it adopting. Other profiles, and links from before this flag, publish edits at once, whatever else is still downloading; none publishes over a `pth:` record that has arrived but isn't applied yet (tested). Older Macs keep showing the preset colour, which choosing a custom theme doesn't change |
 | `share:<sync id>` | app | `{ o }`: the sync id of the profile whose data this one shares | its own key, not a field of `prof:`, so Macs before 0.2.39 keep it untouched instead of republishing `prof:` without it on every cycle; written once, while both sync; never deleted |
 | `dev:<device id>` | app | a device's name | removed when it stops syncing |
 | `bm:<sync key>` | profile | `{ k, p (parent: its sync key, "bar" or "other"), t, u, a (added), pos }` | Bookmarks are Chrome's (BookmarkModel). A node's sync key is its Chrome UUID, or, for a bookmark synced before 0.2.20, its old id (`bm-…`, kept on Chrome's node as meta info `ac_sync_key`); every Mac makes an old key the node `bookmarkUuidFor` gives it, so Macs on either version name a bookmark alike (no renames, no duplicates; tested). Favicons stay local. A node whose folder was deleted elsewhere lands in Other Bookmarks; a cycle from two concurrent moves is broken the same way on every Mac (tested). Nothing is published or applied until the tree has been read from Chrome |
@@ -267,7 +295,7 @@ Profiles).
 ### Extensions
 
 What Chrome Sync does for extensions, through our folder (`packages/sync/src/extensions.ts`, the app's host in
-`apps/browser/src/sync/extensions.ts`, Chrome's side in `engine/chromium/…/ardia/ac_extensions_sync.cc`).
+`apps/browser/src/state/sync/extensions.ts`, Chrome's side in `engine/chromium/…/ardia/ac_extensions_sync.cc`).
 - **What syncs.** Extensions from the Chrome Web Store that Chrome itself would sync (`sync_util::ShouldSync`:
   installed by the user from the store, not by default, policy or a component, not blocklisted, no other update
   URL), and not themes or apps. Unpacked extensions, Ardia Scripts and uBlock Origin (bundled) stay on their Mac. Per
@@ -306,13 +334,38 @@ What Chrome Sync does for extensions, through our folder (`packages/sync/src/ext
 
 Saved passwords are Chrome's (its password manager).
 - **Reading.** Chrome's own API (`passwordsPrivate`) reveals a password only after device
-  authentication, so sync reads the profile's `Login Data` with the importer's reader
-  (`ChromiumSecrets`, `packages/import`). Chrome's key is its "Ardia Safe Storage" item, or
-  the mock keychain's where ArdiaCoreHost uses that (test instances, ad hoc builds). No Touch ID prompt is needed each cycle, and no
-  Chromium change.
-- **Writing.** Writes go through Chrome's API (`savePassword`, `deletePassword` in
-  `@ardia/ardiacore`), so Chrome's in-memory store and autofill see them at once. A changed
-  password is a delete plus an add: the update API needs the device check.
+  authentication, so sync asks the engine instead: `ac_passwords_logins` reads both of the profile's password stores
+  through Chrome's `PasswordStoreInterface::GetAllLogins`, with no Touch ID prompt. The reply is built in one buffer
+  that is wiped after it is sent, the bridge parses it from bytes it then wipes, and every `PasswordString` Chrome
+  made for the read is zeroed when it goes (`chromium-password-string-erase.patch`). The strings Foundation parses
+  can't be wiped; they live until the seal.
+- **All or nothing.** A list reaches the adapter only when the engine answered with one. On the Mac one password that
+  doesn't decrypt fails Chrome's whole read (`SkipUndecryptablePasswords` is off there, and nothing is deleted:
+  Chrome never clears undecryptable passwords when `--user-data-dir` is set, which ArdiaHost always sets), and the
+  engine refuses to read at all with that feature on. A store error, the profile going away mid-read, no reply within
+  30 s or a malformed entry all give `null`, so the cycle skips passwords and nothing is tombstoned.
+- **Sealed for JS.** Plain passwords never reach JS (#241). The native read gives JS each login's
+  origin, username, creation time and the password sealed with the sync key (AES-256-GCM, its
+  own HKDF key, bound to origin and username). The nonce is an HMAC of the login and password,
+  so the same password seals the same on every Mac and the adapter can compare without opening
+  it. Applying a remote password hands the sealed value back to `ArdiaSync.savePassword`, which
+  opens it for that login only and writes through Chrome's API.
+- **Keys.** Records are `pws:<origin>\n<username>` → `{ o, u, s }`. Builds before this used
+  `pw:` with the plain password; new builds ignore `pw:` records and never tombstone them, so a
+  Mac still on an old build keeps its passwords and syncs them only with other old builds until
+  it updates. Those legacy records still never reach JS in the clear: `read` and `openLocal`
+  seal each `pw:` value's `p` into `s` the same way and drop `pw:` entries from the local base,
+  and `write` opens `s` back into `p`, so the folder keeps the old format and an old build's
+  records survive a new build's compaction unchanged. The next local state checkpoint holds only
+  the sealed form. A document with `pw:` records that can't be parsed or sealed (after replacing
+  lone surrogate escapes, which `JSONSerialization` rejects) is never handed over in the clear:
+  a folder file is reported as damaged, and a local state or journal file reads as missing while
+  `sealLocal` and `write` refuse for the rest of the session, so the files on disk and the
+  folder stay as they were and sync shows an error instead of saving a rebuilt state over them.
+- **Writing.** Writes go through Chrome's API (`ArdiaServices.savePassword` from the sync module,
+  `deletePassword` in `@ardia/ardiacore`), so Chrome's in-memory store and autofill see them at
+  once. A changed password is a delete plus an add, done natively only after the sealed value
+  opens: the update API needs the device check.
 - **Safety.**
   - A read that finds any row it can't decrypt is skipped (a partial list would read as
     deletions).
@@ -321,7 +374,7 @@ Saved passwords are Chrome's (its password manager).
   - A login changed here but not read yet isn't overwritten.
   - Turning sync off, or turning Passwords off, never removes a password. Only a password
     deleted on another Mac is deleted here.
-- **Cadence.** Passwords are read at most every 30 s (and at once with Sync Now).
+- **Cadence.** Passwords are read at most every 30 s (and at once with Sync Now; pressed while a cycle runs, the cycle after it reads them).
 
 ## UX (from Dia's binary)
 
@@ -345,6 +398,9 @@ Settings › Sync. Dia puts sync in Account › Sync, with the section icon
   - Dia's copy: "Enter your 24-word recovery phrase to sync with another device.", the
     placeholder "Enter your 24-word recovery phrase", the "%d/%d words" counter, "too many
     words", and Connect / "Connecting…" / Cancel.
+  - Once connected, the sheet says "This Mac Is Syncing" and lists the synced profiles this Mac lacks, each with Add
+    to This Mac, and Add All (Settings › Sync › Profiles offers the same). Until the profiles have paired it says
+    "Looking for the profiles on your other devices…", with the files still downloading.
   - It also shows the folder the phrase is checked against, with Change….
 - **On.**
   - The status line uses Dia's words: "starting up", "updating", "updated just now", "not
@@ -374,7 +430,7 @@ Settings › Sync. Dia puts sync in Account › Sync, with the section icon
 
 ## Cycle
 
-The engine (`apps/browser/src/sync/engine.ts`) runs a cycle 15 s after the last one, 3 s after a
+The engine (`apps/browser/src/state/sync/engine.ts`) runs a cycle 15 s after the last one, 3 s after a
 bookmark, settings, profile or group edit, and on Sync Now. A cycle:
 1. Checks the chain folder: gone means reset elsewhere; the folder missing means offline.
 2. Syncs the app scope and links profiles.
@@ -413,9 +469,10 @@ The barrier is strict, so it can wait indefinitely: a file in a scope that stays
     an old snapshot put back after its tombstones were collected; a tombstone kept past its age
     limit while an older log is missing, for twice the limit at most; a write that fails before or
     after the file lands; 40 randomized three-device runs with flaky delivery, compaction and crashes.
-- `pnpm --filter @ardia/browser test` runs `src/sync/adapters.test.mjs` (4 tests against the real
+- `pnpm --filter @ardia/browser test` runs `src/state/sync/adapters.test.mjs` (4 tests against the real
   store: delete versus add, concurrent moves that would make a cycle, parked pinned tabs, passwords
-  both ways) and `src/sync/engine.test.mjs` (the engine against a fake native module: a crash the
+  both ways), `src/state/sync/pairs.test.mjs` and `src/state/sync/tileFolders.test.mjs` (the pinned tree, `pt:n:`, with
+  its tile folders) and `src/state/sync/engine.test.mjs` (the engine against a fake native module: a crash the
   moment a batch lands re-sends the journalled batches byte for byte and numbers the next one after
   them; nothing is published before its journal is on disk).
 - End to end: `node packages/sync/scripts/e2e.mjs [Debug app] [work dir]` drives two hidden

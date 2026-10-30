@@ -1,31 +1,21 @@
-import { ContextMenuArea, copyText, showMenu, Symbol } from "@ardia/shell";
 import { memo, useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { useShallow } from "zustand/react/shallow";
-import { layout, useTheme } from "../../lib/theme";
-import { archivedEntries, type ArchivedRow } from "../../store/archive";
-import { useBrowser } from "../../store/browser";
-import { plural } from "../../store/model";
+import { copyText, showMenu } from "../../state/app/system";
+import { plural } from "../../state/browser/model";
+import { groupByDay, type ArchiveFilter } from "../../state/library/groups";
+import { useArchivedRows } from "../../state/library/hooks";
+import type { ArchivedRow } from "../../state/pins/archive";
+import { restoreArchived } from "../../state/windows/actions";
+import { Favicon } from "../favicon/Favicon";
 import { hostLabel, matchesQuery } from "../pages/PageLayout";
-import { Favicon, IconButton, useHover } from "../primitives";
+import { Button, ContextMenuArea, layout, Symbol, useHover, useTheme, weight } from "../ui";
 import { LibraryEmpty, LibraryGroupTitle } from "./DownloadsSection";
-import { groupByDay, LIBRARY_ROW, type ArchiveFilter } from "./groups";
+import { LIBRARY_ROW } from "./tokens";
 
 const ICON = 16;
 
 export function ArchivedSection({ windowId, query, filter }: { windowId: string; query: string; filter: ArchiveFilter }) {
-  const inputs = useBrowser(
-    useShallow((s) => ({
-      windows: s.windows,
-      tabs: s.tabs,
-      parkedPins: s.parkedPins,
-      closedTabs: s.closedTabs,
-      closedGroups: s.closedGroups,
-      cleanedTabs: s.cleanedTabs,
-      privateCleanedTabs: s.privateCleanedTabs,
-    })),
-  );
-  const rows = useMemo(() => archivedEntries(inputs, windowId), [inputs, windowId]);
+  const rows = useArchivedRows(windowId);
   const groups = useMemo(() => {
     const shown = rows.filter((r) => (filter === "all" || r.source === filter) && matchesQuery(query, r.title, r.url));
     return groupByDay(shown, (r) => r.closedAt);
@@ -45,7 +35,7 @@ export function ArchivedSection({ windowId, query, filter }: { windowId: string;
   );
 }
 
-const restore = (windowId: string, key: string) => useBrowser.getState().restoreArchived(windowId, key);
+const restore = (windowId: string, key: string) => restoreArchived(windowId, key);
 
 async function archivedMenu(windowId: string, row: ArchivedRow) {
   const choice = await showMenu([{ id: "restore", title: "Restore" }, ...(row.source !== "closedGroup" && row.url ? [{ id: "copy", title: "Copy Link" }] : [])]);
@@ -71,7 +61,7 @@ const ArchivedRowItem = memo(function ArchivedRowItem({ row, windowId }: { row: 
           )}
         </View>
         <View style={{ flex: 1, gap: 2 }}>
-          <Text numberOfLines={1} style={{ fontSize: 13.5, fontWeight: "500", color: theme.textPrimary }}>
+          <Text numberOfLines={1} style={{ fontSize: 13.5, fontWeight: weight.medium, color: theme.textPrimary }}>
             {row.title}
           </Text>
           <Text numberOfLines={1} style={{ fontSize: 12, color: theme.textSecondary }}>
@@ -79,7 +69,7 @@ const ArchivedRowItem = memo(function ArchivedRowItem({ row, windowId }: { row: 
           </Text>
         </View>
         <View pointerEvents={hovered ? "auto" : "none"} style={{ opacity: hovered ? 1 : 0 }}>
-          <IconButton icon="arrow.uturn.backward" size={13} box={26} radius={6} onPress={() => restore(windowId, row.key)} tooltip="Restore" />
+          <Button variant="icon" icon="arrow.uturn.backward" size={13} box={26} radius={6} onPress={() => restore(windowId, row.key)} tooltip="Restore" />
         </View>
       </View>
     </ContextMenuArea>

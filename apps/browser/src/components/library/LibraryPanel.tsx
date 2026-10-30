@@ -1,15 +1,14 @@
-import { ContextMenuArea, showMenu, Symbol, WindowDragRegion } from "@ardia/shell";
 import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON } from "../layout/windowLayout";
-import { IconButton, useHover } from "../primitives";
+import { showMenu } from "../../state/app/system";
+import { ARCHIVE_FILTERS, DOWNLOAD_FILTERS } from "../../state/library/groups";
+import { closeLibrary, libraryOpenings, libraryVisible, updateLibrary, type LibrarySection, type LibraryView } from "../../state/library/store";
+import { clearArchive } from "../../state/windows/actions";
+import { SIDEBAR_FIELD, SIDEBAR_FOOTER_BUTTON } from "../sidebar/geometry";
 import { useSidebarTokens } from "../sidebar/tokens";
+import { Button, ContextMenuArea, layout, Symbol, useHover, useTheme, weight, WindowDragRegion } from "../ui";
 import { ArchivedSection } from "./ArchivedSection";
 import { DownloadsSection } from "./DownloadsSection";
-import { ARCHIVE_FILTERS, DOWNLOAD_FILTERS } from "./groups";
-import { closeLibrary, libraryOpenings, libraryVisible, updateLibrary, type LibrarySection, type LibraryView } from "./store";
 
 const TILE_HEIGHT = 76;
 const TILE_GAP = 24;
@@ -69,7 +68,7 @@ export function LibraryPanel({ windowId, width, view, active }: { windowId: stri
           ))}
         </View>
         <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
-          <IconButton icon="arrow.left" size={16} weight="medium" color={theme.textSecondary} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Back" onPress={() => closeLibrary(windowId)} />
+          <Button variant="icon" icon="arrow.left" size={16} weight="medium" color={theme.textSecondary} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Back" onPress={() => closeLibrary(windowId)} />
         </View>
       </View>
       <View style={{ flex: 1, paddingRight: layout.sidebarInset }}>
@@ -111,7 +110,7 @@ export function LibraryPanel({ windowId, width, view, active }: { windowId: stri
 
 async function archiveMenu(windowId: string, opening: number) {
   const choice = await showMenu([{ id: "clear", title: "Clear Archive" }]);
-  if (choice === "clear" && libraryVisible(windowId) && libraryOpenings(windowId) === opening) useBrowser.getState().clearArchive(windowId);
+  if (choice === "clear" && libraryVisible(windowId) && libraryOpenings(windowId) === opening) clearArchive(windowId);
 }
 
 function RailTile({ title, icon, selected, fill, onPress, onContextMenu }: { title: string; icon: string; selected: boolean; fill: string; onPress: () => void; onContextMenu?: () => void }) {
@@ -125,7 +124,7 @@ function RailTile({ title, icon, selected, fill, onPress, onContextMenu }: { tit
         style={{ height: TILE_HEIGHT, alignItems: "center", justifyContent: "center", gap: 6, borderRadius: layout.rowRadius, backgroundColor: selected ? fill : hovered ? theme.tabHover : undefined }}
       >
         <Symbol name={icon} size={20} weight="medium" color={selected ? theme.textPrimary : theme.textSecondary} style={{ width: 24, height: 24 }} />
-        <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: "600", color: selected ? theme.textPrimary : theme.textSecondary }}>
+        <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: weight.semibold, color: selected ? theme.textPrimary : theme.textSecondary }}>
           {title}
         </Text>
       </Pressable>

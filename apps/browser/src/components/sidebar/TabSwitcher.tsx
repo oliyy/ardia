@@ -1,14 +1,15 @@
-import { Surface } from "@ardia/shell";
+import { tabTitle } from "../../state/browser/model";
 import { useEffect, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { lastPicture, refreshPicture } from "../../lib/tabPictures";
-import { hex, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import type { Tab } from "../../store/types";
-import { tabTitle } from "./actions";
-import { useSidebarUi } from "./state";
-import { commitSwitcher, hoverSwitcherRow, leaveSwitcherRow } from "./switcher";
+import { Panel, weight } from "../ui";
+import { useTheme } from "../ui/theme";
+import { useTab } from "../../state/browser/hooks";
+import type { Tab } from "../../state/browser/types";
+import { useSidebarUi } from "../../state/sidebar/sidebarUi";
+import { commitSwitcher, hoverSwitcherRow, leaveSwitcherRow } from "../../state/sidebar/switcher";
+import { lastPicture, refreshPicture } from "../../state/tabs/tabPictures";
 import { TabIcon } from "./TabIcon";
+import { SIDEBAR_SHADOW, SWITCHER_CARD_COLORS } from "./tokens";
 
 const MAX_CARDS = 5;
 const MARGIN = 20;
@@ -25,10 +26,7 @@ const FAVICON_LEFT = 13.75;
 const TITLE_GAP = 7.5;
 const TITLE_SIZE = 13.75;
 const PLACEHOLDER_ICON = 30;
-const DARK_FILL = "#1A1A1A";
-const SELECTED_UNDER = { dark: "#404040", light: "#FFFFFF" };
 const SELECTED_TINT = 0.45;
-const PREVIEW_EMPTY = { dark: "rgba(255,255,255,0.06)", light: "rgba(0,0,0,0.05)" };
 
 export function TabSwitcher({ windowId, windowWidth, windowHeight }: { windowId: string; windowWidth: number; windowHeight: number }) {
   const theme = useTheme();
@@ -41,21 +39,17 @@ export function TabSwitcher({ windowId, windowWidth, windowHeight }: { windowId:
   const width = shown.length * CARD_WIDTH + 2 * PADDING;
   const height = CARD_HEIGHT + 2 * PADDING;
   return (
-    <Surface
-      fill={hex(theme.dark ? DARK_FILL : theme.panel)}
-      cornerRadius={RADIUS}
-      borderColor={hex(theme.panelBorder)}
-      borderWidth={0.5}
-      shadowColor="#000000"
-      shadowOpacity={theme.panelShadowOpacity}
-      shadowRadius={35}
-      shadowOffset={[0, 15]}
+    <Panel
+      fill={theme.dark ? SWITCHER_CARD_COLORS.darkFill : theme.panel}
+      radius={RADIUS}
+      border={theme.panelBorder}
+      shadow={SIDEBAR_SHADOW.tabSwitcher}
       style={{ position: "absolute", left: (windowWidth - width) / 2, top: Math.max(MARGIN, (windowHeight - height) / 2), width, height, padding: PADDING, flexDirection: "row" }}
     >
       {shown.map((id, i) => (
         <SwitcherCard key={id} tabId={id} focused={start + i === switcher.index} index={start + i} />
       ))}
-    </Surface>
+    </Panel>
   );
 }
 
@@ -76,7 +70,7 @@ function useFreshPictures(ids: readonly string[] | undefined) {
 
 function SwitcherCard({ tabId, focused, index }: { tabId: string; focused: boolean; index: number }) {
   const theme = useTheme();
-  const tab = useBrowser((s) => s.tabs[tabId]);
+  const tab = useTab(tabId);
   useEffect(() => () => leaveSwitcherRow(index), [index]);
   if (!tab) return null;
   const mode = theme.dark ? "dark" : "light";
@@ -86,13 +80,13 @@ function SwitcherCard({ tabId, focused, index }: { tabId: string; focused: boole
       <View
         onMouseEnter={() => hoverSwitcherRow(index)}
         onMouseLeave={() => leaveSwitcherRow(index)}
-        style={{ width: CARD_WIDTH, height: CARD_HEIGHT, borderRadius: CARD_RADIUS, backgroundColor: focused ? SELECTED_UNDER[mode] : undefined }}
+        style={{ width: CARD_WIDTH, height: CARD_HEIGHT, borderRadius: CARD_RADIUS, backgroundColor: focused ? SWITCHER_CARD_COLORS.selectedUnder[mode] : undefined }}
       >
         {focused && <View pointerEvents="none" style={{ ...StyleSheet.absoluteFillObject, borderRadius: CARD_RADIUS, backgroundColor: theme.backdrop.tintColor, opacity: SELECTED_TINT }} />}
-        <Preview tab={tab} empty={PREVIEW_EMPTY[mode]} />
+        <Preview tab={tab} empty={SWITCHER_CARD_COLORS.previewEmpty[mode]} />
         <View style={{ flex: 1, flexDirection: "row", alignItems: "center", paddingLeft: FAVICON_LEFT, paddingRight: INSET, gap: TITLE_GAP }}>
           <TabIcon url={tab.url} favicon={tab.favicon} icon={tab.customIcon} size={FAVICON} profileId={tab.profileId} />
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: TITLE_SIZE, fontWeight: "600", color: theme.textPrimary }}>
+          <Text numberOfLines={1} style={{ flex: 1, fontSize: TITLE_SIZE, fontWeight: weight.semibold, color: theme.textPrimary }}>
             {title}
           </Text>
         </View>

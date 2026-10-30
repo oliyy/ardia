@@ -14,4 +14,7 @@ declare module "react-native" {
     ntpLayoutRole?: "bar" | "mark" | "commandBar" | null;
     onMountReceipt?: (event: NativeSyntheticEvent<{ receipt: number; target: number; x: number; y: number; width: number; height: number }>) => void;
   }
+  interface TextInputProps {
+    pastedTypes?: PastedTypesType;
+  }
 }

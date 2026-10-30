@@ -1,28 +1,34 @@
-import { WindowBackdrop } from "@ardia/shaders";
+import { WindowBackdrop } from "./components/ui";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { CommandPanel } from "./components/CommandPanel";
-import { ContentCard } from "./components/ContentCard";
+import { CommandPanel } from "./components/omnibox/CommandPanel";
+import { ContentCard } from "./components/window/ContentCard";
 import { BookmarkDialog } from "./components/bookmarks/BookmarkDialog";
 import { EditBookmarkDialog } from "./components/bookmarks/EditBookmarkDialog";
+import { FolderMenus } from "./components/bookmarks/FolderMenus";
 import { ExtensionOverlays } from "./components/extensions/ExtensionOverlays";
 import { ExtensionSidePanel } from "./components/extensions/SidePanel";
-import { DownloadMagnet, DownloadsPopover } from "./components/Downloads";
+import { DownloadMagnet, DownloadsPopover } from "./components/downloads/Downloads";
 import { UtilityWindow } from "./components/settings/UtilityWindow";
-import { isUtilityWindowId } from "./components/settings/windows";
+import { isUtilityWindowId } from "./state/settings/settingsWindows";
 import { OnboardingOverlay } from "./components/onboarding";
 import { CreateProfileHost } from "./components/profiles/CreateProfile";
-import { useFullscreenTab } from "./components/layout/pageState";
-import { ProfileTint } from "./components/layout/ProfileSwipe";
-import { TOP_CARD_INSET, TOP_STRIP_HEIGHT, TopStripPeek, TopTabStrip } from "./components/layout/TopTabStrip";
-import { useCardGeometry, useTabLayout } from "./components/layout/windowLayout";
-import { WindowProfile } from "./components/layout/WindowProfile";
-import { DockedLayout, DockShift } from "./components/layout/SidebarDock";
+import { useFullscreenTab } from "./state/tabs/pageState";
+import { ProfileTint } from "./components/window/ProfileSwipe";
+import { TOP_STRIP_HEIGHT, TopStripPeek, TopTabStrip } from "./components/tabstrip/TopTabStrip";
+import { useCardGeometry, useTabLayout } from "./state/windows/layout";
+import { WindowProfile } from "./components/window/WindowProfile";
+import { DockedLayout, DockShift } from "./components/window/SidebarDock";
 import { LittleArdiaWindow } from "./components/littleArdia/LittleArdiaWindow";
 import { SidebarOverlays } from "./components/sidebar/Overlays";
-import { layout, ThemeScope, useTheme } from "./lib/theme";
-import { useBrowser } from "./store/browser";
-import { useWindowId, WindowContext } from "./store/hooks";
+import { layout, profileAccent, profileTheme, useTheme } from "./components/ui/theme";
+import { ThemeScope } from "./components/window/ThemeScope";
+import { useBrowser } from "./state/browser/store";
+import { useWindowId, WindowContext } from "./state/browser/hooks";
+import { provideProfileLooks } from "./state/profiles/looks";
+import { focusedWindowOf } from "./state/windows/ui";
+
+provideProfileLooks({ accent: profileAccent, theme: profileTheme });
 
 export function WindowRoot({ windowId }: { windowId?: string }) {
   if (isUtilityWindowId(windowId))
@@ -35,7 +41,7 @@ export function WindowRoot({ windowId }: { windowId?: string }) {
 }
 
 function BrowserWindowRoot({ windowId }: { windowId?: string }) {
-  const id = useBrowser((s) => windowId ?? s.ui.focusedWindowId ?? s.windowOrder[0] ?? null);
+  const id = useBrowser((s) => windowId ?? focusedWindowOf(s) ?? s.windowOrder[0] ?? null);
   const exists = useBrowser((s) => !!id && !!s.windows[id]);
   const small = useBrowser((s) => !!id && s.windows[id]?.kind === "small");
   if (!id || !exists) return null;
@@ -50,7 +56,6 @@ function BrowserWindow() {
   const theme = useTheme();
   const windowId = useWindowId();
   const topTabs = useTabLayout() === "top";
-  const showStrip = useBrowser((s) => topTabs && !!s.windows[windowId]?.sidebarOpen);
   const fullscreen = !!useFullscreenTab(windowId);
   const cardGeometry = useCardGeometry();
   const [width, setWidth] = useState(0);
@@ -70,20 +75,20 @@ function BrowserWindow() {
         fullscreen={fullscreen}
         topTabs={topTabs}
         inset={
-          showStrip
-            ? { top: TOP_STRIP_HEIGHT, right: TOP_CARD_INSET, bottom: TOP_CARD_INSET, left: TOP_CARD_INSET }
+          topTabs
+            ? { top: TOP_STRIP_HEIGHT, right: layout.cardInset, bottom: layout.cardInset, left: layout.cardInset }
             : { top: cardGeometry.top, right: cardGeometry.inset, bottom: cardGeometry.inset, left: cardGeometry.inset }
+        }
+        topStrip={
+          topTabs
+            ? { strip: <TopTabStrip width={width} hidden={fullscreen} />, peek: <TopStripPeek windowWidth={width} enabled={!fullscreen} /> }
+            : undefined
         }
       >
         {card}
       </DockedLayout>
-      {showStrip && (
-        <View pointerEvents={fullscreen ? "none" : "auto"} style={[{ position: "absolute", left: 0, right: 0 }, fullscreen ? { bottom: "100%" } : { top: 0 }]}>
-          <TopTabStrip width={width} hidden={fullscreen} />
-        </View>
-      )}
-      {topTabs && !showStrip && <TopStripPeek windowWidth={width} enabled={!fullscreen} />}
       <CommandPanel windowWidth={width} />
+      <FolderMenus />
       <DownloadsPopover />
       <ExtensionOverlays />
       <DownloadMagnet />

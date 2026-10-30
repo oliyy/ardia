@@ -1,4 +1,5 @@
 import AppKit
+import ArdiaCore
 import ExpoModulesCore
 
 public class UrlFieldTextModule: Module {
@@ -16,7 +17,7 @@ public class UrlFieldTextModule: Module {
         view.alignment = value == "trailing" ? .trailing : .leading
       }
       Prop("color") { (view: UrlFieldText, value: String?) in
-        view.color = value.flatMap(NSColor.init(hex:)) ?? .labelColor
+        view.color = value.flatMap { RGBA(hex: $0)?.srgb } ?? .labelColor
       }
       Prop("hoverButtonsWidth") { (view: UrlFieldText, value: Double?) in
         view.hoverButtonsWidth = value.flatMap { $0.isFinite && $0 >= 0 ? CGFloat($0) : nil } ?? 0

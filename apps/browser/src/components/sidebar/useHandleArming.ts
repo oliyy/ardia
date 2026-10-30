@@ -1,6 +1,6 @@
-import { onAppEvent, onWindowEvent } from "@ardia/shell";
 import { useEffect, useRef, useState } from "react";
-import { useDockMotion } from "../layout/dockMotion";
+import { dockMoving, useDockMotion } from "../../state/windows/dockMotion";
+import { watchWindowActive } from "../../state/windows/windowWatch";
 
 export function useHandleArming(windowId: string, onArming: (arming: boolean) => void) {
   const sink = useRef(onArming);
@@ -28,25 +28,17 @@ export function useHandleArming(windowId: string, onArming: (arming: boolean) =>
   useEffect(() => {
     const { state, publish } = arming;
     const move = () => {
-      state.moving = !!useDockMotion.getState().moving[windowId];
+      state.moving = dockMoving(windowId);
       publish();
     };
     move();
-    const subscriptions = [
-      onWindowEvent((e) => {
-        if (e.type !== "focus") return;
-        state.active = e.id === windowId;
-        publish();
-      }),
-      onAppEvent((e) => {
-        if (e.type !== "resignActive" && e.type !== "screenLocked") return;
-        state.active = false;
-        publish();
-      }),
-    ];
+    const unwatchActive = watchWindowActive(windowId, (active) => {
+      state.active = active;
+      publish();
+    });
     const stop = useDockMotion.subscribe(move);
     return () => {
-      subscriptions.forEach((subscription) => subscription.remove());
+      unwatchActive();
       stop();
       state.published = false;
       sink.current(false);

@@ -10,6 +10,7 @@
 
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
 #include "ardia/core/ac_content_hooks.h"
@@ -24,6 +25,7 @@ class NSDictionary;
 class Profile;
 
 namespace content {
+class BrowserContext;
 class NavigationHandle;
 class NavigationThrottleRegistry;
 class RenderFrameHost;
@@ -74,6 +76,14 @@ struct RoutedPlacement {
   std::string url;
   std::optional<blink::mojom::WindowFeatures> features;
 };
+
+struct CreationSeed {
+  std::optional<RoutedPlacement> placement;
+  raw_ptr<content::BrowserContext> context = nullptr;
+  std::string sidebar;
+};
+
+const std::string* EngineOf(const LinkRouting& routing, const std::string& sidebar);
 
 std::optional<LinkDecision> DecideLink(const LinkRouting& routing,
                                        std::string_view url,

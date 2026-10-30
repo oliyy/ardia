@@ -1,19 +1,24 @@
 import { memo, useLayoutEffect, useRef } from "react";
-import { ArcUrlFieldBackground, ArcUrlFieldText } from "@ardia/shell";
 import { findNodeHandle, Image, Pressable, StyleSheet, View, type NativeSyntheticEvent, type ViewStyle } from "react-native";
-import { layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { useActiveTabId, useTabLive, useWindowId } from "../../store/hooks";
-import { splitOf } from "../../store/splits";
+import { layout, useTheme } from "../ui/theme";
+import { useActiveTabId, useSettings, useTabLive, useWindowId } from "../../state/browser/hooks";
+import { currentWindow } from "../../state/browser/current";
+import { useShortcutHint, withShortcut } from "../../state/commands/commandShortcuts";
+import { openPanel, toggleSidebar } from "../../state/windows/actions";
+import { isAddressBarInSidebar } from "../../state/sidebar/current";
+import { setUrlAnchor } from "../../state/windows/layout";
+import { useHistoryAvailability } from "../../state/tabs/navigation";
+import { ARC_LIGHTS_CENTER } from "../../state/windows/dockMotion";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../state/sidebar/sidebarWidth";
 import { extensionsFitting, ToolbarExtensions, useToolbarExtensionsWidth } from "../extensions/ToolbarExtensions";
-import { useHistoryAvailability } from "../layout/history";
-import { toolbarPalette, type ToolbarPalette } from "../layout/toolbarColors";
-import { ToolbarButton, type ButtonHit } from "../layout/controls";
-import { addressBarInSidebar, setUrlAnchor, SIDEBAR_FIELD } from "../layout/windowLayout";
-import { useHover } from "../primitives";
-import { HistoryButton, ReloadButton, UrlField, useToolbarTab } from "../Toolbar";
-import { ARC_LIGHTS_CENTER, HEADER_TOOLS, navButtonsFitting, type HeaderButton } from "../layout/dockMotion";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./tokens";
+import { toolbarPalette, type ToolbarPalette } from "../ui/toolbarColors";
+import { ArcUrlFieldBackground, ArcUrlFieldText, Button, type ButtonHit, useHover } from "../ui";
+import { useToolbarTab } from "../toolbar/Toolbar";
+import { SidebarUrlField } from "../toolbar/SidebarUrlField";
+import { HistoryButton, ReloadButton } from "../toolbar/NavButtons";
+import { HEADER_TOOLS, navButtonsFitting, type HeaderButton } from "../window/dockMotion";
+import { SIDEBAR_FIELD } from "./geometry";
+import { ADDRESS_HEADER_ICON, ADDRESS_PLACEHOLDER_TEXT, ADDRESS_SEARCH_ICON } from "./tokens";
 
 const BUTTON = layout.toolbarButton;
 const { toggleX: TOGGLE_X, edge: EDGE, pitch: PITCH } = HEADER_TOOLS;
@@ -24,11 +29,9 @@ const END_INSET = EDGE + BUTTON / 2 - PLATE / 2;
 const HEADER_GLYPH = 16;
 const HEADER_WEIGHT = "medium";
 const HEADER_INACTIVE = 5 / 12;
-const DARK_ICON = "#FFFFFF99";
-const DARK_ICON_DISABLED = "#FFFFFF40";
 
 export function SidebarHeaderTools({ width }: { width: number }) {
-  const toggle = useBrowser((s) => s.settings.showSidebarButton !== false);
+  const toggle = useSettings((s) => s.showSidebarButton !== false);
   const { buttons, step } = navButtonsFitting(width, BUTTON, toggle);
   const anchored = Number.isFinite(width) && Math.fround(width) === width && width >= SIDEBAR_MIN_WIDTH && width <= SIDEBAR_MAX_WIDTH && step === PITCH;
   return <HeaderTools toggle={toggle} buttons={buttons.join(" ")} last={anchored ? null : width - EDGE - BUTTON / 2} step={anchored ? null : step} />;
@@ -39,7 +42,8 @@ const HeaderTools = memo(function HeaderTools({ toggle, buttons, last, step }: {
   const tab = useToolbarTab(useActiveTabId());
   const theme = useTheme();
   const base = toolbarPalette(theme, null);
-  const palette = theme.dark ? { ...base, icon: DARK_ICON, iconDisabled: DARK_ICON_DISABLED } : base;
+  const palette = theme.dark ? { ...base, icon: ADDRESS_HEADER_ICON.dark, iconDisabled: ADDRESS_HEADER_ICON.darkDisabled } : base;
+  const sidebarHint = useShortcutHint("toggleSidebar");
   const inactiveOpacity = theme.dark ? HEADER_INACTIVE : undefined;
   const shown = tab && buttons ? (buttons.split(" ") as HeaderButton[]) : [];
   const place = (edge: Pick<ViewStyle, "left" | "right">) => ({
@@ -53,15 +57,17 @@ const HeaderTools = memo(function HeaderTools({ toggle, buttons, last, step }: {
   return (
     <>
       {toggle && (
-        <ToolbarButton
+        <Button
+          variant="icon"
+          toolbar
           {...place({ left: TOGGLE_X - PLATE / 2 })}
           palette={palette}
           icon="sidebar.left"
           size={HEADER_GLYPH}
           weight={HEADER_WEIGHT}
           inactiveOpacity={inactiveOpacity}
-          onPress={() => useBrowser.getState().toggleSidebar(windowId)}
-          tooltip="Auto-Hide Tabs (⌘S)"
+          onPress={() => toggleSidebar(windowId)}
+          tooltip={withShortcut("Auto-Hide Tabs", sidebarHint)}
         />
       )}
       {tab ? <NavigationButtons tab={tab} palette={palette} inactiveOpacity={inactiveOpacity} buttons={shown} slots={slots} /> : null}
@@ -126,10 +132,7 @@ type MountReceipt = { receipt: number; target: number; x: number; y: number; wid
 
 const validFrame = (x: number, y: number, width: number, height: number) => [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0;
 
-const fieldShown = (windowId: string) => {
-  const s = useBrowser.getState();
-  return !!s.windows[windowId] && addressBarInSidebar(s, windowId);
-};
+const fieldShown = (windowId: string) => !!currentWindow(windowId) && isAddressBarInSidebar(windowId);
 
 export function SidebarAddressRow({ width, receipt }: { width: number; receipt: number | undefined }) {
   const windowId = useWindowId();
@@ -208,8 +211,8 @@ export function SidebarAddressRow({ width, receipt }: { width: number; receipt: 
 }
 
 const HOST_ROOM = 84;
-const PLACEHOLDER_TEXT = { light: "#0000004D", dark: "#FFFFFF4D" } as const;
-const SEARCH_ICON = { rest: { light: "#00000066", dark: "#FFFFFF66" }, hover: { light: "#000000CC", dark: "#FFFFFFCC" } } as const;
+const PLACEHOLDER_TEXT = ADDRESS_PLACEHOLDER_TEXT;
+const SEARCH_ICON = ADDRESS_SEARCH_ICON;
 const SEARCH_ICON_HOVER = { left: 7, size: 22 } as const;
 const SEARCH_GLYPH = require("../../../assets/arc-url-icons/search.png");
 const SEARCH_ICON_LAYERS = [
@@ -221,24 +224,22 @@ const SEARCH_ICON_LAYERS = [
 
 function PageField({ tab, windowId, width }: { tab: NonNullable<ReturnType<typeof useToolbarTab>>; windowId: string; width: number }) {
   const palette = toolbarPalette(useTheme(), null);
-  const inSplit = useBrowser((s) => !!splitOf(s, tab.id));
   const limit = extensionsFitting(width - 10 - 3 - HOST_ROOM);
   const extensionsWidth = useToolbarExtensionsWidth(windowId, limit);
   return (
-    <UrlField
+    <SidebarUrlField
       tab={tab}
       palette={palette}
       windowId={windowId}
-      inSplit={inSplit}
       onFocus={alreadyFocused}
-      sidebar={{
-        height: SIDEBAR_FIELD.height,
-        accessory: extensionsWidth ? (
+      height={SIDEBAR_FIELD.height}
+      accessory={
+        extensionsWidth ? (
           <View style={{ width: extensionsWidth - 6, height: 28 }}>
             <ToolbarExtensions tabId={tab.id} windowId={windowId} palette={palette} top={0} right={0} limit={limit} />
           </View>
-        ) : null,
-      }}
+        ) : null
+      }
     />
   );
 }
@@ -249,7 +250,7 @@ function EmptyField({ windowId }: { windowId: string }) {
   const searchIcon = useHover();
   const appearance = theme.dark ? "dark" : "light";
   const iconState = searchIcon.hovered ? "hover" : "rest";
-  const open = () => useBrowser.getState().openPanel(windowId, "");
+  const open = () => openPanel(windowId, "");
   return (
     <View {...hoverProps}>
       <Pressable onPress={open}>

@@ -1,12 +1,12 @@
-import { FolderShape, type FolderShapeProps } from "@ardia/shell";
 import { useMemo } from "react";
 import { Image, type ImageRequireSource } from "react-native";
-import { colorHex, colorHexAlpha, fromOklab, hexColor, oklab, resolveTheme } from "../../lib/profileTheme";
-import { useTheme } from "../../lib/theme";
-import type { GroupColor } from "../../store/types";
+import { iconSymbol } from "../../lib/customIcon";
+import { colorHex, colorHexAlpha, fromOklab, hexColor, oklab, resolveTheme } from "../../lib/profileLook";
+import type { GroupColor } from "../../state/browser/types";
+import { NO_GROUP_ICON } from "../../state/groups/groupIcons";
+import { FolderShape, hex, ink, useTheme, withAlpha, type FolderShapeProps } from "../ui";
 import { arcIconSource, isArcIcon } from "./arcFolderIcons";
-import { NO_GROUP_ICON, SYMBOL_PREFIX } from "./TabIcon";
-import { GROUP_COLORS } from "./tokens";
+import { groupTint } from "./tokens";
 
 const SLOT = 16;
 const BACK_LIGHTNESS = 0.7;
@@ -26,21 +26,23 @@ function customMark(icon: string | null | undefined): FolderShapeProps["mark"] {
     const source = arcIconSource(icon);
     return source === undefined ? null : { kind: "image", uri: Image.resolveAssetSource(source).uri };
   }
-  if (icon.startsWith(SYMBOL_PREFIX)) return { kind: "symbol", name: icon.slice(SYMBOL_PREFIX.length) };
+  const symbol = iconSymbol(icon);
+  if (symbol) return { kind: "symbol", name: symbol };
   return { kind: "emoji", text: icon };
 }
 
 export function useFolderColors(color: GroupColor | null): FolderColors {
   const theme = useTheme();
-  const front = color ? GROUP_COLORS[color].hex : (theme.powerUpPalette?.[0] ?? theme.icon);
+  const tint = groupTint(color);
+  const front = tint ?? theme.powerUpPalette?.[0] ?? theme.icon;
   const frontExtendedSRGB = useMemo((): [number, number, number] | undefined => {
-    const stop = !color && theme.custom ? resolveTheme(theme.custom, theme.dark).stops[0]?.color : undefined;
+    const stop = !tint && theme.custom ? resolveTheme(theme.custom, theme.dark).stops[0]?.color : undefined;
     return stop && [stop.r, stop.g, stop.b];
-  }, [color, theme.custom, theme.dark]);
-  const supplied = color ? undefined : theme.custom?.foregroundSecondary;
+  }, [tint, theme.custom, theme.dark]);
+  const supplied = tint ? undefined : theme.custom?.foregroundSecondary;
   const back = supplied ? colorHexAlpha(theme.dark ? supplied.dark : supplied.light) : folderBack(front);
   const contrast = theme.custom?.maxContrastColor;
-  const stroke = contrast ? colorHexAlpha(theme.dark ? contrast.dark : contrast.light) : theme.dark ? "#FFFFFFE6" : theme.icon;
+  const stroke = contrast ? colorHexAlpha(theme.dark ? contrast.dark : contrast.light) : theme.dark ? hex(withAlpha(ink.white, 0.9)) : theme.icon;
   return { front, frontExtendedSRGB, back, stroke };
 }
 

@@ -1,18 +1,16 @@
-import { Symbol } from "@ardia/shell";
 import { memo } from "react";
 import { Image, Text, View } from "react-native";
-import { useIsSleeping } from "../../lib/tabLifecycle";
-import { useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { engineMark, ENGINE_NAMES, ENGINE_SYMBOLS } from "../../store/engines";
-import { isPageUnloaded } from "../../store/pinShare";
-import { Favicon, type FaviconSourceListener } from "../primitives";
+import { useIsSleeping } from "../../state/tabs/tabLifecycle";
+import { Symbol } from "../ui";
+import { useTheme } from "../ui/theme";
+import { sidebarTokens } from "./tokens";
+import { useTab } from "../../state/browser/hooks";
+import { ENGINE_NAMES, ENGINE_SYMBOLS, type PageEngine } from "../../state/engines/engines";
+import { FADED, markedEngine, useIconMarks } from "../../state/sidebar/rowState";
+import { NO_GROUP_ICON } from "../../state/groups/groupIcons";
+import { iconSymbol } from "../../lib/customIcon";
+import { Favicon, type FaviconSourceListener } from "../favicon/Favicon";
 import { arcIconSource, isArcIcon } from "./arcFolderIcons";
-
-export const SYMBOL_PREFIX = "symbol:";
-export const NO_GROUP_ICON = `${SYMBOL_PREFIX}square.stack.fill`;
-export const NO_GROUP_ICON_INK = { light: "#00000040", dark: "#FFFFFF40" };
-export const hasOwnGroupIcon = (icon: string | null | undefined): icon is string => !!icon && icon !== NO_GROUP_ICON;
 
 export const TabIcon = memo(function TabIcon({
   tabId,
@@ -24,6 +22,7 @@ export const TabIcon = memo(function TabIcon({
   profileId: profile,
   direct,
   onSource,
+  marks: givenMarks,
 }: {
   tabId?: string;
   url: string;
@@ -34,22 +33,22 @@ export const TabIcon = memo(function TabIcon({
   profileId?: string;
   direct?: boolean;
   onSource?: FaviconSourceListener;
+  marks?: number;
 }) {
   const sleeping = useIsSleeping(tabId ?? "");
-  const unloaded = useBrowser((s) => s.settings.fadeUnloadedTabs && !!tabId && isPageUnloaded(s, tabId));
+  const marks = useIconMarks(tabId, givenMarks);
+  const engine = tabId && size >= 14 ? markedEngine(marks) : null;
   const props = { url, favicon, icon, size, color, direct, onSource };
   return (
-    <View style={{ opacity: sleeping || unloaded ? SLEEPING_OPACITY : 1 }}>
+    <View style={{ opacity: sleeping || marks & FADED ? SLEEPING_OPACITY : 1 }}>
       {profile || !tabId ? <Icon {...props} profileId={profile} /> : <TabProfileIcon {...props} tabId={tabId} />}
-      {tabId && size >= 14 ? <EngineMark tabId={tabId} size={size} /> : null}
+      {engine ? <EngineMark mark={engine} size={size} /> : null}
     </View>
   );
 });
 
-function EngineMark({ tabId, size }: { tabId: string; size: number }) {
+function EngineMark({ mark, size }: { mark: PageEngine; size: number }) {
   const theme = useTheme();
-  const mark = useBrowser((s) => engineMark(s, tabId));
-  if (!mark) return null;
   const box = Math.round(size * 0.6);
   return (
     <View
@@ -64,7 +63,7 @@ function EngineMark({ tabId, size }: { tabId: string; size: number }) {
         borderRadius: box / 2,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: theme.dark ? "#2C2C2E" : "#FFFFFF",
+        backgroundColor: sidebarTokens(theme).engineMarkPlate,
       }}
     >
       <Symbol name={ENGINE_SYMBOLS[mark]} size={box - 3} weight="semibold" color={theme.icon} style={{ width: box, height: box }} />
@@ -73,7 +72,7 @@ function EngineMark({ tabId, size }: { tabId: string; size: number }) {
 }
 
 function TabProfileIcon({ tabId, ...props }: Omit<Parameters<typeof Icon>[0], "profileId"> & { tabId: string }) {
-  const profileId = useBrowser((s) => s.tabs[tabId]?.profileId);
+  const profileId = useTab(tabId, (t) => t?.profileId);
   return <Icon {...props} profileId={profileId} />;
 }
 
@@ -99,9 +98,10 @@ function Icon({
   onSource?: FaviconSourceListener;
 }) {
   const theme = useTheme();
-  if (icon?.startsWith(SYMBOL_PREFIX)) {
-    const ink = icon === NO_GROUP_ICON ? (theme.dark ? NO_GROUP_ICON_INK.dark : NO_GROUP_ICON_INK.light) : theme.icon;
-    return <Symbol name={icon.slice(SYMBOL_PREFIX.length)} size={size - 3} weight="medium" color={color ?? ink} style={{ width: size, height: size }} />;
+  const symbol = iconSymbol(icon);
+  if (symbol) {
+    const ink = icon === NO_GROUP_ICON ? sidebarTokens(theme).noGroupIcon : theme.icon;
+    return <Symbol name={symbol} size={size - 3} weight="medium" color={color ?? ink} style={{ width: size, height: size }} />;
   }
   const arcSource = arcIconSource(icon);
   if (arcSource !== undefined) {

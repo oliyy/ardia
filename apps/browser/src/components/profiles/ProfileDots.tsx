@@ -1,45 +1,41 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, ScrollView, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
-import { switchProfile } from "../../lib/actions";
-import { layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { useIsIncognito } from "../../store/hooks";
-import { usePagerPages, type PagerPage } from "../layout/profilePager";
-import { SIDEBAR_FOOTER_CENTER } from "../layout/windowLayout";
-import { useHover } from "../primitives";
-import { TooltipAbove } from "../TooltipAbove";
-import { ProfileGlyph } from "./icons";
+import { switchProfile } from "../../state/browser/actions";
+import { layout, useTheme } from "../ui/theme";
+import { useIsIncognito, useProfile, useWindow } from "../../state/browser/hooks";
+import { useProfileOrder } from "../../state/profiles/hooks";
+import { useNativePagerPosition, usePagerPages, type PagerPage } from "../../state/windows/profilePager";
+import { ContextMenuArea, ink, useHover } from "../ui";
+import { TooltipAbove } from "../ui/TooltipAbove";
+import { SIDEBAR_FOOTER_CENTER } from "../sidebar/geometry";
+import { ProfileGlyph } from "./ProfileIcons";
+import { openProfileItemMenu } from "./profileMenu";
+import { arcSwitcher, profileSwitcher } from "./tokens";
 
-export const PROFILE_DOTS_HEIGHT = 41;
-const PITCH = 34;
-const GLYPH = 12;
-const BAND = 28;
-const SELECTED = 0.92;
-const HOVERED = 0.4;
-const IDLE = 0.2;
-const DOT_CENTER_TO_TOOLTIP = 18.25;
-const GLYPH_TINT = { dark: "#FFFFFF", light: "#000000" } as const;
-const GLYPH_TINTS = [GLYPH_TINT.dark, GLYPH_TINT.light];
+export const PROFILE_DOTS_HEIGHT = profileSwitcher.height;
+const { band: BAND, dotTooltipLift } = profileSwitcher;
+const { pitch: PITCH, glyph: GLYPH } = arcSwitcher;
+const GLYPH_TINTS = [ink.white, ink.black];
 
 export function useProfileDotsShown() {
   return !useIsIncognito();
 }
 
 export function ProfileDots({ windowId, width, reserve }: { windowId: string; width: number; reserve: number }) {
-  const ids = useBrowser(useShallow((s) => s.profileOrder));
+  const ids = useProfileOrder(useShallow((o) => o));
   const { pages, pager } = usePagerPages(windowId);
-  const current = useBrowser((s) => s.windows[windowId]?.profileId);
+  const current = useWindow(windowId, (w) => w?.profileId);
   const room = Math.max(PITCH, width - 2 * Math.max(reserve, layout.sidebarInset));
   const viewport = Math.min(ids.length * PITCH, room);
   const scroll = useRef<ScrollView>(null);
   const offset = useRef(0);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [hovered, setHovered] = useState<string | null>(null);
-  const onHover = useCallback((id: string, active: boolean) => setHovered((current) => active ? id : current === id ? null : current), []);
+  const onHover = useCallback((id: string, active: boolean) => setHovered((current) => (active ? id : current === id ? null : current)), []);
   const hoverIndex = hovered ? ids.indexOf(hovered) : -1;
   const hoverCenter = hoverIndex * PITCH + PITCH / 2 - scrollOffset;
-  const hoverName = useBrowser((s) => hovered ? s.profiles[hovered]?.name ?? "" : "");
+  const hoverName = useProfile(hovered, (p) => p?.name ?? "");
   useEffect(() => {
     const index = current ? ids.indexOf(current) : -1;
     if (index < 0) return;
@@ -50,7 +46,7 @@ export function ProfileDots({ windowId, width, reserve }: { windowId: string; wi
   }, [current, ids, viewport]);
   return (
     <View style={{ height: PROFILE_DOTS_HEIGHT, alignItems: "center" }}>
-      <TooltipAbove text={hoverName} active={hoverIndex >= 0 && hoverCenter >= 0 && hoverCenter <= viewport} centerX={(width - viewport) / 2 + hoverCenter} bottom={SIDEBAR_FOOTER_CENTER + DOT_CENTER_TO_TOOLTIP} />
+      <TooltipAbove text={hoverName} active={hoverIndex >= 0 && hoverCenter >= 0 && hoverCenter <= viewport} centerX={(width - viewport) / 2 + hoverCenter} bottom={SIDEBAR_FOOTER_CENTER + dotTooltipLift} />
       <ScrollView
         ref={scroll}
         horizontal
@@ -73,7 +69,8 @@ export function ProfileDots({ windowId, width, reserve }: { windowId: string; wi
 
 const ProfileIcon = memo(function ProfileIcon({ id, windowId, page, pos, onHover }: { id: string; windowId: string; page: PagerPage | undefined; pos: Animated.Value; onHover(id: string, active: boolean): void }) {
   const theme = useTheme();
-  const profile = useBrowser(useShallow((s) => ({ name: s.profiles[id]?.name ?? "", icon: s.profiles[id]?.icon ?? null })));
+  useNativePagerPosition(windowId);
+  const profile = useProfile(id, useShallow((p) => ({ name: p?.name ?? "", icon: p?.icon ?? null })));
   const { hovered, hoverProps } = useHover();
   const [pressed, setPressed] = useState(false);
   if (pressed && !hovered) setPressed(false);
@@ -81,26 +78,28 @@ const ProfileIcon = memo(function ProfileIcon({ id, windowId, page, pos, onHover
     onHover(id, hovered && !pressed);
     return () => onHover(id, false);
   }, [hovered, pressed, id, onHover]);
-  const rest = hovered ? HOVERED : IDLE;
+  const rest = hovered ? arcSwitcher.hovered : arcSwitcher.idle;
   const slot = page?.slot;
   const opacity = useMemo(
-    () => (slot === undefined ? rest : pos.interpolate({ inputRange: [slot - 1, slot, slot + 1], outputRange: [rest, SELECTED, rest], extrapolate: "clamp" })),
+    () => (slot === undefined ? rest : pos.interpolate({ inputRange: [slot - 1, slot, slot + 1], outputRange: [rest, arcSwitcher.selected, rest], extrapolate: "clamp" })),
     [pos, slot, rest],
   );
   return (
     <View {...hoverProps}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={profile.name}
-        onPress={() => {
-          setPressed(true);
-          switchProfile(windowId, id, true);
-        }}
-      >
-        <Animated.View style={{ width: PITCH, height: BAND, alignItems: "center", justifyContent: "center", opacity }}>
-          <ProfileGlyph profile={profile} glyph={GLYPH} color={theme.dark ? GLYPH_TINT.dark : GLYPH_TINT.light} tints={GLYPH_TINTS} />
-        </Animated.View>
-      </Pressable>
+      <ContextMenuArea onContextMenu={() => void openProfileItemMenu(id, "sidebar", windowId)}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={profile.name}
+          onPress={() => {
+            setPressed(true);
+            switchProfile(windowId, id, true);
+          }}
+        >
+          <Animated.View style={{ width: PITCH, height: BAND, alignItems: "center", justifyContent: "center", opacity }}>
+            <ProfileGlyph profile={profile} glyph={GLYPH} color={theme.dark ? ink.white : ink.black} tints={GLYPH_TINTS} />
+          </Animated.View>
+        </Pressable>
+      </ContextMenuArea>
     </View>
   );
 });

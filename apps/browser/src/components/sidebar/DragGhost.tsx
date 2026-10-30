@@ -1,20 +1,20 @@
-import { FadeLabel, Surface, Symbol } from "@ardia/shell";
 import { Animated, Text, View } from "react-native";
-import { hex, layout, useTheme } from "../../lib/theme";
-import { liveFolderIcon } from "../../live/sources";
-import { useLive } from "../../live/store";
-import { useBrowser } from "../../store/browser";
-import { groupLabel } from "../../store/organize";
-import { tabTitle } from "./actions";
-import { useTabDrag } from "../layout/tabDrag";
-import { useDropLine, type Ghost } from "./dnd";
+import { FadeLabel, font, ink, Panel, radius, Symbol, weight } from "../ui";
+import { layout, useTheme } from "../ui/theme";
+import { liveFolderIcon } from "../../state/live/sources";
+import { useLive } from "../../state/live/store";
+import { useGroup, useTab } from "../../state/browser/hooks";
+import { useDragGhostLabel } from "../../state/sidebar/hooks";
+import { useTabDrag } from "../../state/drag/tabDrag";
+import { useAddressBarInSidebar } from "../../state/windows/layout";
+import type { Ghost } from "./dragModel";
+import { useDropLine } from "./DragProvider";
 import { FolderMosaic } from "./FolderTile";
-import { useAddressBarInSidebar } from "../layout/windowLayout";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
 import { TabIcon } from "./TabIcon";
-import { useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
+import { DRAG_LIFTED_FILL, SIDEBAR_SHADOW, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
+import { folderOf } from "./dragModel";
 
-const LIFTED_FILL = "rgba(255,255,255,0.15)";
 const LINE = 2;
 const RING = 8;
 const RING_INSET = 10;
@@ -37,24 +37,27 @@ export function DragGhost({ ghost }: { ghost: Ghost }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const { item, count, width, height, position } = ghost;
-  const tab = useBrowser((s) => s.tabs[item.tabIds[0] ?? ""]);
-  const label = useBrowser((s) => (item.groupId && s.groups[item.groupId] ? groupLabel(s, s.groups[item.groupId]!) : tab ? tabTitle(tab) : ""));
-  const group = useBrowser((s) => (item.groupId ? s.groups[item.groupId] : undefined));
-  const liveFolder = useLive((s) => (item.liveId ? s.folders[item.liveId] : undefined));
-  const folderColors = useFolderColors(group?.color ?? null);
+  const tab = useTab(item.tabIds[0] ?? "");
+  const liveFolderId = item.kind === "live" ? item.liveFolderId : undefined;
+  const groupId = item.kind === "group" ? item.groupId : undefined;
+  const folder = useLive((s) => (liveFolderId ? s.folders[liveFolderId] : undefined));
+  const liveIcon = folder ? liveFolderIcon(folder) : null;
+  const groupIcon = useGroup(groupId ?? null, (g) => g?.icon ?? null);
+  const groupColor = useGroup(groupId ?? null, (g) => g?.color ?? null);
+  const folderColors = useFolderColors(groupColor);
+  const label = useDragGhostLabel(folder?.name, groupId, tab);
   const flat = useAddressBarInSidebar();
   const arcLabel = useArcLabel();
   const arcTitle = useArcTitle();
   const tile = item.kind === "tile";
   const groupRow = item.kind === "group" || item.kind === "live";
-  const folderTile = tile && !!item.folderId;
-  const liveIcon = liveFolder ? liveFolderIcon(liveFolder) : null;
-  const onPage = useTabDrag((d) => d.onPage);
+  const folderTile = !!folderOf(item);
+  const onPage = useTabDrag((d) => d.phase === "tab" && d.onPage);
   const face = ghost.face;
   if (face)
     return (
       <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width, height, opacity: onPage ? 0 : 1, transform: position.getTranslateTransform() }}>
-        <View style={{ width, height, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding, paddingRight: 6, borderRadius: layout.rowRadius, backgroundColor: theme.dark ? LIFTED_FILL : tokens.selectedFill }}>
+        <View style={{ width, height, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding, paddingRight: 6, borderRadius: layout.rowRadius, backgroundColor: theme.dark ? DRAG_LIFTED_FILL : tokens.selectedFill }}>
           <TabIcon url={face.url} favicon={face.favicon} icon={face.icon} profileId={face.profileId} />
           <FadeLabel text={face.title} fontSize={layout.rowFontSize} weight="regular" color={arcTitle ?? arcLabel ?? theme.textPrimary} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
           <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
@@ -65,15 +68,11 @@ export function DragGhost({ ghost }: { ghost: Ghost }) {
     );
   return (
     <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width, height, opacity: onPage ? 0 : 1, transform: position.getTranslateTransform() }}>
-      <Surface
-        fill={hex(tokens.dragSilhouette)}
-        cornerRadius={flat && !tile ? layout.rowRadius : 10}
-        borderColor={hex(tokens.dragBorder)}
-        borderWidth={0.5}
-        shadowColor="#000000"
-        shadowOpacity={theme.dark ? 0.45 : 0.18}
-        shadowRadius={10}
-        shadowOffset={[0, 4]}
+      <Panel
+        fill={tokens.dragSilhouette}
+        radius={flat && !tile ? layout.rowRadius : radius.card}
+        border={tokens.dragBorder}
+        shadow={SIDEBAR_SHADOW.dragGhost}
         style={{
           width,
           height: tile ? layout.pinnedHeight : height,
@@ -85,26 +84,28 @@ export function DragGhost({ ghost }: { ghost: Ghost }) {
           opacity: 0.96,
         }}
       >
-        {folderTile ? <FolderMosaic tabIds={item.tabIds} /> : liveIcon && !flat ? (
+        {folderTile ? (
+          <FolderMosaic tabIds={item.tabIds} />
+        ) : liveIcon && !flat ? (
           <TabIcon url={liveIcon.site} icon={liveIcon.icon} />
         ) : flat && groupRow ? (
-          <FolderGlyph colors={folderColors} open={!item.collapsed} icon={liveFolder ? liveFolder.icon : group?.icon} />
-        ) : group?.icon || tab ? (
-          <TabIcon url={tab?.url ?? ""} favicon={tab?.favicon} icon={group?.icon ?? tab?.customIcon} profileId={tab?.profileId} />
+          <FolderGlyph colors={folderColors} open={!item.collapsed} icon={folder ? folder.icon : groupIcon} />
+        ) : groupIcon || tab ? (
+          <TabIcon url={tab?.url ?? ""} favicon={tab?.favicon} icon={groupIcon ?? tab?.customIcon} profileId={tab?.profileId} />
         ) : null}
         {!tile ? (
           <FadeLabel
-            text={liveFolder ? liveFolder.name : label}
-            fontSize={flat ? layout.rowFontSize : 13}
+            text={label}
+            fontSize={flat ? layout.rowFontSize : font.body.fontSize}
             weight={groupRow ? (flat ? "semibold" : "medium") : "regular"}
-            color={(item.kind === "row" || item.kind === "group" || item.kind === "live" ? arcTitle : null) ?? arcLabel ?? (flat && groupRow ? theme.textTab : theme.textPrimary)}
+            color={(item.kind === "row" || groupRow ? arcTitle : null) ?? arcLabel ?? (flat && groupRow ? theme.textTab : theme.textPrimary)}
             style={{ flex: 1, height: 18, marginLeft: flat ? layout.rowLabelGap : 7 }}
           />
         ) : null}
-      </Surface>
+      </Panel>
       {count > 1 && !folderTile ? (
         <View style={{ position: "absolute", top: -6, right: -4, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ fontSize: 11, fontWeight: "700", color: "#FFFFFF" }}>{count}</Text>
+          <Text style={{ ...font.caption, fontWeight: weight.bold, color: ink.white }}>{count}</Text>
         </View>
       ) : null}
     </Animated.View>

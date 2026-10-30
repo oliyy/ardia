@@ -1,30 +1,31 @@
-import { ContextMenuArea, discardKeyResponder, onAppEvent, onCommand, onWindowEvent, PopoverBubble, popoverBubbleAvailable, restoreKeyResponder, saveKeyResponder, Symbol } from "@ardia/shell";
 import { Fragment, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
-import { createProfile, switchProfile } from "../../lib/actions";
-import { markHoverProps } from "../../lib/hoverShift";
-import { useBrowser } from "../../store/browser";
-import { activeTabId } from "../../store/model";
-import { POPOVER_MOTION } from "../layout/controls";
-import { useDockMotion } from "../layout/dockMotion";
-import { openNewTabInSplit } from "../layout/splitActions";
-import { addressBarInSidebar, SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT } from "../layout/windowLayout";
-import { toggleNewTabBar } from "../omnibox/newTabBar";
-import { IconButton } from "../primitives";
-import { newPinnedFolder } from "./menus";
-import { setSidebarUi, sidebarUi, useSidebarUi, type Anchor } from "./state";
-import { useSidebarWidth } from "./tokens";
+import { markHoverProps } from "../../lib/hoverMarks";
+import { useWindow } from "../../state/browser/hooks";
+import { useSidebarWidth } from "../../state/sidebar/hooks";
+import {
+  dismissPlusMenu,
+  dismissPlusMenuIn,
+  dismissPlusOpening,
+  plusMenuLive,
+  plusMenuOpening,
+  pressPlusButton,
+  runPlusAction,
+  type PlusAction,
+  type PlusMenuShown,
+  type PlusOpening,
+} from "../../state/sidebar/plusMenu";
+import { useSidebarUi } from "../../state/sidebar/sidebarUi";
+import { Button, ContextMenuArea, PopoverBubble, POPOVER_MOTION, Symbol, weight } from "../ui";
+import { SIDEBAR_FOOTER_BUTTON, SIDEBAR_FOOTER_HEIGHT } from "./geometry";
+import { PLUS_MENU_INK as INK } from "./tokens";
 
 const MENU = { width: 210, radius: 13, pad: 8, row: 40, divider: 17, inset: 8, rowRadius: 8, iconLeft: 18, icon: 20, labelLeft: 51, shortcutRight: 21, edge: 8, anchorRight: 16, arrowShift: -3 } as const;
 const ARROW = { width: 12, height: 6 } as const;
-const INK = { body: "#000214", surface: "#192759", label: "#FFFFFF", shortcut: "#767880" } as const;
 const KEYS = [{ key: "ArrowUp" }, { key: "ArrowDown" }, { key: "Enter" }, { key: "Escape" }];
 
-type Action = "space" | "folder" | "split" | "tab";
-type Item = { id: Action; title: string; icon: string; shortcut?: string; group: number };
-type Menu = { windowId: string; anchor: Anchor; id: number };
+type Item = { id: PlusAction; title: string; icon: string; shortcut?: string; group: number };
 type Size = { width: number; height: number };
-type Opening = { id: number; windowId: string; start: string; token: number | null; done: boolean; focus: (() => void) | null; stop: () => void };
 
 const ITEMS: Item[] = [
   { id: "space", title: "New Space", icon: "plus.square.on.square", group: 0 },
@@ -33,169 +34,43 @@ const ITEMS: Item[] = [
   { id: "tab", title: "New Tab", icon: "plus.square", shortcut: "⌘T", group: 1 },
 ];
 
-let openings = 0;
-let current: Opening | null = null;
-
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
-
-function watched(windowId: string): string | null {
-  const s = useBrowser.getState();
-  const w = s.windows[windowId];
-  if (!w) return null;
-  const ui = s.windowUi[windowId];
-  const u = sidebarUi();
-  const dock = useDockMotion.getState();
-  return [
-    w.profileId,
-    activeTabId(s, windowId),
-    !!w.incognito,
-    addressBarInSidebar(s, windowId),
-    s.ui.focusedWindowId,
-    w.frame,
-    s.settings.sidebarWidth,
-    !!ui?.panel.open,
-    !!ui?.downloadsOpen,
-    w.sidebarOpen || windowId in dock.peeks,
-    !!dock.moving[windowId],
-    !!u.iconPicker,
-    !!u.searchTabs,
-    !!u.switcher,
-    !!u.renaming,
-    u.dragWidth[windowId] ?? null,
-  ].join("|");
-}
-
-const live = (opening: Opening) => !opening.done && current === opening && watched(opening.windowId) === opening.start;
-
-function dismissOpening(opening: Opening, explicit: boolean) {
-  if (opening.done) return;
-  const restore = explicit && live(opening) && useBrowser.getState().ui.focusedWindowId === opening.windowId;
-  opening.done = true;
-  opening.focus = null;
-  opening.stop();
-  if (current === opening) current = null;
-  if (sidebarUi().plusMenu?.id === opening.id) setSidebarUi({ plusMenu: null });
-  if (opening.token === null) return;
-  if (restore) void restoreKeyResponder(opening.token);
-  else discardKeyResponder(opening.token);
-}
-
-function watchOpening(opening: Opening): () => void {
-  const quit = () => dismissOpening(opening, false);
-  const check = () => {
-    if (watched(opening.windowId) !== opening.start) quit();
-  };
-  const subscriptions = [
-    onCommand((e) => {
-      if ((e.command === "newTab" || e.command === "openSplitPane") && (!e.windowId || e.windowId === opening.windowId)) quit();
-    }),
-    onAppEvent((e) => {
-      if (e.type === "resignActive" || e.type === "screenLocked") quit();
-    }),
-    onWindowEvent((e) => {
-      if ((e.type === "focus" && e.id !== opening.windowId) || (e.type === "close" && e.id === opening.windowId)) quit();
-    }),
-  ];
-  const stops = [useBrowser.subscribe(check), useSidebarUi.subscribe(check), useDockMotion.subscribe(check)];
-  return () => {
-    subscriptions.forEach((subscription) => subscription.remove());
-    stops.forEach((stop) => stop());
-  };
-}
-
-function beginPlusMenu(windowId: string): Opening | null {
-  const start = watched(windowId);
-  if (start === null) return null;
-  const opening: Opening = { id: ++openings, windowId, start, token: null, done: false, focus: null, stop: () => {} };
-  current = opening;
-  opening.stop = watchOpening(opening);
-  return opening;
-}
-
-function showPlusMenu(opening: Opening, anchor: Anchor) {
-  if (!live(opening)) return dismissOpening(opening, false);
-  void saveKeyResponder(opening.windowId).then((token) => {
-    if (opening.done) return discardKeyResponder(token);
-    opening.token = token;
-    if (!live(opening)) return dismissOpening(opening, false);
-    opening.focus?.();
-  });
-  setSidebarUi({ plusMenu: { windowId: opening.windowId, anchor, id: opening.id } });
-}
-
-function dismissPlusMenu(id: number, explicit: boolean) {
-  if (current?.id === id) return dismissOpening(current, explicit);
-  if (sidebarUi().plusMenu?.id === id) setSidebarUi({ plusMenu: null });
-}
-
-export function cancelPlusMenu() {
-  if (current) dismissOpening(current, false);
-  else if (sidebarUi().plusMenu) setSidebarUi({ plusMenu: null });
-}
-
-function runAction(menu: Menu, action: Action) {
-  const opening = current;
-  if (!opening || opening.id !== menu.id) return;
-  if (!live(opening)) return dismissOpening(opening, false);
-  const { windowId } = opening;
-  const w = useBrowser.getState().windows[windowId];
-  dismissOpening(opening, false);
-  if (!w) return;
-  if (action === "space") void createProfile(windowId).then((id) => id && switchProfile(windowId, id));
-  else if (action === "folder") {
-    if (!w.incognito) newPinnedFolder(windowId);
-  } else if (action === "split") openNewTabInSplit(windowId);
-  else if (!toggleNewTabBar(windowId)) useBrowser.getState().newTab(windowId);
-}
 
 export function PlusButton({ windowId, color }: { windowId: string; color: string }) {
   const open = useSidebarUi((u) => u.plusMenu?.windowId === windowId);
   const button = useRef<View>(null);
-  const owned = useRef<Opening | null>(null);
+  const owned = useRef<PlusOpening | null>(null);
   useEffect(
     () => () => {
-      if (owned.current) dismissOpening(owned.current, false);
+      if (owned.current) dismissPlusOpening(owned.current, false);
     },
     [],
   );
   const press = () => {
-    const previous = current;
-    if (previous) {
-      dismissOpening(previous, previous.windowId === windowId);
-      if (previous.windowId === windowId) return;
-    } else if (sidebarUi().plusMenu) setSidebarUi({ plusMenu: null });
-    const opening = beginPlusMenu(windowId);
-    if (!opening) return;
-    owned.current = opening;
-    button.current?.measureInWindow((x, y, width, height) => {
-      if (opening.done) return;
-      if (!width || !height) return dismissOpening(opening, false);
-      showPlusMenu(opening, { x, y, width, height });
+    const opening = pressPlusButton(windowId, (placed) => {
+      if (!button.current) return placed(null);
+      button.current.measureInWindow((x, y, width, height) => placed(width && height ? { x, y, width, height } : null));
     });
+    if (opening) owned.current = opening;
   };
   return (
     <View ref={button} collapsable={false}>
-      <IconButton icon={open ? "xmark" : "plus"} size={open ? 13 : 18} weight="medium" color={color} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip={open ? undefined : "New"} onPress={press} />
+      <Button variant="icon" icon={open ? "xmark" : "plus"} size={open ? 13 : 18} weight="medium" color={color} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip={open ? undefined : "New"} onPress={press} />
     </View>
   );
 }
 
 export function PlusMenu({ windowId, size }: { windowId: string; size: Size }) {
   const menu = useSidebarUi((u) => (u.plusMenu?.windowId === windowId ? u.plusMenu : null));
-  const [shown, setShown] = useState<Menu | null>(menu);
+  const [shown, setShown] = useState<PlusMenuShown | null>(menu);
   if (menu && menu !== shown) setShown(menu);
-  useEffect(
-    () => () => {
-      if (current?.windowId === windowId) dismissOpening(current, false);
-    },
-    [windowId],
-  );
+  useEffect(() => () => dismissPlusMenuIn(windowId), [windowId]);
   if (!shown) return null;
   return <Panel key={shown.id} menu={shown} size={size} closing={menu !== shown} onClosed={() => setShown((m) => (m === shown ? null : m))} />;
 }
 
-function Panel({ menu, size, closing, onClosed }: { menu: Menu; size: Size; closing: boolean; onClosed: () => void }) {
-  const incognito = useBrowser((s) => !!s.windows[menu.windowId]?.incognito);
+function Panel({ menu, size, closing, onClosed }: { menu: PlusMenuShown; size: Size; closing: boolean; onClosed: () => void }) {
+  const incognito = useWindow(menu.windowId, (w) => w?.kind === "private");
   const sidebarWidth = useSidebarWidth(menu.windowId);
   const [opened] = useState(() => ({ size, sidebarWidth }));
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
@@ -222,11 +97,11 @@ function Panel({ menu, size, closing, onClosed }: { menu: Menu; size: Size; clos
   }, [closing, size.width, size.height, sidebarWidth]);
 
   useEffect(() => {
-    const opening = current?.id === menu.id ? current : null;
+    const opening = plusMenuOpening(menu.id);
     if (closing || !placed || !opening) return;
     const focus = () => {
-      if (mounted.current && live(opening)) keys.current?.focus();
-      else dismissOpening(opening, false);
+      if (mounted.current && plusMenuLive(opening)) keys.current?.focus();
+      else dismissPlusOpening(opening, false);
     };
     if (opening.token !== null) return focus();
     opening.focus = focus;
@@ -251,7 +126,7 @@ function Panel({ menu, size, closing, onClosed }: { menu: Menu; size: Size; clos
     if (key === "Escape") return dismissPlusMenu(menu.id, true);
     if (key === "Enter") {
       const item = selected === null ? undefined : items[selected];
-      if (item) runAction(menu, item.id);
+      if (item) runPlusAction(menu, item.id);
       return;
     }
     const step = key === "ArrowDown" ? 1 : key === "ArrowUp" ? -1 : 0;
@@ -285,7 +160,7 @@ function Panel({ menu, size, closing, onClosed }: { menu: Menu; size: Size; clos
       style={StyleSheet.absoluteFill}
       onLayout={() =>
         root.current?.measureInWindow((x, y) => {
-          if (mounted.current && current?.id === menu.id) setOrigin({ x, y });
+          if (mounted.current && plusMenuOpening(menu.id)) setOrigin({ x, y });
         })
       }
     >
@@ -311,24 +186,20 @@ function Panel({ menu, size, closing, onClosed }: { menu: Menu; size: Size; clos
             ],
           }}
         >
-          {popoverBubbleAvailable ? (
-            <PopoverBubble
-              material="menu"
-              dark
-              cornerRadius={MENU.radius}
-              arrowEdge="bottom"
-              arrowX={arrowX}
-              arrowWidth={ARROW.width}
-              arrowHeight={ARROW.height}
-              tint={INK.body}
-              shadowOpacity={0.35}
-              shadowRadius={16}
-              shadowOffsetY={6}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : (
-            <View style={{ ...StyleSheet.absoluteFillObject, bottom: ARROW.height, borderRadius: MENU.radius, backgroundColor: INK.body }} />
-          )}
+          <PopoverBubble
+            material="menu"
+            dark
+            cornerRadius={MENU.radius}
+            arrowEdge="bottom"
+            arrowX={arrowX}
+            arrowWidth={ARROW.width}
+            arrowHeight={ARROW.height}
+            tint={INK.body}
+            shadowOpacity={0.35}
+            shadowRadius={16}
+            shadowOffsetY={6}
+            style={StyleSheet.absoluteFill}
+          />
           <View
             ref={keys}
             focusable
@@ -343,7 +214,7 @@ function Panel({ menu, size, closing, onClosed }: { menu: Menu; size: Size; clos
                 {index > 0 && item.group !== items[index - 1]!.group ? (
                   <View style={{ height: 1, marginVertical: (MENU.divider - 1) / 2, marginHorizontal: 12, backgroundColor: INK.surface }} />
                 ) : null}
-                <Row item={item} index={index} selected={selected === index} onSelect={setSelected} onPress={() => runAction(menu, item.id)} />
+                <Row item={item} index={index} selected={selected === index} onSelect={setSelected} onPress={() => runPlusAction(menu, item.id)} />
               </Fragment>
             ))}
           </View>
@@ -360,7 +231,7 @@ function Row({ item, index, selected, onSelect, onPress }: { item: Item; index: 
       <Pressable focusable={false} accessibilityRole="menuitem" accessibilityLabel={item.title} onPress={onPress}>
         <View style={{ height: MENU.row, marginHorizontal: MENU.inset, borderRadius: MENU.rowRadius, flexDirection: "row", alignItems: "center", backgroundColor: selected ? INK.surface : undefined }}>
           <Symbol name={item.icon} size={16} weight="medium" color={INK.label} style={{ width: MENU.icon, height: MENU.icon, marginLeft: MENU.iconLeft - MENU.inset }} />
-          <Text numberOfLines={1} style={{ flex: 1, marginLeft: MENU.labelLeft - MENU.iconLeft - MENU.icon, fontSize: 14, fontWeight: "600", color: INK.label }}>
+          <Text numberOfLines={1} style={{ flex: 1, marginLeft: MENU.labelLeft - MENU.iconLeft - MENU.icon, fontSize: 14, fontWeight: weight.semibold, color: INK.label }}>
             {item.title}
           </Text>
           {item.shortcut ? <Text style={{ marginRight: MENU.shortcutRight - MENU.inset, fontSize: 14, letterSpacing: 2, color: INK.shortcut }}>{item.shortcut}</Text> : null}

@@ -1,4 +1,4 @@
-import { isCalendarTab } from "../live/CalendarPreview";
-import { showsMiniPlayer } from "../media/HoverPlayer";
+import { isCalendarTab } from "../../state/live/calendar";
+import { showsMiniPlayer } from "../../state/media/media";
 
 export const tabHasCard = (tabId: string) => showsMiniPlayer(tabId) || isCalendarTab(tabId);

@@ -1,22 +1,10 @@
-import { Symbol } from "@ardia/shell";
 import { View } from "react-native";
-import { useTheme } from "../../../lib/theme";
-import { useBrowser } from "../../../store/browser";
-import {
-  LITTLE_DESTINATION,
-  newLinkRuleId,
-  RECENT_DESTINATION,
-  withDefaultDestination,
-  withLinkRule,
-  withLinkRuleChanged,
-  withoutLinkRule,
-  type LinkDestination,
-  type LinkRouting,
-  type LinkRule,
-} from "../../../store/linkRouting";
-import { lastActiveProfile } from "../../../store/small";
-import { IconButton } from "../../primitives";
-import { Button, Group, PopUp, Row, SectionHeader, TextField, type Option } from "../controls";
+import { useTheme } from "../../ui/theme";
+import { useProfiles, useSettings } from "../../../state/browser/hooks";
+import { LITTLE_DESTINATION, RECENT_DESTINATION, type LinkDestination, type LinkRule } from "../../../state/settings/linkRouting";
+import { addLinkRule, changeLinkRule, removeLinkRule, setDefaultLinkDestination } from "../../../state/settings/linkRoutingActions";
+import { Button, PopUp, Symbol, TextField, type Option } from "../../ui";
+import { Group, Row, SectionHeader } from "../Form";
 
 const MATCH_OPTIONS: Option<LinkRule["match"]>[] = [
   { value: "contains", title: "Contains" },
@@ -28,39 +16,31 @@ const destinationValue = (d: LinkDestination) => (d.kind === "profile" ? `profil
 const destinationFrom = (value: string): LinkDestination =>
   value === "little" ? LITTLE_DESTINATION : value === "recent" ? RECENT_DESTINATION : { kind: "profile", profileId: value.slice("profile:".length) };
 
-const routing = () => useBrowser.getState().settings.linkRouting;
-const save = (linkRouting: LinkRouting) => useBrowser.getState().updateSettings({ linkRouting });
-
 export function useLinkDestinationOptions(): Option<string>[] {
-  const profiles = useBrowser((s) => s.profiles);
-  const order = useBrowser((s) => s.profileOrder);
+  const profiles = useProfiles();
   return [
-    ...order.filter((id) => profiles[id]).map((id) => ({ value: `profile:${id}`, title: profiles[id]!.name })),
+    ...profiles.map((p) => ({ value: `profile:${p.id}`, title: p.name })),
     { value: "recent", title: "Most Recent Profile", separatorBefore: true },
     { value: "little", title: "Little Ardia" },
   ];
 }
 
 export function LinkDefaultPopUp({ minWidth = 190 }: { minWidth?: number }) {
-  const value = useBrowser((s) => destinationValue(s.settings.linkRouting.defaultDestination));
+  const value = useSettings((s) => destinationValue(s.linkRouting.defaultDestination));
   const options = useLinkDestinationOptions();
-  return <PopUp value={value} options={options} onChange={(v) => save(withDefaultDestination(routing(), destinationFrom(v)))} minWidth={minWidth} />;
+  return <PopUp value={value} options={options} onChange={(v) => setDefaultLinkDestination(destinationFrom(v))} minWidth={minWidth} />;
 }
 
 export function LinksPane() {
-  const rules = useBrowser((s) => s.settings.linkRouting.rules);
+  const rules = useSettings((s) => s.linkRouting.rules);
   const options = useLinkDestinationOptions();
-  const add = () => {
-    const s = useBrowser.getState();
-    save(withLinkRule(s.settings.linkRouting, { id: newLinkRuleId(), match: "contains", text: "", destination: { kind: "profile", profileId: lastActiveProfile(s) } }));
-  };
 
   return (
     <View>
       <SectionHeader
         anchor="links.routes"
         description="A link that matches a route opens there instead. The first matching route wins."
-        action={<Button title="New Route" icon="plus" onPress={add} />}
+        action={<Button title="New Route" icon="plus" onPress={addLinkRule} />}
       />
       <Group>
         {rules.length === 0 ? (
@@ -82,14 +62,14 @@ export function LinksPane() {
 
 function RouteRow({ rule, options }: { rule: LinkRule; options: Option<string>[] }) {
   const theme = useTheme();
-  const change = (patch: Partial<Omit<LinkRule, "id">>) => save(withLinkRuleChanged(routing(), rule.id, patch));
+  const change = (patch: Partial<Omit<LinkRule, "id">>) => changeLinkRule(rule.id, patch);
   return (
     <View style={{ minHeight: 40, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
       <PopUp value={rule.match} options={MATCH_OPTIONS} onChange={(match) => change({ match })} minWidth={106} />
       <TextField value={rule.text} onChangeText={(text) => change({ text })} placeholder="example.com" style={{ flex: 1 }} />
       <Symbol name="arrow.right" size={11} weight="semibold" color={theme.textTertiary} style={{ width: 14, height: 14 }} />
       <PopUp value={destinationValue(rule.destination)} options={options} onChange={(v) => change({ destination: destinationFrom(v) })} minWidth={150} />
-      <IconButton icon="trash" size={12} box={24} radius={6} onPress={() => save(withoutLinkRule(routing(), rule.id))} tooltip="Remove Route" />
+      <Button variant="icon" icon="trash" size={12} box={24} radius={6} onPress={() => removeLinkRule(rule.id)} tooltip="Remove Route" />
     </View>
   );
 }

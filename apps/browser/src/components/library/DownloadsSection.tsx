@@ -1,21 +1,24 @@
-import { cancelDownload, pauseDownload, resumeDownload } from "@ardia/ardiacore";
-import { ContextMenuArea, fileExists, fileThumbnail, MouseArea, openFile, revealFile } from "@ardia/shell";
 import { memo, useEffect, useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import { useShallow } from "zustand/react/shallow";
-import { layout, useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { downloadSession, downloadsIn, type StoredDownload } from "../../store/ui";
-import { downloadMenu, downloadStatus, FileIcon } from "../Downloads";
+import { fileExists, fileThumbnail, openFile, revealFile } from "../../state/app/system";
+import { useDownloads } from "../../state/browser/hooks";
+import { cancelDownload, pauseDownload, resumeDownload } from "../../state/downloads/actions";
+import { downloadMenu } from "../../state/downloads/downloadMenu";
+import type { StoredDownload } from "../../state/downloads/downloadsSlice";
+import { downloadStatus } from "../../state/downloads/status";
+import { downloadMatches, fileKind, groupByDay, kindLabel, type DownloadFilter } from "../../state/library/groups";
+import { useDownloadSession } from "../../state/library/hooks";
+import { FileIcon } from "../downloads/Downloads";
 import { hostLabel, matchesQuery } from "../pages/PageLayout";
-import { IconButton, useHover } from "../primitives";
-import { downloadMatches, fileKind, groupByDay, kindLabel, LIBRARY_ROW, type DownloadFilter } from "./groups";
+import { Button, ContextMenuArea, layout, MouseArea, useHover, useTheme, weight } from "../ui";
+import { LIBRARY_ROW } from "./tokens";
 
 const THUMB = 28;
 
 export function LibraryGroupTitle({ title }: { title: string }) {
   const theme = useTheme();
-  return <Text style={{ fontSize: 12, fontWeight: "600", color: theme.textSecondary, paddingHorizontal: 8, paddingTop: 12, paddingBottom: 4 }}>{title}</Text>;
+  return <Text style={{ fontSize: 12, fontWeight: weight.semibold, color: theme.textSecondary, paddingHorizontal: 8, paddingTop: 12, paddingBottom: 4 }}>{title}</Text>;
 }
 
 export function LibraryEmpty({ title }: { title: string }) {
@@ -24,7 +27,7 @@ export function LibraryEmpty({ title }: { title: string }) {
 }
 
 export function DownloadsSection({ windowId, query, filter, visible }: { windowId: string; query: string; filter: DownloadFilter; visible: boolean }) {
-  const downloads = useBrowser(useShallow((s) => downloadsIn(s, windowId)));
+  const downloads = useDownloads(windowId, useShallow((all: StoredDownload[]) => all));
   const groups = useMemo(() => {
     const shown = downloads.filter((d) => downloadMatches(filter, d.filename, d.mimeType) && matchesQuery(query, d.filename, d.url));
     return groupByDay(shown, (d) => d.seenAt);
@@ -64,7 +67,7 @@ const DownloadRow = memo(function DownloadRow({ d, windowId, visible }: { d: Sto
             <DownloadThumb d={d} size={THUMB} visible={visible} />
           </View>
           <View style={{ flex: 1, gap: 2 }}>
-            <Text numberOfLines={1} style={{ fontSize: 13.5, fontWeight: "500", color: exists ? theme.textPrimary : theme.textSecondary, textDecorationLine: exists ? "none" : "line-through" }}>
+            <Text numberOfLines={1} style={{ fontSize: 13.5, fontWeight: weight.medium, color: exists ? theme.textPrimary : theme.textSecondary, textDecorationLine: exists ? "none" : "line-through" }}>
               {d.filename || "Preparing…"}
             </Text>
             {d.state === "downloading" ? (
@@ -78,11 +81,11 @@ const DownloadRow = memo(function DownloadRow({ d, windowId, visible }: { d: Sto
           </View>
           {hovered && d.state === "downloading" ? (
             <>
-              <IconButton icon={d.paused ? "play.circle" : "pause.circle"} size={14} box={24} radius={6} onPress={() => void (d.paused ? resumeDownload(d.id) : pauseDownload(d.id))} tooltip={d.paused ? "Resume" : "Pause"} />
-              <IconButton icon="xmark.circle" size={14} box={24} radius={6} onPress={() => void cancelDownload(d.id)} tooltip="Cancel" />
+              <Button variant="icon" icon={d.paused ? "play.circle" : "pause.circle"} size={14} box={24} radius={6} onPress={() => void (d.paused ? resumeDownload(d.id) : pauseDownload(d.id))} tooltip={d.paused ? "Resume" : "Pause"} />
+              <Button variant="icon" icon="xmark.circle" size={14} box={24} radius={6} onPress={() => void cancelDownload(d.id)} tooltip="Cancel" />
             </>
           ) : hovered && done ? (
-            <IconButton icon="magnifyingglass" size={13} box={24} radius={6} onPress={() => void revealFile(d.path)} tooltip="Show in Finder" />
+            <Button variant="icon" icon="magnifyingglass" size={13} box={24} radius={6} onPress={() => void revealFile(d.path)} tooltip="Show in Finder" />
           ) : null}
         </Pressable>
       </MouseArea>
@@ -94,8 +97,9 @@ type Thumbnail = { key: string; uri: string | null };
 
 export const DownloadThumb = memo(function DownloadThumb({ d, size, visible }: { d: StoredDownload; size: number; visible: boolean }) {
   const kind = fileKind(d.filename, d.mimeType);
+  const session = useDownloadSession(d);
   const media = d.state === "finished" && (kind === "image" || kind === "movie") && !!d.path && fileExists(d.path);
-  const key = media ? [d.id, d.path, d.seenAt ?? "", size, d.profile ?? "", d.offTheRecord ? "otr" : "", downloadSession(d) ?? ""].join("\n") : null;
+  const key = media ? [d.id, d.path, d.seenAt ?? "", size, d.profile ?? "", d.offTheRecord ? "otr" : "", session ?? ""].join("\n") : null;
   const [thumbnail, setThumbnail] = useState<Thumbnail | null>(null);
   const known = !!key && thumbnail?.key === key;
   const uri = key && thumbnail?.key === key ? thumbnail.uri : null;

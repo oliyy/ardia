@@ -1,116 +1,22 @@
-import { FadeLabel, Symbol } from "@ardia/shell";
 import { Image, Text, View } from "react-native";
-import { resolveFavicon, useFavicons } from "../../lib/favicons";
-import { bundledSiteIcon } from "../../lib/siteIcons";
-import { layout, useTheme } from "../../lib/theme";
-import { errorText } from "../../live/engine";
-import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
-import { liveFolderIcon, SOURCES } from "../../live/sources";
-import type { live } from "../../live/store";
-import type { CompletedItem, CompletionState, LiveFolder, LiveItem } from "../../live/types";
-import { useLiveColors } from "../live/colors";
-import type { BrowserState } from "../../store/browser";
-import { activeTabId, viewTabIds } from "../../store/model";
-import type { GroupColor } from "../../store/types";
-import { groupLabel } from "../../store/organize";
-import { splitRowPanes } from "../../store/splits";
-import { tabTitle } from "./actions";
-import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_PAD, GROUP_RADIUS, groupFrame, keptEntry } from "./geometry";
-import { useAddressBarInSidebar } from "../layout/windowLayout";
+import { FadeLabel, font, Symbol, weight, withAlpha } from "../ui";
+import { HoverSlot } from "../ui/HoverSlot";
+import { layout, useTheme } from "../ui/theme";
+import { bundledSiteIcon } from "../favicon/siteIcons";
+import { FaviconFallback, NewTabIcon } from "../favicon/Favicon";
+import { SOURCES } from "../../state/live/sources";
+import type { FolderRow } from "../../state/live/rows";
+import type { LiveData } from "../../state/sidebar/listCapture";
+import { groupFrame } from "../../state/sidebar/geometry";
+import { useAddressBarInSidebar } from "../../state/windows/layout";
+import { iconSymbol } from "../../lib/customIcon";
+import { useLiveColors } from "../live/tokens";
+import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_PAD, GROUP_RADIUS } from "./geometry";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
-import { pointerOnRow } from "./hover";
-import { ItemIcon, LiveSubtitle, Trailing } from "./LiveFolderBlock";
-import { folderChildrenWith } from "./pinnedTree";
-import { FaviconFallback, NewTabIcon } from "../primitives";
-import { HoverSlot } from "../HoverSlot";
-import { SYMBOL_PREFIX, TabIcon } from "./TabIcon";
-import { GROUP_COLORS, useArcLabel, useArcTitle, useSidebarTokens, withAlpha } from "./tokens";
-
-type TabShot = { kind: "tab"; key: string; title: string; url: string; favicon?: string | null; icon?: string | null; profileId: string; uri: string | null; template: boolean; sound: "muted" | "playing" | null; hovered: boolean };
-type SplitShot = { kind: "split"; key: string; panes: TabShot[] };
-type LiveItemShot = { key: string; item: LiveItem; indent: number; completing: CompletedItem["state"] | null; done: CompletionState | null; dot: boolean; unread: boolean };
-type LiveRowShot =
-  | { kind: "title"; key: string; title: string }
-  | { kind: "more"; key: string; count: number }
-  | { kind: "stack"; key: string; repo: string; count: number; items: LiveItemShot[] | null }
-  | { kind: "item"; key: string; item: LiveItemShot }
-  | { kind: "note"; key: string; text: string }
-  | { kind: "tab"; key: string; tab: TabShot };
-type LiveShot = {
-  kind: "live";
-  key: string;
-  name: string;
-  custom: string | null;
-  icon: string | null;
-  site: string;
-  githubMark: boolean;
-  error: string | null;
-  updating: boolean;
-  unread: boolean;
-  count: number;
-  collapsed: boolean;
-  rows: LiveRowShot[];
-};
-export type LiveData = ReturnType<typeof live>;
-type GroupShot = {
-  kind: "group";
-  key: string;
-  label: string;
-  color: string | null;
-  icon: { url: string; favicon?: string | null; icon?: string | null; profileId?: string } | null;
-  custom: string | null;
-  collapsed: boolean;
-  members: EntrySnapshot[];
-};
-export type EntrySnapshot = TabShot | SplitShot | GroupShot | LiveShot;
-
-function tabShot(s: BrowserState, tabId: string, hovered: boolean): TabShot | null {
-  const tab = s.tabs[tabId];
-  if (!tab) return null;
-  const uri = tab.customIcon ? null : (resolveFavicon(tab.url, tab.favicon, tab.profileId)?.uri ?? null);
-  const shape = uri ? useFavicons.getState().themes[uri] : null;
-  return {
-    uri,
-    template: shape?.kind === "template" && !!shape.stroke,
-    kind: "tab",
-    key: `t:${tabId}`,
-    title: tabTitle(tab),
-    url: tab.url,
-    favicon: tab.favicon,
-    icon: tab.customIcon,
-    profileId: tab.profileId,
-    sound: tab.muted ? "muted" : s.live[tabId]?.playingAudio ? "playing" : null,
-    hovered,
-  };
-}
-
-function splitShot(s: BrowserState, splitId: string): SplitShot {
-  const panes = splitRowPanes(s, s.splits[splitId]);
-  return { kind: "split", key: `s:${splitId}`, panes: panes.flatMap((id) => tabShot(s, id, false) ?? []) };
-}
-
-function itemShot(data: LiveData, folderId: string, item: LiveItem, indent: number, done: CompletionState | null = null): LiveItemShot {
-  const completing = !done && data.completing[folderId]?.includes(item.id) ? (data.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null;
-  const unread = !done && !!data.unread[folderId]?.includes(item.id);
-  return { key: item.id, item, indent, completing, done, dot: unread || (!done && !completing && awaitsReview(item)), unread };
-}
-
-function noteText(data: LiveData, folder: LiveFolder): string {
-  const status = data.status[folder.id];
-  if (!status || status.state === "initializing" || (status.state === "updating" && !status.lastFetch)) return "Loading…";
-  if (status.error) return errorText(status.error.kind, status.error.source);
-  const hidden = data.hidden[folder.id]?.length ?? 0;
-  if (hidden) return `${hidden} hidden until you refresh`;
-  return folder.kind === "pullRequests" ? "No open pull requests" : "No recent documents";
-}
-
-function rowShot(data: LiveData, folderId: string, row: FolderRow): LiveRowShot {
-  if (row.kind === "header") return { kind: "title", key: row.key, title: row.title };
-  if (row.kind === "more") return { kind: "more", key: row.key, count: row.count };
-  if (row.kind === "item") return { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, 0, row.done ?? null) };
-  const open = data.expandedStacks[row.id] !== false;
-  return { kind: "stack", key: row.key, repo: row.repo.split("/")[1] ?? row.repo, count: row.items.length, items: open ? row.items.map((it) => itemShot(data, folderId, it, 10)) : null };
-}
+import { ItemIcon, LiveSubtitle, Trailing } from "./LiveItemRow";
+import { TabIcon } from "./TabIcon";
+import { groupSurface, TABULAR_NUMS, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
+import { itemShot, rowShot, type EntrySnapshot, type GroupShot, type LiveItemShot, type LiveRowShot, type LiveShot, type SplitShot, type TabShot } from "./ghostShots";
 
 export function LiveRowGhost({ data, folderId, row, indent = 0 }: { data: LiveData; folderId: string; row: FolderRow; indent?: number }) {
   const theme = useTheme();
@@ -125,79 +31,6 @@ export function LiveRowGhost({ data, folderId, row, indent = 0 }: { data: LiveDa
   return <View>{liveRowGhost(shot, theme, label, flat)}</View>;
 }
 
-function liveShot(s: BrowserState, windowId: string, profileId: string, folderId: string, data: LiveData, peek: boolean): LiveShot | null {
-  const folder = data.folders[folderId];
-  if (!folder) return null;
-  const fetched = data.items[folderId] ?? [];
-  const items = shownItems(folder, fetched);
-  const completed = shownCompleted(folder, data.completed[folderId] ?? []);
-  const rows = folderRows(folder, openItems(items, completed), data.showAll, completed);
-  const itemIds = new Set([...items, ...completed.map((c) => c.item)].map((i) => i.id));
-  const hiddenIds = new Set([...(data.hidden[folderId] ?? []), ...fetched.filter((it) => !itemIds.has(it.id))].map((item) => item.id));
-  const strays = viewTabIds(s, windowId, profileId).filter((id) => s.tabs[id]?.liveItem?.folderId === folderId && liveTabPlace(s.tabs[id]!.liveItem!.itemId, itemIds, hiddenIds) === "stray");
-  const all: LiveRowShot[] = rows.length ? rows.map((row) => rowShot(data, folderId, row)) : [{ kind: "note", key: "note", text: noteText(data, folder) }];
-  for (const id of strays) {
-    const tab = tabShot(s, id, false);
-    if (tab) all.push({ kind: "tab", key: `stray:${id}`, tab });
-  }
-  const collapsed = folder.collapsed || peek;
-  const status = data.status[folderId];
-  const initialLoading = !status || status.state === "initializing" || (status.state === "updating" && !status.lastFetch);
-  const active = activeTabId(s, windowId, profileId);
-  const activeItem = active && s.tabs[active]?.liveItem?.folderId === folderId ? s.tabs[active]!.liveItem!.itemId : null;
-  const keep = !activeItem
-    ? null
-    : strays.includes(active!)
-      ? `stray:${active}`
-      : (rows.find((r) => (r.kind === "item" && r.item.id === activeItem) || (r.kind === "stack" && r.items.some((i) => i.id === activeItem)))?.key ?? null);
-  return {
-    kind: "live",
-    key: `l:${folderId}`,
-    name: folder.name,
-    custom: folder.icon,
-    icon: liveFolderIcon(folder).icon,
-    site: liveFolderIcon(folder).site,
-    githubMark: folder.sources[0] === "github" && !initialLoading,
-    error: status?.error ? errorText(status.error.kind, status.error.source) : null,
-    updating: status?.state === "updating" || status?.state === "initializing",
-    unread: hasShownUnread(folder, fetched, data.unread[folderId]),
-    count: items.length,
-    collapsed,
-    rows: collapsed ? all.filter((r) => r.key === keep) : all,
-  };
-}
-
-function groupShot(s: BrowserState, windowId: string, profileId: string, groupId: string, data: LiveData, peek: boolean): GroupShot | null {
-  const group = s.groups[groupId];
-  if (!group) return null;
-  const entries = folderChildrenWith(s, windowId, profileId, groupId, data.folders);
-  const collapsed = !!group.collapsed || peek;
-  const kept = collapsed ? keptEntry(s, windowId, profileId, entries) : null;
-  const first = s.tabs[group.tabIds[0] ?? ""];
-  return {
-    kind: "group",
-    key: `g:${groupId}`,
-    label: groupLabel(s, group),
-    color: group.color ?? null,
-    icon: group.icon || first ? { url: first?.url ?? "", favicon: first?.favicon, icon: group.icon ?? first?.customIcon, profileId: first?.profileId } : null,
-    custom: group.icon ?? null,
-    collapsed,
-    members: (collapsed ? (kept ? [kept] : []) : entries).flatMap((e) => memberShot(s, windowId, profileId, e, data, collapsed) ?? []),
-  };
-}
-
-function memberShot(s: BrowserState, windowId: string, profileId: string, entry: string, data: LiveData, peek: boolean): EntrySnapshot | null {
-  const id = entry.slice(2);
-  if (entry.startsWith("s:")) return splitShot(s, id);
-  if (entry.startsWith("g:")) return groupShot(s, windowId, profileId, id, data, peek);
-  if (entry.startsWith("l:")) return liveShot(s, windowId, profileId, id, data, peek);
-  return tabShot(s, id, false);
-}
-
-export function snapshotEntry(s: BrowserState, windowId: string, profileId: string, entry: string, data: LiveData): EntrySnapshot | null {
-  if (entry.startsWith("t:")) return tabShot(s, entry.slice(2), pointerOnRow(entry.slice(2)));
-  return memberShot(s, windowId, profileId, entry, data, false);
-}
 
 export function ghostEntry(snapshot: EntrySnapshot, theme: ReturnType<typeof useTheme>, top: number, label: string) {
   if (snapshot.kind === "tab") return <TabGhost shot={snapshot} theme={theme} label={label} top={top} />;
@@ -212,7 +45,8 @@ function memberGhost(shot: EntrySnapshot, theme: ReturnType<typeof useTheme>, la
 }
 
 function ghostIcon(shot: TabShot, theme: ReturnType<typeof useTheme>) {
-  if (shot.icon?.startsWith(SYMBOL_PREFIX)) return <Symbol name={shot.icon.slice(SYMBOL_PREFIX.length)} size={13} weight="medium" color={theme.icon} style={{ width: 16, height: 16 }} />;
+  const symbol = iconSymbol(shot.icon);
+  if (symbol) return <Symbol name={symbol} size={13} weight="medium" color={theme.icon} style={{ width: 16, height: 16 }} />;
   if (shot.icon) return <TabIcon url={shot.url} icon={shot.icon} profileId={shot.profileId} />;
   if (shot.uri) return <Image source={{ uri: shot.uri }} style={{ width: 16, height: 16, borderRadius: 3, tintColor: shot.template && !theme.dark ? theme.textPrimary : undefined }} />;
   return shot.url ? <FaviconFallback url={shot.url} /> : <NewTabIcon />;
@@ -263,9 +97,8 @@ function GroupGhost({ shot, label }: { shot: GroupShot; label: string }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const flat = useAddressBarInSidebar();
-  const folderColors = useFolderColors((shot.color as GroupColor | null) ?? null);
+  const folderColors = useFolderColors(shot.color);
   const arcTitle = useArcTitle();
-  const spec = shot.color ? GROUP_COLORS[shot.color as keyof typeof GROUP_COLORS] : null;
   const members = shot.members.map((m) => memberGhost(m, theme, label));
   if (flat) {
     return (
@@ -283,15 +116,15 @@ function GroupGhost({ shot, label }: { shot: GroupShot; label: string }) {
       </View>
     );
   }
-  const fill = spec ? withAlpha(spec.hex, 0.16) : tokens.groupFill;
-  const stroke = spec ? withAlpha(spec.hex, 0.3) : tokens.groupStroke;
+  const { fill, stroke } = groupSurface(shot.color, tokens);
   const pad = shot.members.length || !shot.collapsed ? GROUP_PAD : 0;
   return (
-    <View style={{ borderRadius: 12, backgroundColor: fill, borderWidth: GROUP_BORDER, borderColor: stroke, paddingHorizontal: GROUP_PAD }}>
+    <View style={{ paddingVertical: GROUP_BORDER, paddingHorizontal: GROUP_PAD }}>
+      {shot.hovered ? <View style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, borderRadius: GROUP_RADIUS, backgroundColor: fill, borderWidth: GROUP_BORDER, borderColor: stroke }} /> : null}
       <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: 9, paddingRight: 6 - GROUP_PAD }}>
         {shot.icon ? <TabIcon url={shot.icon.url} favicon={shot.icon.favicon} icon={shot.icon.icon} profileId={shot.icon.profileId} /> : <View style={{ width: 16 }} />}
         <View style={{ flexShrink: 1, height: 18, marginLeft: 5, paddingRight: 8, justifyContent: "center" }}>
-          <Text numberOfLines={1} style={{ opacity: 0, fontSize: 13, fontWeight: "500", fontVariant: ["tabular-nums"] }}>
+          <Text numberOfLines={1} style={{ opacity: 0, ...font.body, fontWeight: weight.medium, fontVariant: TABULAR_NUMS }}>
             {shot.label}
           </Text>
           <FadeLabel text={shot.label} fontSize={13} weight="medium" color={tokens.groupTitle} style={{ position: "absolute", left: 0, right: 0, top: 0, height: 18 }} />
@@ -330,10 +163,10 @@ function LiveGhost({ shot, label }: { shot: LiveShot; label: string }) {
           </View>
         ) : shot.collapsed ? (
           <View style={{ flexDirection: "row", alignItems: "center", marginRight: 2, gap: 5 }}>
-            {shot.unread ? <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.pip }} /> : null}
+            {shot.unread ? <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: theme.accent }} /> : null}
             {flat ? null : (
               <View style={{ minWidth: 20, height: 18, borderRadius: 9, paddingHorizontal: 6, backgroundColor: tokens.countPill, alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontSize: 11, fontWeight: "600", color: theme.textTab, fontVariant: ["tabular-nums"] }}>{shot.count}</Text>
+                <Text style={{ fontSize: 11, fontWeight: "600", color: theme.textTab, fontVariant: TABULAR_NUMS }}>{shot.count}</Text>
               </View>
             )}
           </View>
@@ -367,7 +200,7 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
   const color = completing ? theme.textSecondary : (arcTitle ?? label);
   return (
     <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}>
-      {dot && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
+      {dot && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: theme.accent }} /> : null}
       <ItemIcon item={item} completing={completing} done={done} colors={colors} animate={false} />
       {flat && subtitle ? (
         <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>

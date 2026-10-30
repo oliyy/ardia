@@ -58,9 +58,9 @@ diff --git a/content/browser/renderer_host/navigator.cc b/content/browser/render
    // Note: This can be called for subframes (even when OOPIFs are not possible)
    // if the disposition calls for a different window.
  
-@@ -1137,6 +1139,8 @@ void Navigator::RequestOpenURL(
+@@ -1140,6 +1142,8 @@ void Navigator::RequestOpenURL(
+   params.initiator_frame_token = base::OptionalFromPtr(initiator_frame_token);
    params.initiator_process_id = initiator_process_id;
-   params.initiator_navigation_state = initiator_navigation_state;
    params.started_by_ad = started_by_ad;
 +  params.is_form_submission = is_form_submission;
 +  params.download_policy = download_policy;

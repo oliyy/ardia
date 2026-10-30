@@ -1,19 +1,19 @@
-import { ContextMenuArea, Symbol } from "@ardia/shell";
 import { memo, useRef } from "react";
 import { Animated, Pressable, View } from "react-native";
-import { useShallow } from "zustand/react/shallow";
-import { useTheme } from "../../lib/theme";
-import { useBrowser } from "../../store/browser";
-import { useWindowId } from "../../store/hooks";
-import { activeTabId } from "../../store/model";
-import { folderMembers, tileFolderOf } from "../../store/tileFolders";
-import { useDragItem, useFolderTarget } from "./dnd";
-import { dismissHover, useRowHover } from "./hover";
-import { registerRow } from "./state";
+import { ContextMenuArea, radius, Symbol } from "../ui";
+import { useTheme } from "../ui/theme";
+import { sidebarTokens } from "./tokens";
+import { useTab, useWindowId } from "../../state/browser/hooks";
+import { useShownFolderTab, useTileFolderMembers } from "../../state/pins/hooks";
+import { useDragItem, useFolderTarget } from "./DragProvider";
+import { dismissHover } from "../../state/sidebar/hover";
+import { useRowHover } from "./hoverController";
+import { registerRow } from "../../state/sidebar/sidebarUi";
 import { TabIcon } from "./TabIcon";
 import { FolderDropRing, RestingTile, TileFace, useSlotPosition } from "./TileFace";
 import type { TileWidth } from "./tileWidth";
-import { closedByPress, openTileFolderMenu, toggleFolderPanel, useFolderPanel } from "./tileFolderUi";
+import { closedByPress, openTileFolderMenu, toggleFolderPanel, useFolderPanel } from "../../state/sidebar/tileFolderUi";
+import { entryKey } from "../../state/sidebar/entryKey";
 
 const MOSAIC_CELL = 9;
 const MOSAIC_GAP = 2;
@@ -23,15 +23,12 @@ const MOSAIC = MOSAIC_PAD * 2 + MOSAIC_CELL * 2 + MOSAIC_GAP;
 export const FolderTile = memo(function FolderTile({ folderId, grid, sliding, column, row }: { folderId: string; grid: TileWidth; sliding: boolean; column: number; row: number }) {
   const theme = useTheme();
   const windowId = useWindowId();
-  const members = useBrowser(useShallow((s) => folderMembers(s, windowId, folderId)));
-  const shown = useBrowser((s) => {
-    const id = activeTabId(s, windowId);
-    return id && tileFolderOf(s.tabs[id])?.id === folderId ? id : null;
-  });
+  const members = useTileFolderMembers(windowId, folderId);
+  const shown = useShownFolderTab(windowId, folderId);
   const open = useFolderPanel((u) => u.open?.windowId === windowId && u.open.folderId === folderId);
   const { hovered, hoverProps } = useRowHover(windowId, { kind: "folder", id: folderId });
-  const { wrapper, handle, dragging } = useDragItem(`tf:${folderId}`, { kind: "tile", tabIds: members, section: "tiles", folderId });
-  const target = useFolderTarget(`tf:${folderId}`);
+  const { wrapper, handle, dragging } = useDragItem(entryKey("tileFolder", folderId), { kind: "tile", tabIds: members, section: "tiles", folderId });
+  const target = useFolderTarget(entryKey("tileFolder", folderId));
   const position = useSlotPosition(column, row, grid, sliding, dragging);
   const pressedAt = useRef<number | undefined>(undefined);
   if (!members.length) return null;
@@ -72,12 +69,12 @@ export function FolderMosaic({ tabIds }: { tabIds: string[] }) {
       style={{
         width: MOSAIC,
         height: MOSAIC,
-        borderRadius: 7,
+        borderRadius: radius.button,
         padding: MOSAIC_PAD,
         flexDirection: "row",
         flexWrap: "wrap",
         gap: MOSAIC_GAP,
-        backgroundColor: theme.dark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)",
+        backgroundColor: sidebarTokens(theme).folderMosaic,
       }}
     >
       {tabIds.slice(0, 4).map((id) => (
@@ -88,7 +85,7 @@ export function FolderMosaic({ tabIds }: { tabIds: string[] }) {
 }
 
 function MosaicIcon({ tabId }: { tabId: string }) {
-  const tab = useBrowser((s) => s.tabs[tabId]);
+  const tab = useTab(tabId);
   if (!tab) return <View style={{ width: MOSAIC_CELL, height: MOSAIC_CELL }} />;
   return (
     <View style={{ width: MOSAIC_CELL, height: MOSAIC_CELL, alignItems: "center", justifyContent: "center" }}>

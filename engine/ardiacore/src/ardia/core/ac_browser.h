@@ -1,6 +1,8 @@
 #ifndef ARDIA_CORE_AC_BROWSER_H_
 #define ARDIA_CORE_AC_BROWSER_H_
 
+#include <dispatch/dispatch.h>
+
 #include <map>
 #include <memory>
 #include <optional>
@@ -57,6 +59,12 @@ namespace ardiacore {
 class ACBrowserWindow;
 
 const char* DispositionName(WindowOpenDisposition disposition);
+NSDictionary* PopupFeatures(const blink::mojom::WindowFeatures& window_features);
+
+struct OpenOrigin {
+  std::optional<WindowOpenDisposition> disposition;
+  base::WeakPtr<content::WebContents> source;
+};
 
 class WindowHost : public TabStripModelObserver,
                    public views::WidgetObserver,
@@ -75,6 +83,7 @@ class WindowHost : public TabStripModelObserver,
   static const std::vector<WindowHost*>& All();
   static WindowHost* ForNSWindow(NSWindow* window);
   static WindowHost* ForBrowser(const BrowserWindowInterface* browser);
+  static WindowHost* ForContents(content::WebContents* contents);
 
   Browser* BrowserFor(Profile* profile);
   Browser* ExistingBrowserFor(Profile* profile) const;
@@ -98,14 +107,13 @@ class WindowHost : public TabStripModelObserver,
   void NotifyCloseCancelled();
   void QuitCancelled();
 
-  struct PendingOpen {
-    std::optional<WindowOpenDisposition> disposition;
-    base::WeakPtr<content::WebContents> source;
-    std::optional<RoutedPlacement> placement;
-    raw_ptr<content::BrowserContext> seed_context = nullptr;
-    std::string sidebar;
-  };
-  PendingOpen& pending_open() { return pending_open_; }
+  [[nodiscard]] base::AutoReset<OpenOrigin> ScopedPendingOpen(OpenOrigin origin) {
+    return base::AutoReset<OpenOrigin>(&pending_open_, std::move(origin));
+  }
+  [[nodiscard]] base::AutoReset<CreationSeed> ScopedCreationSeed(CreationSeed seed) {
+    return base::AutoReset<CreationSeed>(&creation_seed_, std::move(seed));
+  }
+  CreationSeed& creation_seed() { return creation_seed_; }
 
   BrowserWindow* HostChromeBrowser(Browser* browser);
 
@@ -159,18 +167,34 @@ class WindowHost : public TabStripModelObserver,
   bool widget_close_allowed_ = false;
   bool internal_ = false;
   bool acted_fullscreen_ = false;
-  PendingOpen pending_open_;
+  OpenOrigin pending_open_;
+  CreationSeed creation_seed_;
   base::ObserverList<web_modal::ModalDialogHostObserver> modal_observers_;
   bool dialog_position_update_scheduled_ = false;
   base::WeakPtrFactory<WindowHost> weak_factory_{this};
 };
 
+class ScopedNotifying {
+ public:
+  enum class Kind { kTabStrip, kNavigation };
+
+  explicit ScopedNotifying(Kind kind);
+  ScopedNotifying(const ScopedNotifying&) = delete;
+  ScopedNotifying& operator=(const ScopedNotifying&) = delete;
+  ~ScopedNotifying();
+
+ private:
+  const Kind kind_;
+};
+
 bool IsNotifyingTabStrip();
-bool IsNotifyingNavigation();
+bool DeferWhileTabStripNotifies(dispatch_block_t retry);
+bool DeferWhileAnyNotifies(dispatch_block_t retry);
 void InitialMainDocumentAccessed(content::WebContents* contents);
 
 bool OnlyShowedBlank(content::WebContents* contents);
 void CloseBlankTabsBeforeWindowCloses(Browser* browser);
+void DeleteTabClosedByHost(content::WebContents* contents);
 
 bool HostExtensionSidePanel(content::WebContents* contents,
                             const std::string& extension_id,
@@ -190,6 +214,7 @@ bool HostExtensionInstallPrompt(
     const extensions::InstallPromptData& prompt,
     extensions::ExtensionInstallPromptClient::DoneCallback* done_callback);
 void ResolveExtensionInstallPrompt(const std::string& request_id, bool accepted);
+void HostExtensionInstallFailed(content::WebContents* contents, const std::u16string& message);
 
 void InstallRuleMatchedHook();
 
@@ -226,6 +251,7 @@ class ACWebContentsDelegate : public BrowserWebContentsDelegate {
                             base::RepeatingClosure hang_monitor_restarter) override;
   void RendererResponsive(content::WebContents* source,
                           content::RenderWidgetHost* render_widget_host) override;
+  void CloseContents(content::WebContents* source) override;
   content::WebContents* AddNewContents(
       content::WebContents* source,
       std::unique_ptr<content::WebContents> new_contents,
@@ -251,12 +277,11 @@ class TabBridge : public content::WebContentsObserver,
 
   static TabBridge* GetOrCreate(content::WebContents* contents);
   ArdiaCoreTab* tab() const { return tab_; }
-  void set_open(WindowOpenDisposition d, content::WebContents* source) {
-    open_disposition_ = d;
-    open_source_ = source ? source->GetWeakPtr() : nullptr;
+  void set_open(OpenOrigin origin) { open_ = std::move(origin); }
+  std::optional<WindowOpenDisposition> TakeOpenDisposition() {
+    return std::exchange(open_.disposition, std::nullopt);
   }
-  std::optional<WindowOpenDisposition> TakeOpenDisposition();
-  content::WebContents* open_source() const { return open_source_.get(); }
+  content::WebContents* open_source() const { return open_.source.get(); }
   void set_popup_features(NSDictionary* features) { popup_features_ = features; }
   NSDictionary* popup_features() const { return popup_features_; }
   void EnsureFaviconObserved();
@@ -279,7 +304,19 @@ class TabBridge : public content::WebContentsObserver,
 
   void NoteRuleMatched(bool block, const GURL& url);
 
-  void set_closed_by_host() { closed_by_host_ = true; }
+  enum class CloseStep { kOpen, kClosedByHost, kAwaitingBeforeUnload, kUnloading };
+
+  void set_closed_by_host() {
+    if (close_step_ == CloseStep::kOpen) {
+      close_step_ = CloseStep::kClosedByHost;
+    }
+  }
+  void CloseAfterUnloadHandlers(bool window_closing);
+  void StartUnload();
+  void EnforceCloseDeadline(bool unload_given);
+  bool closing_after_unload() const {
+    return close_step_ >= CloseStep::kAwaitingBeforeUnload;
+  }
   void SetTemporary(bool temporary);
   void SetTemporarySource(int32_t source_id);
   bool temporary() const { return temporary_id_ != 0; }
@@ -316,6 +353,9 @@ class TabBridge : public content::WebContentsObserver,
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void NavigationEntryCommitted(
       const content::LoadCommittedDetails& load_details) override;
+  void NavigationListPruned(
+      const content::PrunedDetails& pruned_details) override;
+  void NavigationEntriesDeleted() override;
   void WebContentsDestroyed() override;
 
   void OnFindResultAvailable(content::WebContents* web_contents) override;
@@ -344,7 +384,7 @@ class TabBridge : public content::WebContentsObserver,
   base::RepeatingClosure hang_monitor_restarter_;
   base::WeakPtrFactory<TabBridge> weak_factory_{this};
   float pinch_scale_ = 1;
-  bool closed_by_host_ = false;
+  CloseStep close_step_ = CloseStep::kOpen;
   int32_t temporary_id_ = 0;
   int32_t temporary_source_id_ = 0;
   bool made_ahead_ = false;
@@ -355,8 +395,7 @@ class TabBridge : public content::WebContentsObserver,
   int blocked_pending_ = 0;
   GURL blocked_last_url_;
   bool will_close_reported_ = false;
-  std::optional<WindowOpenDisposition> open_disposition_;
-  base::WeakPtr<content::WebContents> open_source_;
+  OpenOrigin open_;
   NSDictionary* __strong popup_features_ = nil;
   bool observing_favicon_ = false;
   raw_ptr<find_in_page::FindTabHelper> find_helper_ = nullptr;
