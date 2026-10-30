@@ -1,9 +1,10 @@
 import { onAppEvent, onWindowEvent } from "@ardia/shell";
 import { everySlowly } from "../lib/slowTimers";
-import { useBrowser } from "../store/browser";
+import { batchStoreUpdates, useBrowser, type BrowserState } from "../store/browser";
 import { activeTabId, isIncognitoProfile, viewTabIds } from "../store/model";
 import { liveNode, migrateLivePlaces } from "../store/pinTree";
-import { completedExpiry } from "./rows";
+import { splitOf } from "../store/splits";
+import { completedExpired, completedExpiry, shownCompleted } from "./rows";
 import { SOURCES } from "./sources";
 import { applyFetch, createFolder, expireCompleted, finishCompleting, folderGeneration, live, markRead, removeFolder, setStatus, unhide, useLive, type LiveFolderSnapshot } from "./store";
 import { LiveError, type CompletionState, type LiveFolder, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
@@ -91,9 +92,45 @@ async function run(folderId: string, generation: number, background: boolean) {
   const lastSources = fetchedSources.get(folderId);
   const quiet = new Set(lastSources ? next.filter((it) => !lastSources.has(it.source)).map((it) => it.id) : []);
   fetchedSources.set(folderId, new Set(folder.sources.filter((id) => !failed.some((f) => f.source === id))));
+  closeFinishedTabs(folderId, (current.hidden[folderId] ?? []).filter((it) => gone[it.id]).map((it) => it.id));
   const token = applyFetch(folderId, order(next), gone, Date.now(), quiet);
   if (firstFailure) setStatus(folderId, { state: "error", error: describe(firstFailure.source, firstFailure.error) });
-  if (Object.keys(gone).length) setTimeout(() => finishCompleting(folderId, generation, token), COMPLETION_MS);
+  if (Object.keys(gone).length) setTimeout(() => finishFolder(folderId, generation, token), COMPLETION_MS);
+}
+
+function finishFolder(folderId: string, generation: number, token: number) {
+  batchStoreUpdates(() => {
+    const done = finishCompleting(folderId, generation, token);
+    const folder = live().folders[folderId];
+    const rows = new Set(folder ? shownCompleted(folder, live().completed[folderId] ?? []).map((c) => c.item.id) : []);
+    closeFinishedTabs(folderId, done.filter((id) => !rows.has(id)));
+  });
+}
+
+function expireFolder(folderId: string) {
+  const now = Date.now();
+  const expired = (live().completed[folderId] ?? []).filter((c) => completedExpired(c, now)).map((c) => c.item.id);
+  batchStoreUpdates(() => {
+    expireCompleted(folderId, now);
+    closeFinishedTabs(folderId, expired);
+  });
+}
+
+const leftOpen = new Map<string, { folderId: string; itemId: string }>();
+
+function onScreen(s: BrowserState, tabId: string) {
+  const t = s.tabs[tabId]!;
+  const shown = activeTabId(s, t.windowId, t.profileId);
+  return shown === tabId || !!splitOf(s, shown)?.tabIds.includes(tabId);
+}
+
+function closeFinishedTabs(folderId: string, itemIds: string[]) {
+  if (!itemIds.length) return;
+  const s = useBrowser.getState();
+  const tabs = Object.values(s.tabs).filter((t) => t.liveItem?.folderId === folderId && itemIds.includes(t.liveItem.itemId));
+  for (const t of tabs) if (onScreen(s, t.id)) leftOpen.set(t.id, t.liveItem!);
+  const closing = tabs.filter((t) => !leftOpen.has(t.id)).map((t) => t.id);
+  if (closing.length) s.closeTabs(closing);
 }
 
 function describe(source: LiveSourceId, error: unknown) {
@@ -183,7 +220,7 @@ function scheduleExpiry(folderId: string) {
   if (at === null) return;
   const timer = setTimeout(() => {
     expiries.delete(folderId);
-    expireCompleted(folderId);
+    expireFolder(folderId);
     scheduleExpiry(folderId);
   }, Math.max(0, at - Date.now()));
   expiries.set(folderId, { at, timer });
@@ -270,6 +307,19 @@ export function startLiveEngine() {
       const t = s.tabs[id]!;
       if (t.pinned && t.liveItem && !prev.tabs[id]?.pinned) useBrowser.getState().updateTab(id, { liveItem: undefined });
     }
+  });
+
+  useBrowser.subscribe((s, prev) => {
+    if (!leftOpen.size || (s.windows === prev.windows && s.tabs === prev.tabs && s.splits === prev.splits)) return;
+    const closing: string[] = [];
+    for (const [id, ref] of leftOpen) {
+      const t = s.tabs[id];
+      const stray = t?.liveItem?.folderId === ref.folderId && t.liveItem.itemId === ref.itemId && !(live().items[ref.folderId] ?? []).some((it) => it.id === ref.itemId);
+      if (stray && onScreen(s, id)) continue;
+      leftOpen.delete(id);
+      if (stray) closing.push(id);
+    }
+    if (closing.length) useBrowser.getState().closeTabs(closing);
   });
 
   useBrowser.subscribe((s, prev) => {

@@ -82,9 +82,6 @@ const saved = load();
 
 const FOLDER_OPTION_DEFAULTS: Pick<LiveFolder, "groupStacks" | "showCompleted" | "hiddenRepos"> = { groupStacks: true, showCompleted: true, hiddenRepos: [] };
 
-const unexpired = (completed: Record<string, CompletedItem[]>, now = Date.now()) =>
-  Object.fromEntries(Object.entries(completed).map(([id, list]) => [id, list.filter((c) => !completedExpired(c, now))]));
-
 const withOptionDefaults = (f: LiveFolder): LiveFolder => ({ ...FOLDER_OPTION_DEFAULTS, ...f, filters: { ...f.filters, teamReviewRequests: f.filters.teamReviewRequests ?? f.filters.reviewRequests } });
 
 export const useLive = create<LiveState>()(() => ({
@@ -94,7 +91,7 @@ export const useLive = create<LiveState>()(() => ({
   known: saved.known ?? {},
   unread: saved.unread ?? {},
   hidden: saved.hidden ?? {},
-  completed: unexpired(saved.completed ?? {}),
+  completed: saved.completed ?? {},
   completing: {},
   completions: {},
   status: {},
@@ -327,13 +324,13 @@ export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<s
   return token;
 }
 
-export function finishCompleting(folderId: string, generation: number, token: number) {
-  setLive((s) => {
-    const tokens = s.completions[folderId] ?? {};
-    const done = (s.completing[folderId] ?? []).filter((id) => tokens[id] === token);
-    if (!s.folders[folderId] || (s.generations[folderId] ?? 0) !== generation || !done.length) return {};
-    return { ...finished(s, folderId, done), revisions: revised(s, folderId) };
-  });
+export function finishCompleting(folderId: string, generation: number, token: number): string[] {
+  const s = live();
+  const tokens = s.completions[folderId] ?? {};
+  const done = (s.completing[folderId] ?? []).filter((id) => tokens[id] === token);
+  if (!s.folders[folderId] || (s.generations[folderId] ?? 0) !== generation || !done.length) return [];
+  setLive((s) => ({ ...finished(s, folderId, done), revisions: revised(s, folderId) }));
+  return done;
 }
 
 export function expireCompleted(folderId: string, now = Date.now()) {

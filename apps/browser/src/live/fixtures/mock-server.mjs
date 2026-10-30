@@ -88,13 +88,14 @@ createServer(async (req, res) => {
       const i = detailsError ? variables.ids.indexOf(detailsError.id) : -1;
       if (i >= 0 && detailsError.type === "PAGE") return send(res, 502, { message: "Server Error" });
       const details = variables.ids.map((id) => (prs.has(id) ? { ...prs.get(id), state: state[id] ?? "OPEN" } : null));
-      if (i < 0) return send(res, 200, { data: { nodes: details } });
+      const unknown = details.flatMap((d, j) => (d ? [] : [{ type: "NOT_FOUND", path: ["nodes", j], message: `Could not resolve to a node with the global id of '${variables.ids[j]}'` }]));
+      if (i < 0) return send(res, 200, { data: { nodes: details }, ...(unknown.length ? { errors: unknown } : {}) });
       const field = detailsError.type === "FIELD";
       if (field) details[i] = { ...details[i], commits: { nodes: [{ commit: { statusCheckRollup: null } }] } };
       else details[i] = null;
       const path = field ? ["nodes", i, "commits", "nodes", 0, "commit", "statusCheckRollup"] : ["nodes", i];
       const error = { type: field ? "FORBIDDEN" : detailsError.type, path, message: `Mock ${detailsError.type} for ${detailsError.id}` };
-      return send(res, 200, { data: { nodes: details }, errors: [error] });
+      return send(res, 200, { data: { nodes: details }, errors: [...unknown, error] });
     }
     if (!query.includes("search(")) return send(res, 200, { data: { viewer: github.data.viewer } });
     return send(res, 200, github);
