@@ -40,9 +40,8 @@ test("with stacks ungrouped, each stacked pull request is its own row", () => {
   assert.deepEqual(rows.map((r) => `${r.kind}:${r.key}`), ["item:a", "item:b", "item:c"]);
 });
 
-test("a folder saved before these options existed loads with stacks grouped and completed pull requests shown", () => {
+test("a folder saved before these options existed loads with stacks grouped", () => {
   assert.equal(live().folders.old.groupStacks, true);
-  assert.equal(live().folders.old.showCompleted, true);
 });
 
 test("a hidden pull request stays out of the folder through later fetches until a manual refresh", async () => {
@@ -65,13 +64,12 @@ test("a hidden pull request stays out of the folder through later fetches until 
   assert.deepEqual(shown(), ["a", "b", "c"], "and the next fetch that lists them keeps them");
 });
 
-test("hiding a pull request while its merge plays keeps it out of Completed", () => {
+test("hiding a pull request while its merge plays ends its merge", () => {
   const id = createFolder("p", "pullRequests", []);
   applyFetch(id, stacked, {});
   applyFetch(id, stacked.filter((it) => it.id !== "c"), { c: "merged" });
   hideItems(id, [stacked[2]]);
   finishCompleting(id, ["c"]);
-  assert.deepEqual(live().completed[id], []);
   assert.deepEqual(live().completing[id], []);
 });
 
@@ -90,7 +88,6 @@ test("a hidden pull request that merges stops counting as hidden; one that only 
   hideItems(id, [stacked[1], stacked[2]]);
   applyFetch(id, [stacked[0]], { c: "merged" });
   assert.deepEqual(live().hidden[id].map((it) => it.id), ["b"]);
-  assert.deepEqual(live().completed[id], [], "a pull request that merged while hidden doesn't show under Completed");
 });
 
 const bitbucket = (id) => ({ ...pr(id, 1, `h-${id}`, "main"), source: "bitbucket" });
@@ -138,7 +135,6 @@ test("a refresh doesn't ask whether pull requests its filters leave out have clo
   }
   assert.deepEqual(asked, []);
   assert.deepEqual(live().hidden[id].map((it) => it.id), ["x"]);
-  assert.deepEqual(live().completed[id], [], "rows a filter turned off don't show up as completed");
 });
 
 test("a hidden review request only leaves the hidden list when it closed, not when it may have been reviewed", () => {

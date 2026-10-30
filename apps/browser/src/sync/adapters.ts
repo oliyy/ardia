@@ -466,7 +466,7 @@ const PIN_NODE = `${PIN_TREE}n:`;
 
 type PinTabProps = { kind: "tab"; url: string; title: string; customTitle: string | null; customIcon: string | null };
 type PinFolderProps = { kind: "folder"; name: string; icon: string | null; color: TabGroup["color"] };
-type PinLiveProps = Pick<LiveFolder, "name" | "icon" | "sources" | "filters" | "hiddenRepos" | "groupStacks" | "showCompleted" | "createdAt"> & { kind: "live"; liveKind: LiveFolderKind };
+type PinLiveProps = Pick<LiveFolder, "name" | "icon" | "sources" | "filters" | "hiddenRepos" | "groupStacks" | "createdAt"> & { kind: "live"; liveKind: LiveFolderKind };
 type PinNodeProps = PinTabProps | PinFolderProps | PinLiveProps;
 export type PinNodeRecord = PinPlace & PinNodeProps;
 type PinTabRecord = PinPlace & PinTabProps;
@@ -512,14 +512,13 @@ function pinNodeRecord(node: string, value: unknown): PinNodeRecord | null {
     typeof v.createdAt === "number" &&
     !!filters &&
     typeof v.groupStacks === "boolean" &&
-    typeof v.showCompleted === "boolean" &&
     typeof filters.authored === "boolean" &&
     typeof filters.reviewRequests === "boolean"
   ) {
     const teamReviewRequests = typeof filters.teamReviewRequests === "boolean" ? filters.teamReviewRequests : filters.reviewRequests;
     const filtersOut = { authored: filters.authored, reviewRequests: filters.reviewRequests, teamReviewRequests };
     const hiddenRepos = Array.isArray(v.hiddenRepos) ? v.hiddenRepos.filter(isText) : [];
-    return { ...place, kind: "live", liveKind: v.liveKind, name: v.name, icon: v.icon, sources: v.sources.filter(isLiveSource), filters: filtersOut, hiddenRepos, groupStacks: v.groupStacks, showCompleted: v.showCompleted, createdAt: v.createdAt };
+    return { ...place, kind: "live", liveKind: v.liveKind, name: v.name, icon: v.icon, sources: v.sources.filter(isLiveSource), filters: filtersOut, hiddenRepos, groupStacks: v.groupStacks, createdAt: v.createdAt };
   }
   return null;
 }
@@ -552,7 +551,6 @@ const liveProps = (f: LiveFolder): PinLiveProps => ({
   filters: { authored: f.filters.authored, reviewRequests: f.filters.reviewRequests, teamReviewRequests: f.filters.teamReviewRequests },
   hiddenRepos: [...f.hiddenRepos],
   groupStacks: f.groupStacks,
-  showCompleted: f.showCompleted,
   createdAt: f.createdAt,
 });
 
@@ -806,7 +804,6 @@ function liveChanges(f: LiveFolder, r: PinLiveRecord): Partial<Omit<LiveFolder, 
   if (f.name !== r.name) patch.name = r.name;
   if (f.icon !== r.icon) patch.icon = r.icon;
   if (f.groupStacks !== r.groupStacks) patch.groupStacks = r.groupStacks;
-  if (f.showCompleted !== r.showCompleted) patch.showCompleted = r.showCompleted;
   if (f.createdAt !== r.createdAt) patch.createdAt = r.createdAt;
   if (canonical(f.sources) !== canonical(r.sources)) patch.sources = [...r.sources];
   if (canonical(f.filters) !== canonical(r.filters)) patch.filters = { ...r.filters };
@@ -825,7 +822,7 @@ function applyLiveDefinitions(profileId: string, received: Map<string, PinNodeRe
     const id = keyOfNode(node);
     const f = folders[id];
     if (!f) {
-      restoreFolder({ id, profileId, kind: r.liveKind, name: r.name, icon: r.icon, collapsed: false, sources: r.sources, filters: r.filters, hiddenRepos: r.hiddenRepos, groupStacks: r.groupStacks, showCompleted: r.showCompleted, createdAt: r.createdAt });
+      restoreFolder({ id, profileId, kind: r.liveKind, name: r.name, icon: r.icon, collapsed: false, sources: r.sources, filters: r.filters, hiddenRepos: r.hiddenRepos, groupStacks: r.groupStacks, createdAt: r.createdAt });
       continue;
     }
     if (f.profileId !== profileId || f.kind !== r.liveKind) continue;

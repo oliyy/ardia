@@ -76,12 +76,9 @@ function FolderGroup({ folder, profileName, searchable }: { folder: LiveFolder; 
           <Button title="Delete" kind="destructive" onPress={() => removeLiveFolder(folder.id)} />
         </View>
       </Row>
-      {folder.kind === "pullRequests"
-        ? [
-            <FolderOption key="stacks" id="liveFolders.groupStacks" searchable={searchable} value={folder.groupStacks} onChange={(v) => updateFolder(folder.id, { groupStacks: v })} />,
-            <FolderOption key="completed" id="liveFolders.showCompleted" searchable={searchable} value={folder.showCompleted} onChange={(v) => updateFolder(folder.id, { showCompleted: v })} />,
-          ]
-        : null}
+      {folder.kind === "pullRequests" ? (
+        <FolderOption id="liveFolders.groupStacks" searchable={searchable} value={folder.groupStacks} onChange={(v) => updateFolder(folder.id, { groupStacks: v })} />
+      ) : null}
     </Group>
   );
 }

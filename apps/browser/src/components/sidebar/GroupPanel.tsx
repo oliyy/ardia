@@ -7,9 +7,9 @@ import { ago } from "../../lib/timeAgo";
 import { webviews } from "../../lib/webviews";
 import { useBrowser } from "../../store/browser";
 import { openLiveItem } from "../../live/engine";
-import { inHiddenRepo, openItems, shownCompleted } from "../../live/rows";
+import { inHiddenRepo } from "../../live/rows";
 import { useLive } from "../../live/store";
-import type { CompletionState, LiveItem } from "../../live/types";
+import type { LiveItem } from "../../live/types";
 import { displayedSubtree, groupNode, isLiveNode, isTabNode, keyOfNode, pinKeyOf } from "../../store/pinTree";
 import { activeTabId, viewTabIds } from "../../store/model";
 import { sharedTabsIn, sharesTabs } from "../../store/tabShare";
@@ -36,7 +36,7 @@ const MAX_ROWS = 7;
 const EDGE = 8;
 const NOW_TICK_MS = 30_000;
 
-type Row = GroupPanelTab & { favicon: string | null; icon: string | null; profileId: string; tabId?: string; liveItem?: { folderId: string; item: LiveItem; done: CompletionState | null } };
+type Row = GroupPanelTab & { favicon: string | null; icon: string | null; profileId: string; tabId?: string; liveItem?: { folderId: string; item: LiveItem } };
 
 function returnFocusToPage(windowId: string) {
   const s = useBrowser.getState();
@@ -67,7 +67,7 @@ function useGroupRows(groupId: string, windowId: string): Row[] {
     ])];
     return ids.map((id) => s.tabs[id]).filter((t): t is Tab => !!t);
   }));
-  const data = useLive(useShallow((s) => ({ folders: s.folders, items: s.items, hidden: s.hidden, completed: s.completed })));
+  const data = useLive(useShallow((s) => ({ folders: s.folders, items: s.items, hidden: s.hidden })));
   return useMemo(() => {
     const s = useBrowser.getState();
     const group = s.groups[groupId];
@@ -79,9 +79,7 @@ function useGroupRows(groupId: string, windowId: string): Row[] {
       const folder = data.folders[folderId];
       if (!folder || folder.profileId !== group?.profileId) continue;
       const hidden = new Set([...(data.hidden[folderId] ?? []), ...(data.items[folderId] ?? []).filter((item) => inHiddenRepo(folder, item))].map((item) => item.id));
-      const done = shownCompleted(folder, data.completed[folderId] ?? []);
-      const items = [...openItems(data.items[folderId] ?? [], done).filter((item) => !hidden.has(item.id)), ...done.map((c) => c.item)];
-      const doneStates = new Map(done.map((c) => [c.item.id, c.state]));
+      const items = (data.items[folderId] ?? []).filter((item) => !hidden.has(item.id));
       const loaded = new Map(tabs.filter((t) => !t.pinned && t.liveItem?.folderId === folderId).map((t) => [t.liveItem!.itemId, t]));
       for (const item of items) {
         const tab = loaded.get(item.id);
@@ -95,7 +93,7 @@ function useGroupRows(groupId: string, windowId: string): Row[] {
           favicon: tab?.favicon ?? (imageIcon ? item.icon : null),
           icon: imageIcon ? null : item.icon,
           profileId: folder.profileId,
-          liveItem: { folderId, item, done: doneStates.get(item.id) ?? null },
+          liveItem: { folderId, item },
         });
       }
       const known = new Set(items.map((item) => item.id));
@@ -282,7 +280,7 @@ function PanelRow({ row, now, selected, onHover, onPress }: { row: Row; now: num
         >
           <View style={{ width: PANEL.iconSlot, height: PANEL.iconSlot, alignItems: "center", justifyContent: "center" }}>
             {row.liveItem?.item.pr ? (
-              <ItemIcon item={row.liveItem.item} completing={null} done={row.liveItem.done} colors={colors} />
+              <ItemIcon item={row.liveItem.item} completing={null} colors={colors} />
             ) : (
               <TabIcon tabId={row.tabId} url={row.url} favicon={row.favicon} icon={row.icon} profileId={row.profileId} />
             )}
