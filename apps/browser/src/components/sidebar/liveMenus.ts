@@ -91,6 +91,7 @@ export async function openLiveFolderMenu(windowId: string, folderId: string) {
         ...(pr
           ? [
               ...FILTERS.map((f) => ({ id: `filter:${f.key}`, title: f.title, checked: folder.filters[f.key] })),
+              { id: "showCompleted", title: "Show Completed", checked: folder.showCompleted },
               sep,
               {
                 id: "repos",
@@ -124,7 +125,8 @@ export async function openLiveFolderMenu(windowId: string, folderId: string) {
   else if (filter) {
     updateFolder(folderId, { filters: { ...folder.filters, [filter.key]: !folder.filters[filter.key] } });
     void refreshFolder(folderId);
-  } else if (choice.startsWith("repo:")) {
+  } else if (choice === "showCompleted") updateFolder(folderId, { showCompleted: !folder.showCompleted });
+  else if (choice.startsWith("repo:")) {
     const repo = choice.slice(5);
     updateFolder(folderId, { hiddenRepos: folder.hiddenRepos.includes(repo) ? folder.hiddenRepos.filter((r) => r !== repo) : [...folder.hiddenRepos, repo] });
   } else if (choice.startsWith("source:")) {

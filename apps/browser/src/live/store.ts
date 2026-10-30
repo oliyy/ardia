@@ -1,7 +1,8 @@
 import { readDocument, writeDocument } from "@ardia/shell";
 import { create } from "zustand";
 import { batchStoreUpdates } from "../store/browser";
-import type { CompletionState, FolderStatus, LiveAccount, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId } from "./types";
+import { completedExpired } from "./rows";
+import type { CompletedItem, CompletionState, FolderStatus, LiveAccount, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId } from "./types";
 
 export type LiveConfig = {
   githubClientId: string;
@@ -30,8 +31,6 @@ export type MeetingGroup = {
   endedAt: number | null;
 };
 
-type Completion = { state: CompletionState; token: number };
-
 type LiveState = {
   folders: Record<string, LiveFolder>;
   folderOrder: string[];
@@ -39,8 +38,9 @@ type LiveState = {
   known: Record<string, string[]>;
   unread: Record<string, string[]>;
   hidden: Record<string, LiveItem[]>;
+  completed: Record<string, CompletedItem[]>;
   completing: Record<string, string[]>;
-  completions: Record<string, Record<string, Completion>>;
+  completions: Record<string, Record<string, number>>;
   status: Record<string, FolderStatus>;
   expandedStacks: Record<string, boolean>;
   showAll: Record<string, boolean>;
@@ -67,7 +67,7 @@ export const DEFAULT_CALENDAR: CalendarSettings = {
 };
 
 const DOC = "live.json";
-const PERSISTED = ["folders", "folderOrder", "items", "known", "unread", "hidden", "expandedStacks", "accounts", "config", "calendar", "meetingGroups", "dismissedAlerts"] as const;
+const PERSISTED = ["folders", "folderOrder", "items", "known", "unread", "hidden", "completed", "expandedStacks", "accounts", "config", "calendar", "meetingGroups", "dismissedAlerts"] as const;
 
 function load(): Partial<LiveState> {
   try {
@@ -80,7 +80,10 @@ function load(): Partial<LiveState> {
 
 const saved = load();
 
-const FOLDER_OPTION_DEFAULTS: Pick<LiveFolder, "groupStacks" | "hiddenRepos"> = { groupStacks: true, hiddenRepos: [] };
+const FOLDER_OPTION_DEFAULTS: Pick<LiveFolder, "groupStacks" | "showCompleted" | "hiddenRepos"> = { groupStacks: true, showCompleted: true, hiddenRepos: [] };
+
+const unexpired = (completed: Record<string, CompletedItem[]>, now = Date.now()) =>
+  Object.fromEntries(Object.entries(completed).map(([id, list]) => [id, list.filter((c) => !completedExpired(c, now))]));
 
 const withOptionDefaults = (f: LiveFolder): LiveFolder => ({ ...FOLDER_OPTION_DEFAULTS, ...f, filters: { ...f.filters, teamReviewRequests: f.filters.teamReviewRequests ?? f.filters.reviewRequests } });
 
@@ -91,6 +94,7 @@ export const useLive = create<LiveState>()(() => ({
   known: saved.known ?? {},
   unread: saved.unread ?? {},
   hidden: saved.hidden ?? {},
+  completed: unexpired(saved.completed ?? {}),
   completing: {},
   completions: {},
   status: {},
@@ -220,6 +224,7 @@ const withoutFetched = (s: LiveState, id: string) => ({
   items: without(s.items, id),
   known: without(s.known, id),
   unread: without(s.unread, id),
+  completed: without(s.completed, id),
   completing: without(s.completing, id),
   completions: without(s.completions, id),
 });
@@ -275,6 +280,7 @@ export function arrangeFolders(placed: { id: string; after: string | null }[]) {
 }
 
 const MAX_KNOWN = 600;
+const MAX_COMPLETED = 20;
 
 let completionCounter = 0;
 
@@ -296,6 +302,10 @@ export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<s
     const leaving = prev.filter((it) => !ids.has(it.id) && gone[it.id] && !animating.has(it.id));
     const merged = [...next];
     for (const it of prev) if (!ids.has(it.id) && (animating.has(it.id) || leaving.includes(it))) merged.splice(Math.min(prev.indexOf(it), merged.length), 0, it);
+    const completed = [
+      ...leaving.map((item) => ({ item, state: gone[item.id]!, at: now })),
+      ...(s.completed[folderId] ?? []).filter((c) => !ids.has(c.item.id) && !leaving.some((l) => l.id === c.item.id)),
+    ].slice(0, MAX_COMPLETED);
     const stillThere = new Set(merged.map((it) => it.id));
     const items = reuseItems(prev, merged);
     const unread = first ? [] : [...new Set([...(s.unread[folderId] ?? []), ...unreadFresh])].filter((id) => stillThere.has(id));
@@ -305,9 +315,10 @@ export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<s
       hidden: stillHidden.length === (s.hidden[folderId] ?? []).length ? s.hidden : { ...s.hidden, [folderId]: stillHidden },
       known: fresh.length || !s.known[folderId] ? { ...s.known, [folderId]: [...known, ...fresh].slice(-MAX_KNOWN) } : s.known,
       unread: s.unread[folderId] && sameIds(unread, s.unread[folderId]) ? s.unread : { ...s.unread, [folderId]: unread },
+      completed: leaving.length || (s.completed[folderId] ?? []).length !== completed.length ? { ...s.completed, [folderId]: completed } : s.completed,
       completing: completionChanged ? { ...s.completing, [folderId]: [...[...animating].filter((id) => !ids.has(id)), ...leaving.map((l) => l.id)] } : s.completing,
       completions: completionChanged
-        ? { ...s.completions, [folderId]: Object.fromEntries([...Object.entries(s.completions[folderId] ?? {}).filter(([id]) => !ids.has(id)), ...leaving.map((l) => [l.id, { state: gone[l.id]!, token }] as const)]) }
+        ? { ...s.completions, [folderId]: Object.fromEntries([...Object.entries(s.completions[folderId] ?? {}).filter(([id]) => !ids.has(id)), ...leaving.map((l) => [l.id, token] as const)]) }
         : s.completions,
       status: { ...s.status, [folderId]: { state: "idle", lastFetch: now, error: null } },
       revisions: revised(s, folderId),
@@ -316,15 +327,21 @@ export function applyFetch(folderId: string, fetched: LiveItem[], gone: Record<s
   return token;
 }
 
-export const completionOf = (s: Pick<LiveState, "completing" | "completions">, folderId: string, itemId: string): CompletionState | null =>
-  s.completing[folderId]?.includes(itemId) ? (s.completions[folderId]?.[itemId]?.state ?? "merged") : null;
-
 export function finishCompleting(folderId: string, generation: number, token: number) {
   setLive((s) => {
     const tokens = s.completions[folderId] ?? {};
-    const done = (s.completing[folderId] ?? []).filter((id) => tokens[id]?.token === token);
+    const done = (s.completing[folderId] ?? []).filter((id) => tokens[id] === token);
     if (!s.folders[folderId] || (s.generations[folderId] ?? 0) !== generation || !done.length) return {};
     return { ...finished(s, folderId, done), revisions: revised(s, folderId) };
+  });
+}
+
+export function expireCompleted(folderId: string, now = Date.now()) {
+  setLive((s) => {
+    const completed = s.completed[folderId] ?? [];
+    const kept = completed.filter((c) => !completedExpired(c, now));
+    if (kept.length === completed.length) return {};
+    return { completed: { ...s.completed, [folderId]: kept }, revisions: s.revisions[folderId] ? revised(s, folderId) : s.revisions };
   });
 }
 
@@ -351,6 +368,7 @@ export function hideItems(folderId: string, hiding: LiveItem[]) {
     items: { ...s.items, [folderId]: (s.items[folderId] ?? []).filter((it) => shown(it.id)) },
     unread: { ...s.unread, [folderId]: (s.unread[folderId] ?? []).filter(shown) },
     completing: { ...s.completing, [folderId]: (s.completing[folderId] ?? []).filter(shown) },
+    completed: { ...s.completed, [folderId]: (s.completed[folderId] ?? []).filter((c) => shown(c.item.id)) },
   }));
 }
 

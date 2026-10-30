@@ -12,6 +12,7 @@ export type LiveFolder = {
   filters: { authored: boolean; reviewRequests: boolean; teamReviewRequests: boolean };
   hiddenRepos: string[];
   groupStacks: boolean;
+  showCompleted: boolean;
   createdAt: number;
   after?: string | null;
 };
@@ -60,6 +61,8 @@ export type LiveItem = {
   pr?: PullRequestInfo;
   doc?: DocumentInfo;
 };
+
+export type CompletedItem = { item: LiveItem; state: CompletionState; at: number };
 
 export type CompletionState = "merged" | "closed" | "reviewed";
 

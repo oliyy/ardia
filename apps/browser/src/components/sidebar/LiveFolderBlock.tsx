@@ -6,10 +6,10 @@ import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
 import { githubAge, prBadge, summarizeChecks } from "../../live/github";
-import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, shownItems, type FolderRow } from "../../live/rows";
+import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
-import { completionOf, live, setLive, updateFolder, useLive } from "../../live/store";
-import type { CompletionState, LiveItem, PullRequestInfo } from "../../live/types";
+import { live, setLive, updateFolder, useLive } from "../../live/store";
+import type { CompletedItem, CompletionState, LiveItem, PullRequestInfo } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { usePageProfileId, useWindowId } from "../../store/hooks";
 import { activeTabId, viewTabIds } from "../../store/model";
@@ -39,6 +39,7 @@ import { ARC_SELECTED_INACTIVE, arcSelectedLabel, useArcLabel, useArcTitle, useS
 
 const PAD = GROUP_PAD;
 const EMPTY: LiveItem[] = [];
+const NONE_COMPLETED: CompletedItem[] = [];
 
 const liveRowKey = (folderId: string, itemId: string) => `live|${folderId}|${itemId}`;
 
@@ -106,14 +107,14 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   const tokens = useSidebarTokens();
   const folder = useLive((s) => s.folders[folderId]);
   const fetched = useLive((s) => s.items[folderId] ?? EMPTY);
-  const completing = useLive((s) => s.completing[folderId]);
   const items = useMemo(() => (folder ? shownItems(folder, fetched) : fetched), [folder, fetched]);
   const showAll = useLive((s) => s.showAll);
   const folded = useDragFolded(`l:${folderId}`);
   const collapsed = folded || !!folder?.collapsed || peek;
+  const completed = useCompletedShown(folderId);
   const stackKeys = useRef(new Map<string, StackKey>()).current;
-  const rows = useMemo(() => (folder ? steadyStackKeys(folderRows(folder, items, showAll), stackKeys) : []), [folder, items, showAll]);
-  const itemIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
+  const rows = useMemo(() => (folder ? steadyStackKeys(folderRows(folder, openItems(items, completed), showAll, completed), stackKeys) : []), [folder, items, showAll, completed]);
+  const itemIds = useMemo(() => new Set([...items, ...completed.map((c) => c.item)].map((i) => i.id)), [items, completed]);
   const hiddenList = useLive((s) => s.hidden[folderId] ?? EMPTY);
   const hiddenIds = useMemo(() => new Set([...hiddenList, ...fetched.filter((it) => !itemIds.has(it.id))].map((i) => i.id)), [hiddenList, fetched, itemIds]);
   const profileId = usePageProfileId();
@@ -136,10 +137,10 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   const [moved, movedRef] = useShift(motion?.shift ?? null);
   const scope = useContext(ListMotionContext);
   const chain = useRef<FoldChain | null>(null);
-  const landed = useRef(fetched);
-  const fromData = landed.current !== fetched;
-  landed.current = fetched;
-  const source = useMemo<MotionSource>(() => ({ rows, strays, data: live() }), [rows, strays, completing]);
+  const landed = useRef({ fetched, completed });
+  const fromData = landed.current.fetched !== fetched || landed.current.completed !== completed;
+  landed.current = { fetched, completed };
+  const source = useMemo<MotionSource>(() => ({ rows, strays, data: live() }), [rows, strays]);
   const ready = fromData && scope.enabled && !collapsed && (live().revisions[folderId] ?? 0) > 1;
   const rowMotion = useRowMotion(source, ready, (from) => placeFolder(folderId, from), (delta, timing) => {
     (chain.current ?? scope.fold?.pinned)?.(liveNode(folderId), delta, timing);
@@ -189,7 +190,7 @@ function FolderRowView({ row, folderId, windowId, glide }: { row: FolderRow; fol
     case "stack":
       return <StackRow folderId={folderId} windowId={windowId} stack={row} glide={glide} />;
     case "item":
-      return <LiveItemRow folderId={folderId} item={row.item} windowId={windowId} />;
+      return <LiveItemRow folderId={folderId} item={row.item} windowId={windowId} done={row.done} />;
   }
 }
 
@@ -391,7 +392,7 @@ function StackRow({ folderId, windowId, stack, glide }: { folderId: string; wind
   );
 }
 
-function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean }) {
+function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean; done?: CompletionState }) {
   const indent = inStack ? STACK_INDENT : 0;
   const theme = useTheme();
   const tokens = useSidebarTokens();
@@ -405,16 +406,17 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   const profileId = usePageProfileId();
   const tabId = useBrowser((s) => viewTabIds(s, windowId, profileId).find((id) => s.tabs[id]?.liveItem?.itemId === item.id && s.tabs[id]?.liveItem?.folderId === folderId) ?? null);
   const active = useBrowser((s) => !!tabId && activeTabId(s, windowId, profileId) === tabId);
-  const unread = useLive((s) => !!s.unread[folderId]?.includes(item.id));
-  const completing = useLive((s) => completionOf(s, folderId, item.id));
-  const reviewDue = !completing && awaitsReview(item);
-  const { hovered, hoverProps } = useRowHover(windowId, completing ? null : { kind: "live", id: key });
+  const unread = useLive((s) => !done && !!s.unread[folderId]?.includes(item.id));
+  const completing = useLive((s) => (!done && s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
+  const completion = completing ?? done ?? null;
+  const reviewDue = !completion && awaitsReview(item);
+  const { hovered, hoverProps } = useRowHover(windowId, completion ? null : { kind: "live", id: key });
   const scope = useContext(ListMotionContext);
   const settled = (live().revisions[folderId] ?? 0) > 1;
   const animates = () => settled && scope.enabled && !hidden;
   const badge = item.pr ? prBadge(item.pr) : null;
-  const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr) : "doc";
-  const trailingState = completing ? (flat ? "none" : `c:${completing}`) : badge && badge !== "passed" ? badge : "none";
+  const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr, done ?? null) : "doc";
+  const trailingState = completion ? (flat ? "none" : `c:${completion}`) : badge && badge !== "passed" ? badge : "none";
   const fill = active ? tokens.selectedFill : hovered ? theme.tabHover : "rgba(0,0,0,0)";
   const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
 
@@ -448,12 +450,12 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
               >
                 {(unread || reviewDue) && !flat ? <PulseDot color={colors.pip} pulsing={reviewDue} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
                 <Morph state={iconState} animates={animates}>
-                  <ItemIcon item={item} completing={completing} colors={colors} animate={false} />
+                  <ItemIcon item={item} completing={completing} done={done ?? null} colors={colors} animate={false} />
                 </Morph>
                 {flat && subtitle ? (
                   <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
                     <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} transitions={settled} style={{ height: 18 }} />
-                    <LiveSubtitle item={item} subtitle={subtitle} done={completing} colors={colors} transitions={settled} />
+                    <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} transitions={settled} />
                   </View>
                 ) : (
                   <FadeLabel
@@ -478,7 +480,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
                     </Glide>
                   ) : null}
                   <Morph state={trailingState} animates={animates}>
-                    <Trailing item={item} completion={completing} colors={colors} flat={flat} />
+                    <Trailing item={item} completion={completion} colors={colors} flat={flat} />
                   </Morph>
                 </HoverSlot>
               </Surface>
@@ -490,14 +492,16 @@ function LiveItemRow({ folderId, item, windowId, inStack = false }: { folderId: 
   );
 }
 
-type PrState = "open" | "draft";
+type PrState = "open" | "draft" | "merged" | "closed";
 
 const PR_STATES: Record<PrState, { icon: ImageSourcePropType; color: keyof LiveColors }> = {
   open: { icon: require("../../../assets/octicons/git-pull-request.png"), color: "stateOpen" },
   draft: { icon: require("../../../assets/octicons/git-pull-request-draft.png"), color: "stateDraft" },
+  merged: { icon: require("../../../assets/octicons/git-merge.png"), color: "stateMerged" },
+  closed: { icon: require("../../../assets/octicons/git-pull-request-closed.png"), color: "stateClosed" },
 };
 
-const prState = (pr: PullRequestInfo): PrState => (pr.draft ? "draft" : "open");
+const prState = (pr: PullRequestInfo, done: CompletionState | null): PrState => (done === "merged" || done === "closed" ? done : pr.draft ? "draft" : "open");
 
 const STATE_WORDS: Record<CompletionState, string> = { merged: "Merged", closed: "Closed", reviewed: "Reviewed" };
 
@@ -543,13 +547,25 @@ export function LiveSubtitle({ item, subtitle, done, colors, transitions = false
   return <FadeLabel text={meta?.text ?? subtitle} glyphs={meta?.glyphs} fontSize={12} color={theme.textSecondary} transitions={transitions} style={{ height: 14 }} />;
 }
 
-const COMPLETION_GLYPH: Record<CompletionState, { symbol: string; color: keyof LiveColors }> = {
+const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: keyof LiveColors }> = {
   merged: { symbol: "checkmark.circle.fill", color: "merged" },
   reviewed: { symbol: "checkmark.circle.fill", color: "success" },
   closed: { symbol: "xmark.circle.fill", color: "draft" },
 };
 
-export function ItemIcon({ item, completing, colors, animate = true }: { item: LiveItem; completing: CompletionState | null; colors: LiveColors; animate?: boolean }) {
+export function ItemIcon({
+  item,
+  completing,
+  done = null,
+  colors,
+  animate = true,
+}: {
+  item: LiveItem;
+  completing: CompletionState | null;
+  done?: CompletionState | null;
+  colors: LiveColors;
+  animate?: boolean;
+}) {
   const pop = useRef(new Animated.Value(completing && animate ? 0 : 1)).current;
   useEffect(() => {
     if (!completing || !animate) return;
@@ -565,7 +581,7 @@ export function ItemIcon({ item, completing, colors, animate = true }: { item: L
     );
   }
   if (item.pr) {
-    const state = PR_STATES[prState(item.pr)];
+    const state = PR_STATES[prState(item.pr, done)];
     return <Image key={colors[state.color]} source={state.icon} accessible={false} style={{ width: 16, height: 16, tintColor: colors[state.color] }} />;
   }
   if (item.icon && /^https?:/.test(item.icon)) return <TabIcon url={item.url} favicon={item.icon} direct />;
@@ -584,7 +600,7 @@ const BADGES: Record<Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed">,
   approved: { symbol: "checkmark.seal.fill", color: "success", tip: "Approved" },
 };
 
-export function Trailing({ item, completion, colors, flat }: { item: LiveItem; completion: CompletionState | null; colors: LiveColors; flat: boolean }): ReactNode {
+export function Trailing({ item, completion, colors, flat }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors; flat: boolean }): ReactNode {
   if (completion) {
     if (flat) return null;
     return <Text style={{ fontSize: 11, fontWeight: "500", color: colors[COMPLETION_GLYPH[completion].color], marginRight: 4 }}>{completion === "merged" ? "Merged" : completion === "reviewed" ? "Reviewed" : "Closed"}</Text>;
@@ -601,5 +617,14 @@ export function Trailing({ item, completion, colors, flat }: { item: LiveItem; c
         <ActivitySpinner visible color={colors[spec.color]} period={PENDING_PERIOD} style={{ width: 12, height: 12 }} />
       )}
     </View>
+  );
+}
+
+function useCompletedShown(folderId: string): CompletedItem[] {
+  return useLive(
+    useShallow((s) => {
+      const folder = s.folders[folderId];
+      return folder ? shownCompleted(folder, s.completed[folderId] ?? NONE_COMPLETED) : NONE_COMPLETED;
+    }),
   );
 }

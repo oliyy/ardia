@@ -1,7 +1,7 @@
-import type { LiveFolder, LiveItem, PullRequestSection } from "./types";
+import type { CompletedItem, CompletionState, LiveFolder, LiveItem, PullRequestSection } from "./types";
 
 export type FolderRow =
-  | { kind: "item"; key: string; item: LiveItem }
+  | { kind: "item"; key: string; item: LiveItem; done?: CompletionState }
   | { kind: "stack"; key: string; id: string; repo: string; items: LiveItem[] }
   | { kind: "header"; key: string; title: string }
   | { kind: "more"; key: string; section: string; count: number };
@@ -14,6 +14,12 @@ export const SECTION_TITLES: Record<PullRequestSection, string | null> = {
 
 export const PAGE_SIZE = 8;
 
+export const COMPLETED_SHOWN_MS = 10 * 60_000;
+
+export const completedExpired = (c: CompletedItem, now = Date.now()) => now - c.at >= COMPLETED_SHOWN_MS;
+
+export const completedExpiry = (completed: CompletedItem[]) => (completed.length ? Math.min(...completed.map((c) => c.at)) + COMPLETED_SHOWN_MS : null);
+
 export const awaitsReview = (item: LiveItem) => item.section === "review" || item.section === "team";
 
 export const inHiddenRepo = (folder: Pick<LiveFolder, "hiddenRepos">, item: LiveItem) => !!item.pr && folder.hiddenRepos.includes(item.pr.repo);
@@ -22,6 +28,13 @@ export const shownItems = (folder: Pick<LiveFolder, "hiddenRepos">, items: LiveI
 
 export const hasShownUnread = (folder: Pick<LiveFolder, "hiddenRepos">, items: LiveItem[], unread: string[] = []) =>
   unread.length > 0 && (!folder.hiddenRepos.length || items.some((it) => unread.includes(it.id) && !inHiddenRepo(folder, it)));
+
+export function shownCompleted(folder: Pick<LiveFolder, "showCompleted" | "hiddenRepos">, completed: CompletedItem[], now = Date.now()): CompletedItem[] {
+  if (!folder.showCompleted) return [];
+  return completed.filter((c) => !completedExpired(c, now) && !inHiddenRepo(folder, c.item));
+}
+
+export const openItems = (items: LiveItem[], completed: CompletedItem[]) => (completed.length ? items.filter((it) => !completed.some((c) => c.item.id === it.id)) : items);
 
 export function folderRepos(folder: Pick<LiveFolder, "hiddenRepos">, items: LiveItem[]): string[] {
   return [...new Set([...items.flatMap((it) => (it.pr ? [it.pr.repo] : [])), ...folder.hiddenRepos])].sort();
@@ -37,13 +50,18 @@ export function folderRows(
   folder: Pick<LiveFolder, "id" | "kind" | "groupStacks">,
   items: LiveItem[],
   showAll: Record<string, boolean>,
+  completed: CompletedItem[] = [],
   page = PAGE_SIZE,
 ): FolderRow[] {
   const inSection = (s: string) => (it: LiveItem) => folder.kind !== "pullRequests" || (it.section ?? "authored") === s;
-  const sections: [string, LiveItem[]][] = (folder.kind === "pullRequests" ? (["authored", "review", "team"] as const) : ["documents"]).map((s) => [s, items.filter(inSection(s))]);
+  const sections: [string, LiveItem[], CompletedItem[]][] = (folder.kind === "pullRequests" ? (["authored", "review", "team"] as const) : ["documents"]).map((s) => [
+    s,
+    items.filter(inSection(s)),
+    completed.filter((c) => inSection(s)(c.item)),
+  ]);
   const rows: FolderRow[] = [];
-  for (const [section, members] of sections) {
-    if (!members.length) continue;
+  for (const [section, members, done] of sections) {
+    if (!members.length && !done.length) continue;
     const title = SECTION_TITLES[section as PullRequestSection];
     if (title) rows.push({ kind: "header", key: `h:${section}`, title });
     const entries: FolderRow[] = [];
@@ -59,6 +77,7 @@ export function folderRows(
       const inStack = members.filter((m) => m.pr?.stack?.id === stack.id).sort((a, b) => a.pr!.stack!.position - b.pr!.stack!.position);
       entries.push({ kind: "stack", key: stack.id, id: stack.id, repo: it.pr!.repo, items: inStack });
     }
+    for (const c of done) entries.push({ kind: "item", key: c.item.id, item: c.item, done: c.state });
     const all = showAll[`${folder.id}:${section}`];
     rows.push(...(all ? entries : entries.slice(0, page)));
     if (!all && entries.length > page) rows.push({ kind: "more", key: `m:${section}`, section, count: entries.length - page });

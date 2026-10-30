@@ -4,10 +4,10 @@ import { resolveFavicon, useFavicons } from "../../lib/favicons";
 import { bundledSiteIcon } from "../../lib/siteIcons";
 import { layout, useTheme } from "../../lib/theme";
 import { errorText } from "../../live/engine";
-import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, shownItems, type FolderRow } from "../../live/rows";
+import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
-import { completionOf, type live } from "../../live/store";
-import type { CompletionState, LiveFolder, LiveItem } from "../../live/types";
+import type { live } from "../../live/store";
+import type { CompletedItem, CompletionState, LiveFolder, LiveItem } from "../../live/types";
 import { useLiveColors } from "../live/colors";
 import type { BrowserState } from "../../store/browser";
 import { activeTabId, viewTabIds } from "../../store/model";
@@ -28,7 +28,7 @@ import { GROUP_COLORS, useArcLabel, useArcTitle, useSidebarTokens, withAlpha } f
 
 type TabShot = { kind: "tab"; key: string; title: string; url: string; favicon?: string | null; icon?: string | null; profileId: string; uri: string | null; template: boolean; sound: "muted" | "playing" | null; hovered: boolean };
 type SplitShot = { kind: "split"; key: string; panes: TabShot[] };
-type LiveItemShot = { key: string; item: LiveItem; indent: number; completing: CompletionState | null; dot: boolean; unread: boolean };
+type LiveItemShot = { key: string; item: LiveItem; indent: number; completing: CompletedItem["state"] | null; done: CompletionState | null; dot: boolean; unread: boolean };
 type LiveRowShot =
   | { kind: "title"; key: string; title: string }
   | { kind: "more"; key: string; count: number }
@@ -89,10 +89,10 @@ function splitShot(s: BrowserState, splitId: string): SplitShot {
   return { kind: "split", key: `s:${splitId}`, panes: panes.flatMap((id) => tabShot(s, id, false) ?? []) };
 }
 
-function itemShot(data: LiveData, folderId: string, item: LiveItem, indent: number): LiveItemShot {
-  const completing = completionOf(data, folderId, item.id);
-  const unread = !!data.unread[folderId]?.includes(item.id);
-  return { key: item.id, item, indent, completing, dot: unread || (!completing && awaitsReview(item)), unread };
+function itemShot(data: LiveData, folderId: string, item: LiveItem, indent: number, done: CompletionState | null = null): LiveItemShot {
+  const completing = !done && data.completing[folderId]?.includes(item.id) ? (data.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null;
+  const unread = !done && !!data.unread[folderId]?.includes(item.id);
+  return { key: item.id, item, indent, completing, done, dot: unread || (!done && !completing && awaitsReview(item)), unread };
 }
 
 function noteText(data: LiveData, folder: LiveFolder): string {
@@ -107,7 +107,7 @@ function noteText(data: LiveData, folder: LiveFolder): string {
 function rowShot(data: LiveData, folderId: string, row: FolderRow): LiveRowShot {
   if (row.kind === "header") return { kind: "title", key: row.key, title: row.title };
   if (row.kind === "more") return { kind: "more", key: row.key, count: row.count };
-  if (row.kind === "item") return { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, 0) };
+  if (row.kind === "item") return { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, 0, row.done ?? null) };
   const open = data.expandedStacks[row.id] !== false;
   return { kind: "stack", key: row.key, repo: row.repo.split("/")[1] ?? row.repo, count: row.items.length, items: open ? row.items.map((it) => itemShot(data, folderId, it, 10)) : null };
 }
@@ -118,7 +118,7 @@ export function LiveRowGhost({ data, folderId, row, indent = 0 }: { data: LiveDa
   const label = useArcLabel() ?? theme.textTab;
   const shot: LiveRowShot =
     row.kind === "item"
-      ? { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, indent) }
+      ? { kind: "item", key: row.key, item: itemShot(data, folderId, row.item, indent, row.done ?? null) }
       : row.kind === "stack"
         ? { kind: "stack", key: row.key, repo: row.repo.split("/")[1] ?? row.repo, count: row.items.length, items: null }
         : rowShot(data, folderId, row);
@@ -130,8 +130,9 @@ function liveShot(s: BrowserState, windowId: string, profileId: string, folderId
   if (!folder) return null;
   const fetched = data.items[folderId] ?? [];
   const items = shownItems(folder, fetched);
-  const rows = folderRows(folder, items, data.showAll);
-  const itemIds = new Set(items.map((i) => i.id));
+  const completed = shownCompleted(folder, data.completed[folderId] ?? []);
+  const rows = folderRows(folder, openItems(items, completed), data.showAll, completed);
+  const itemIds = new Set([...items, ...completed.map((c) => c.item)].map((i) => i.id));
   const hiddenIds = new Set([...(data.hidden[folderId] ?? []), ...fetched.filter((it) => !itemIds.has(it.id))].map((item) => item.id));
   const strays = viewTabIds(s, windowId, profileId).filter((id) => s.tabs[id]?.liveItem?.folderId === folderId && liveTabPlace(s.tabs[id]!.liveItem!.itemId, itemIds, hiddenIds) === "stray");
   const all: LiveRowShot[] = rows.length ? rows.map((row) => rowShot(data, folderId, row)) : [{ kind: "note", key: "note", text: noteText(data, folder) }];
@@ -360,17 +361,18 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
   const theme = useTheme();
   const colors = useLiveColors();
   const arcTitle = useArcTitle();
-  const { item, completing, dot, unread, indent } = shot;
+  const { item, completing, done, dot, unread, indent } = shot;
+  const completion = completing ?? done;
   const subtitle = item.pr?.author || item.subtitle;
   const color = completing ? theme.textSecondary : (arcTitle ?? label);
   return (
     <View style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}>
       {dot && !flat ? <View style={{ position: "absolute", left: 2 + indent, width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.pip }} /> : null}
-      <ItemIcon item={item} completing={completing} colors={colors} animate={false} />
+      <ItemIcon item={item} completing={completing} done={done} colors={colors} animate={false} />
       {flat && subtitle ? (
         <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
           <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={color} style={{ height: 18 }} />
-          <LiveSubtitle item={item} subtitle={subtitle} done={completing} colors={colors} />
+          <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} />
         </View>
       ) : (
         <FadeLabel text={item.title} fontSize={layout.rowFontSize} weight={unread && !flat ? "medium" : undefined} color={color} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
@@ -381,7 +383,7 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
           </View>
         ) : null}
-        <Trailing item={item} completion={completing} colors={colors} flat={flat} />
+        <Trailing item={item} completion={completion} colors={colors} flat={flat} />
       </HoverSlot>
     </View>
   );
