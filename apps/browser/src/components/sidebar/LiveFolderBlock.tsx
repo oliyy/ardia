@@ -24,7 +24,7 @@ import { useDragFolded, useDragItem, useDragging } from "./dnd";
 import { useShift, type EntryMotion } from "./entryMotion";
 import { Fold, useFold, useFoldHidden, type FoldEntry } from "./Fold";
 import { LiveRowGhost, type LiveData } from "./GhostEntry";
-import { AnimatedSurface, Morph, RowGhost, useRowMotion, type PlacedRow, type RowPlacement } from "./liveMotion";
+import { AnimatedSurface, Glide, Morph, RowGhost, useRowMotion, type PlacedRow, type RowPlacement } from "./liveMotion";
 import { FoldChainContext, ListMotionContext, type FoldChain } from "./listMotion";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_HEADER_RADIUS, GROUP_PAD, GROUP_RADIUS, groupFrame } from "./geometry";
 import { useAddressBarInSidebar } from "../layout/windowLayout";
@@ -473,9 +473,11 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
                   hover={<IconButton icon="xmark" size={10} weight="semibold" box={22} radius={6} onPress={() => tabId && void closeTab(tabId)} tooltip="Close Tab (⌘W)" />}
                 >
                   {(unread || reviewDue) && flat ? (
-                    <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
-                      <PulseDot color={theme.textPrimary} pulsing={reviewDue} style={{ width: 6, height: 6, opacity: 0.9 }} />
-                    </View>
+                    <Glide x={trailingState === "none" ? 0 : -BADGE_BOX} animates={animates}>
+                      <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
+                        <PulseDot color={theme.textPrimary} pulsing={reviewDue} style={{ width: 6, height: 6, opacity: 0.9 }} />
+                      </View>
+                    </Glide>
                   ) : null}
                   <Morph state={trailingState} animates={animates}>
                     <Trailing item={item} completion={completion} colors={colors} flat={flat} />
@@ -587,6 +589,7 @@ export function ItemIcon({
 }
 
 const PENDING_PERIOD = 3;
+const BADGE_BOX = 22;
 
 const BADGES: Record<Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed">, { symbol: string | null; color: keyof LiveColors; tip: string | ((pr: PullRequestInfo) => string) }> = {
   conflict: { symbol: "exclamationmark.triangle.fill", color: "conflict", tip: "Merge conflicts" },
@@ -607,7 +610,7 @@ export function Trailing({ item, completion, colors, flat }: { item: LiveItem; c
   if (!badge || badge === "passed") return null;
   const spec = BADGES[badge];
   return (
-    <View tooltip={typeof spec.tip === "string" ? spec.tip : spec.tip(item.pr)} style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
+    <View tooltip={typeof spec.tip === "string" ? spec.tip : spec.tip(item.pr)} style={{ width: BADGE_BOX, height: BADGE_BOX, alignItems: "center", justifyContent: "center" }}>
       {spec.symbol ? (
         <Symbol name={spec.symbol} size={11} weight="semibold" color={colors[spec.color]} style={{ width: 16, height: 16 }} />
       ) : (

@@ -110,6 +110,29 @@ export function Morph({ state, animates, children }: { state: string; animates: 
   );
 }
 
+export function Glide({ x, animates, children }: { x: number; animates: () => boolean; children: ReactNode }) {
+  const motion = useRef<{ slide: Slide; style: object } | null>(null);
+  motion.current ??= glideMotion();
+  const { slide, style } = motion.current;
+  const last = useRef(x);
+  useLayoutEffect(() => {
+    const from = last.current;
+    last.current = x;
+    if (from === x) return;
+    if (!animates()) {
+      settle(slide, 0);
+      return;
+    }
+    play(slide, (slide.live ? shiftAt(slide, Date.now()) : 0) + from - x, 0, POP_SPRING);
+  }, [x]);
+  return <AnimatedSurface style={style}>{children}</AnimatedSurface>;
+}
+
+function glideMotion() {
+  const slide = newSlide(0, 0, POP_SPRING);
+  return { slide, style: { transform: [{ translateX: slide.value }] } };
+}
+
 export type PlacedRow = { key: string; y: number; parent: string | null; ghost: (() => ReactNode) | null };
 export type RowPlacement = { rows: PlacedRow[]; height: number };
 
