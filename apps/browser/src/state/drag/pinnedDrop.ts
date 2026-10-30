@@ -30,8 +30,10 @@ function pinnedAt(s: BrowserState, windowId: string, spot: PinnedSpot, movers: r
   return { profileId, parent, beforeNode, siblings: shownNodes(s, windowId, profileId, parent) };
 }
 
-const pinnedTabs = (spot: PinnedSpot, { beforeNode, siblings }: PinnedAt): TabPlacement =>
-  spot.parent ? { pinned: false, groupId: spot.parent, beforeNode, siblings } : { pinned: true, row: true, beforeNode, siblings };
+const pinnedTabs = (spot: PinnedSpot, { beforeNode, siblings }: PinnedAt): TabPlacement => {
+  const end = spot.before ? {} : { last: true };
+  return spot.parent ? { pinned: false, groupId: spot.parent, beforeNode, siblings, ...end } : { pinned: true, row: true, beforeNode, siblings, ...end };
+};
 
 export function pinnedPlacementNow(windowId: string, spot: PinnedSpot): TabPlacement | null {
   const at = pinnedAt(useBrowser.getState(), windowId, spot, []);
