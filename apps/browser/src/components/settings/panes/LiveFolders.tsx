@@ -42,7 +42,7 @@ export function LiveFoldersPane() {
     <View>
       <SectionHeader
         anchor="liveFolders.folders"
-        description="Right-click empty space in the sidebar and choose New Live Folder to add one. Pull requests refresh every 30 seconds while you use Ardia and documents every 10 minutes; items open as tabs that stay in the folder."
+        description="Right-click empty space in the sidebar and choose New Live Folder to add one. Pull requests refresh every 15 seconds while you use Ardia and documents every 10 minutes; items open as tabs that stay in the folder."
       />
       <View style={{ gap: 14 }}>
         {folders.map((f) => (

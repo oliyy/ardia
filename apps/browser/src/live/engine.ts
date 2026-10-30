@@ -7,10 +7,10 @@ import { SOURCES } from "./sources";
 import { applyFetch, createFolder, finishCompleting, folderGeneration, live, markRead, removeFolder, setStatus, unhide, useLive, type LiveFolderSnapshot } from "./store";
 import { LiveError, type CompletionState, type LiveFolder, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
 
-const ACTIVE_MS: Record<LiveFolderKind, number> = { pullRequests: 30_000, documents: 10 * 60_000 };
+const ACTIVE_MS: Record<LiveFolderKind, number> = { pullRequests: 15_000, documents: 10 * 60_000 };
 const IDLE_MS: Record<LiveFolderKind, number> = { pullRequests: 3 * 60_000, documents: 10 * 60_000 };
-const TICK_MS = 30_000;
-const STALE_ON_FOCUS_MS = 30_000;
+const TICK_MS = 15_000;
+const STALE_ON_FOCUS_MS = 15_000;
 export const COMPLETION_MS = 2600;
 
 const inflight = new Map<string, { generation: number; task: Promise<void> }>();
