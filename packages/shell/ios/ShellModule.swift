@@ -2576,7 +2576,39 @@ public class SurfaceModule: Module {
       Prop("logicalWidth") { (view: Surface, v: Double?) in
         view.surfaceLogicalWidth = v.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil }
       }
+      Prop("fadeMask") { (view: Surface, v: [String: Any]?) in view.surfaceFadeMask = v.flatMap(SurfaceFadeMask.init) }
     }
+  }
+}
+
+struct SurfaceFadeMask {
+  let edgeInset: CGFloat
+  let edgeShare: CGFloat
+  let rampShare: CGFloat
+  let baseInset: CGFloat
+  let times: [Double]
+  let offsetShares: [CGFloat]
+  let fades: [CGFloat]
+
+  init?(_ record: [String: Any]) {
+    func number(_ key: String) -> CGFloat? { (record[key] as? NSNumber).map { CGFloat($0.doubleValue) }.flatMap { $0.isFinite ? $0 : nil } }
+    func list(_ key: String) -> [CGFloat]? {
+      guard let values = record[key] as? [NSNumber] else { return nil }
+      let numbers = values.map { CGFloat($0.doubleValue) }
+      return numbers.allSatisfy(\.isFinite) ? numbers : nil
+    }
+    guard let edgeInset = number("edgeInset"), let edgeShare = number("edgeShare"), let rampShare = number("rampShare"), rampShare > 0,
+          let baseInset = number("baseInset"), let times = list("times"), let offsetShares = list("offsetShares"), let fades = list("fades"),
+          !times.isEmpty, times.count == offsetShares.count, times.count == fades.count, times.first == 0,
+          zip(times, times.dropFirst()).allSatisfy({ $0 <= $1 })
+    else { return nil }
+    self.edgeInset = edgeInset
+    self.edgeShare = edgeShare
+    self.rampShare = rampShare
+    self.baseInset = baseInset
+    self.times = times.map { Double($0) / 1000 }
+    self.offsetShares = offsetShares
+    self.fades = fades.map { min(max($0, 0), 1) }
   }
 }
 
@@ -2609,6 +2641,13 @@ final class Surface: ExpoView {
   var surfaceShadowOffset: CGSize = .zero { didSet { apply() } }
   var surfaceCutout: [Double]? { didSet { apply() } }
   var surfaceLogicalWidth: CGFloat? { didSet { apply() } }
+  var surfaceFadeMask: SurfaceFadeMask? {
+    didSet {
+      fadePending = surfaceFadeMask != nil
+      if surfaceFadeMask == nil { fadeRamp.removeAllAnimations() }
+      apply()
+    }
+  }
   var surfaceInactiveOpacity: Double? { didSet { observeActivity() } }
   var surfaceInactiveFillOpacity: Double? { didSet { observeActivity() } }
   var surfaceInactiveBorderColors: [NSColor]? { didSet { observeActivity() } }
@@ -2642,6 +2681,11 @@ final class Surface: ExpoView {
   private let borderGradient = CAGradientLayer()
   private let borderStroke = CAShapeLayer()
   private let cutoutMask = CAShapeLayer()
+  private let fadeHolder = CALayer()
+  private let fadeClip = CALayer()
+  private let fadeRamp = CAGradientLayer()
+  private let fadeBase = CALayer()
+  private var fadePending = false
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -2811,11 +2855,72 @@ final class Surface: ExpoView {
         cutoutMask.frame = bounds
         cutoutMask.path = path
         surfaceLayer.heldMask = cutoutMask
+      } else if let fade = surfaceFadeMask {
+        layoutFade(fade)
+        surfaceLayer.heldMask = fadeHolder
       } else if surfaceLayer.heldMask != nil {
         surfaceLayer.heldMask = nil
       }
     }
     CATransaction.commit()
+  }
+
+  private func layoutFade(_ fade: SurfaceFadeMask) {
+    let flipped = layer?.isGeometryFlipped == true || isFlipped
+    let height = bounds.height
+    let ramp = fade.rampShare * height
+    let bottom = min(max(height - fade.baseInset, 0), height)
+    let edge = height - fade.edgeInset - fade.edgeShare * height
+    let pad = (fade.offsetShares.map(abs).max() ?? 0) * height + ramp + 1
+    let span = bottom + pad * 2
+    if fadeClip.superlayer !== fadeHolder {
+      fadeHolder.addSublayer(fadeClip)
+      fadeHolder.addSublayer(fadeBase)
+      fadeClip.addSublayer(fadeRamp)
+      fadeClip.masksToBounds = true
+      fadeBase.backgroundColor = NSColor.black.cgColor
+    }
+    fadeHolder.frame = bounds
+    fadeClip.frame = CGRect(x: 0, y: flipped ? 0 : height - bottom, width: bounds.width, height: bottom)
+    fadeBase.frame = CGRect(x: 0, y: flipped ? bottom : 0, width: bounds.width, height: height - bottom)
+    fadeRamp.bounds = CGRect(x: 0, y: 0, width: bounds.width, height: span)
+    fadeRamp.position = CGPoint(x: bounds.width / 2, y: span / 2 - pad)
+    fadeRamp.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
+    fadeRamp.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
+    fadeRamp.locations = [0, NSNumber(value: Double((edge - ramp + pad) / span)), NSNumber(value: Double((edge + pad) / span)), 1]
+    guard fadePending, height > 0 else { return }
+    fadePending = false
+    runFade(fade, scale: (flipped ? 1 : -1) * height)
+  }
+
+  private func fadeColors(_ fade: CGFloat) -> [CGColor] {
+    let opaque = NSColor.black.cgColor
+    let floor = NSColor.black.withAlphaComponent(1 - fade).cgColor
+    return [opaque, opaque, floor, floor]
+  }
+
+  private func runFade(_ fade: SurfaceFadeMask, scale: CGFloat) {
+    var offsets = fade.offsetShares.map { $0 * scale }
+    var fades = fade.fades
+    if fadeRamp.animationKeys()?.isEmpty == false, let shown = fadeRamp.presentation() {
+      if let moved = shown.value(forKeyPath: "transform.translation.y") as? NSNumber { offsets[0] = CGFloat(moved.doubleValue) }
+      if let colors = shown.colors as? [CGColor], colors.count == 4 { fades[0] = 1 - colors[2].alpha }
+    }
+    fadeRamp.removeAllAnimations()
+    fadeRamp.colors = fadeColors(fades[fades.count - 1])
+    fadeRamp.setValue(offsets[offsets.count - 1], forKeyPath: "transform.translation.y")
+    guard let total = fade.times.last, total > 0 else { return }
+    let keyTimes = fade.times.map { NSNumber(value: $0 / total) }
+    let move = CAKeyframeAnimation(keyPath: "transform.translation.y")
+    move.values = offsets
+    let tint = CAKeyframeAnimation(keyPath: "colors")
+    tint.values = fades.map(fadeColors)
+    for animation in [move, tint] {
+      animation.keyTimes = keyTimes
+      animation.duration = total
+      animation.calculationMode = .linear
+      fadeRamp.add(animation, forKey: animation.keyPath)
+    }
   }
 
   private func applyBorder() {

@@ -510,6 +510,18 @@ export type SurfaceProps = ViewProps & {
   hidesAccessibility?: boolean;
   logicalWidth?: number;
   refreshRasterOnRest?: boolean;
+  fadeMask?: SurfaceFadeMask | null;
+};
+
+export type SurfaceFadeMask = {
+  edgeInset: number;
+  edgeShare: number;
+  rampShare: number;
+  baseInset: number;
+  times: number[];
+  offsetShares: number[];
+  fades: number[];
+  token: number;
 };
 
 type NativeSurfaceProps = Omit<SurfaceProps, "shadowColor" | "shadowOpacity" | "shadowRadius" | "shadowOffset"> & {

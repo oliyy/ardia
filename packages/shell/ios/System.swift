@@ -85,6 +85,32 @@ public class SystemModule: Module {
       }
     }.runOnQueue(.main)
 
+    AsyncFunction("copyFile") { (path: String) -> Bool in
+      guard FileManager.default.fileExists(atPath: path) else { return false }
+      let url = URL(fileURLWithPath: path)
+      let item = NSPasteboardItem()
+      item.setString(url.absoluteString, forType: .fileURL)
+      item.setString(url.lastPathComponent, forType: .string)
+      if UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true, let image = NSImage(contentsOf: url) {
+        if let tiff = image.tiffRepresentation { item.setData(tiff, forType: .tiff) }
+        if let png = NSBitmapImageRep(data: image.tiffRepresentation ?? Data())?.representation(using: .png, properties: [:]) {
+          item.setData(png, forType: .png)
+        }
+      }
+      if FileDropView.background {
+        NSLog("ArdiaSystem: background instance, not copying %@ (%@)", path, item.types.map(\.rawValue).joined(separator: ","))
+        return true
+      }
+      NSPasteboard.general.clearContents()
+      return NSPasteboard.general.writeObjects([item])
+    }.runOnQueue(.main)
+
+    AsyncFunction("fileOpenerName") { (path: String) -> String? in
+      guard let app = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: path)) else { return nil }
+      let name = FileManager.default.displayName(atPath: app.path)
+      return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }.runOnQueue(.main)
+
     AsyncFunction("fileIcon") { (path: String, size: Double) -> String? in
       let icon = FileManager.default.fileExists(atPath: path)
         ? NSWorkspace.shared.icon(forFile: path)

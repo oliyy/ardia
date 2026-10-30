@@ -98,7 +98,7 @@ function showAllDownloads(windowId: string) {
   else openInternalPage("downloads", windowId);
 }
 
-async function trashDownload(d: Download) {
+export async function trashDownload(d: Download) {
   if (await moveToTrash(d.path)) useBrowser.getState().removeDownload(d.id);
 }
 

@@ -50,6 +50,7 @@ import { SCROLL_EDGE, ScrollEdgeLine, useScrollEdge } from "./sidebar/ScrollEdge
 import { entriesHeight, entryHeight, firstPaintEntries, keptEntry, rootLift, rootTrail, rowSpan, startsOffScreen, type Section } from "./sidebar/geometry";
 import { usePinnedRoot } from "./sidebar/pinnedTree";
 import { measureRow, useSidebarUi } from "./sidebar/state";
+import { RecentDownloadsPeek, RecentDownloadsSurface, recentDownloadsButtonHover, recentDownloadsDockHover } from "./sidebar/RecentDownloads";
 import { LibraryGlyph } from "./sidebar/LibraryGlyph";
 import { SpaceHeader } from "./sidebar/SpaceHeader";
 import { SplitRowItem, TabRowItem } from "./sidebar/TabRow";
@@ -176,7 +177,7 @@ export function Sidebar({ width, resizing, receipt }: { width: number; resizing:
             style={{ width, height: "100%" }}
           >
             <AnimatedSurface refreshRasterOnRest={motion.rested} pointerEvents={motion.rested ? "box-none" : "none"} style={[StyleSheet.absoluteFill, motion.faceStyle]}>
-              <Surface hidesAccessibility={!motion.rested} style={StyleSheet.absoluteFill}>
+              <RecentDownloadsSurface windowId={windowId} hidesAccessibility={!motion.rested} style={StyleSheet.absoluteFill}>
                 <View
                   ref={arming.attach}
                   {...sidebarHover}
@@ -220,14 +221,14 @@ export function Sidebar({ width, resizing, receipt }: { width: number; resizing:
                 </View>
 
                 {footer ? (
-                  <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: footer }}>
+                  <View {...(footerButtons ? recentDownloadsDockHover(windowId) : null)} style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: footer }}>
                     <Surface inactiveOpacity={addressBar && theme.dark ? FOOTER_INACTIVE_OPACITY : undefined} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]}>
                       {dots ? <ProfileDots windowId={windowId} width={width} reserve={footerButtons || footerDownloads ? layout.sidebarInset + SIDEBAR_FOOTER_BUTTON.size : 0} /> : null}
                       {footerButtons ? (
                         <>
-                          <View style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
+                          <View {...recentDownloadsButtonHover(windowId)} style={{ position: "absolute", left: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
                             <ContextMenuArea onContextMenu={() => void openLibraryMenu(windowId)}>
-                              <IconButton glyph={(tint) => <LibraryGlyph color={tint} />} color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip="Library" onPress={() => toggleLibrary(windowId)} />
+                              <IconButton glyph={(tint) => <LibraryGlyph color={tint} />} color={footerTint} box={SIDEBAR_FOOTER_BUTTON.size} radius={10} tooltip={hasDownloads ? undefined : "Library"} onPress={() => toggleLibrary(windowId)} />
                             </ContextMenuArea>
                           </View>
                           <View style={{ position: "absolute", right: layout.sidebarInset, bottom: SIDEBAR_FOOTER_BUTTON.bottom }}>
@@ -258,7 +259,8 @@ export function Sidebar({ width, resizing, receipt }: { width: number; resizing:
                     </View>
                   )}
                 </View>
-              </Surface>
+              </RecentDownloadsSurface>
+              {footerButtons ? <RecentDownloadsPeek windowId={windowId} /> : null}
             </AnimatedSurface>
             {motion.present && motion.view ? (
               <View pointerEvents={motion.entered ? "box-none" : "none"} style={[StyleSheet.absoluteFill, { overflow: "hidden" }]}>
