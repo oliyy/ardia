@@ -9,7 +9,6 @@ import type { ToolbarGeometry } from "./layout/geometry";
 import { toolbarPalette, useEasedColor } from "./layout/toolbarColors";
 import { useHistoryMenu } from "./layout/history";
 import { usePages } from "./layout/pageState";
-import { useExtensions } from "./extensions/store";
 import { needsBar, revealToolbar, setToolbarPeek, STRIP_HEIGHT, toolbarMode, useToolbarAutoHide, type ToolbarMode } from "./layout/toolbarAutoHide";
 import { Toolbar } from "./Toolbar";
 
@@ -37,8 +36,7 @@ export function useToolbarMode(tabId: string, windowId: string, enabled: boolean
   const appNeedsBar = useStoreWhile(useBrowser, down, (s) => down && needsBar(s, tabId, windowId));
   const popover = useStoreWhile(usePages, down, (s) => down && !!s.popover[tabId]);
   const historyMenu = useStoreWhile(useHistoryMenu, down, (m) => down && m.menu?.tabId === tabId);
-  const extensionPopup = useStoreWhile(useExtensions, down, (e) => down && e.popup?.windowId === windowId);
-  return toolbarMode({ enabled, hasPage, scrolledDown, peek, needsBar: appNeedsBar || popover || historyMenu || extensionPopup });
+  return toolbarMode({ enabled, hasPage, scrolledDown, peek, needsBar: appNeedsBar || popover || historyMenu });
 }
 
 type ToolbarMotion = {

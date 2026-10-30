@@ -260,6 +260,8 @@ function startSidePanels() {
       if (!s.windows[windowId]) closeSidePanel(windowId);
       else void syncSidePanel(windowId);
     }
+    const popup = useExtensions.getState().popup;
+    if (popup && !s.windows[popup.windowId]) closeExtensionPopup();
   });
   useExtensions.subscribe((e, prev) => {
     if (e.lists === prev.lists) return;

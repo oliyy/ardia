@@ -22,6 +22,7 @@
       "VisualEffectModule",
       "GlassEffectModule",
       "PopoverBubbleModule",
+      "ExtensionPopupWindowModule",
       "SystemModule",
       "FileDragModule",
       "FileDropModule",

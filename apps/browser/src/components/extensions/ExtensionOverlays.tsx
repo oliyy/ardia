@@ -1,5 +1,5 @@
 import { permissionWarnings, WebView, type InstalledExtension, type WebViewHandle } from "@ardia/ardiacore";
-import { Surface } from "@ardia/shell";
+import { ExtensionPopupWindow, Surface } from "@ardia/shell";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, findNodeHandle, Image, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { hex, useTheme } from "../../lib/theme";
@@ -8,7 +8,7 @@ import { useBrowser } from "../../store/browser";
 import { shownPageId } from "../../store/peek";
 import { useWindowId } from "../../store/hooks";
 import { openFromPage, pageProfileId } from "../layout/openFromPage";
-import { PANEL, PromptButton } from "../layout/controls";
+import { PromptButton } from "../layout/controls";
 import { Checkbox } from "../settings/controls";
 import {
   cancelInstall,
@@ -68,13 +68,13 @@ if (!last || last.w !== now.w || last.h !== now.h) {
   if (document.body) ro.observe(document.body);
 }`;
 
-function ActionPopup({ windowId, pageProfile, url, anchor }: { windowId: string; pageProfile: string; extensionId: string; url: string; anchor: { x: number; y: number; width: number; height: number } }) {
+function ActionPopup({ windowId, pageProfile, extensionId, url, anchor }: { windowId: string; pageProfile: string; extensionId: string; url: string; anchor: { x: number; y: number; width: number; height: number } }) {
   const theme = useTheme();
   const web = useRef<WebViewHandle>(null);
   const screen = useWindowDimensions();
   const [windowWidth, setWindowWidth] = useState(0);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const appear = useRef(new Animated.Value(0)).current;
+  const title = useWindowExtensions(windowId).find((x) => x.id === extensionId)?.name;
   const alive = useRef(true);
   const sized = useRef(false);
 
@@ -85,21 +85,16 @@ function ActionPopup({ windowId, pageProfile, url, anchor }: { windowId: string;
     };
   }, []);
 
-  const tabId = useBrowser((s) => shownPageId(s, windowId));
-  const openedOn = useRef(tabId);
   useEffect(() => {
-    if (tabId !== openedOn.current) closeExtensionPopup();
-  }, [tabId]);
+    if (size) void web.current?.focus();
+  }, [!size]);
 
   const resize = (w: number, h: number) => {
     const next = {
       width: Math.min(MAX.width, Math.max(MIN.width, Math.ceil(w))),
       height: Math.min(MAX.height, Math.max(MIN.height, Math.ceil(h))),
     };
-    setSize((prev) => {
-      if (!prev) Animated.timing(appear, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-      return prev && prev.width === next.width && prev.height === next.height ? prev : next;
-    });
+    setSize((prev) => (prev && prev.width === next.width && prev.height === next.height ? prev : next));
   };
 
   const watchSize = () => {
@@ -111,62 +106,37 @@ function ActionPopup({ windowId, pageProfile, url, anchor }: { windowId: string;
     });
   };
 
-  const width = (size?.width ?? MIN.width) + 1;
-  const height = (size?.height ?? MIN.height) + 1;
+  const width = size?.width ?? MIN.width;
+  const height = size?.height ?? MIN.height;
   const room = windowWidth || screen.width;
   const left = Math.max(8, Math.min(anchor.x + anchor.width - width, room - width - 8));
   const top = anchor.y + anchor.height + 6;
 
   return (
     <>
-      <Pressable style={StyleSheet.absoluteFill} onPress={closeExtensionPopup} onLayout={(e) => setWindowWidth(e.nativeEvent.layout.width)} />
-      <Animated.View
-        style={{
-          position: "absolute",
-          left,
-          top,
-          opacity: appear,
-          transform: [{ translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [-4, 0] }) }],
-        }}
-      >
-        <Surface
-          fill={hex(theme.panel)}
-          cornerRadius={PANEL.radius}
-          borderColor={hex(theme.dark ? "rgba(255,255,255,0.16)" : "rgba(0,0,0,0.14)")}
-          borderWidth={0.5}
-          shadowColor="#000000"
-          shadowOpacity={theme.dark ? 0.45 : 0.18}
-          shadowRadius={16}
-          shadowOffset={[0, 6]}
-          style={{ width, height }}
-        >
-          <View style={{ flex: 1, borderRadius: PANEL.radius, overflow: "hidden" }}>
-            <WebView
-              ref={web}
-              style={StyleSheet.absoluteFill}
-              url={url}
-              profile={pageProfile}
-              standalone
-              extensionHost="popup"
-              pageBackgroundColor="#FFFFFF"
-              onPreferredSize={({ width, height }) => {
-                sized.current = true;
-                resize(width, height);
-              }}
-              onNavigationChange={({ isLoading }) => {
-                if (isLoading) return;
-                watchSize();
-                void web.current?.focus();
-              }}
-              onWindowClose={closeExtensionPopup}
-              onOpenWindow={(request) => {
-                openFromPage(request, { windowId, profileId: pageProfileId(windowId, pageProfile) });
-                if (request.disposition !== "background") closeExtensionPopup();
-              }}
-            />
-          </View>
-        </Surface>
-      </Animated.View>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill} onLayout={(e) => setWindowWidth(e.nativeEvent.layout.width)} />
+      <ExtensionPopupWindow shown={!!size} dark={theme.dark} title={title} onClose={closeExtensionPopup} style={{ position: "absolute", left, top, width, height }}>
+        <WebView
+          ref={web}
+          style={StyleSheet.absoluteFill}
+          url={url}
+          profile={pageProfile}
+          standalone
+          extensionHost="popup"
+          pageBackgroundColor="#FFFFFF"
+          onPreferredSize={({ width, height }) => {
+            sized.current = true;
+            resize(width, height);
+          }}
+          onNavigationChange={({ isLoading }) => {
+            if (isLoading) return;
+            watchSize();
+            if (size) void web.current?.focus();
+          }}
+          onWindowClose={closeExtensionPopup}
+          onOpenWindow={(request) => openFromPage(request, { windowId, profileId: pageProfileId(windowId, pageProfile) })}
+        />
+      </ExtensionPopupWindow>
     </>
   );
 }
