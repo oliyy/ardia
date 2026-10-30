@@ -1,7 +1,6 @@
 import { Surface } from "@ardia/shell";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, View } from "react-native";
-import { layout } from "../../lib/theme";
 import { newSlide, shiftAt, type Slide, type SlideTiming } from "./listMotion";
 
 export const AnimatedSurface = Animated.createAnimatedComponent(Surface);
@@ -216,7 +215,7 @@ function farthestPassers(rows: { key: string; was: number; is: number }[]): stri
 
 export function RowGhost({ top, style, children }: { top: number; style: object; children: ReactNode }) {
   return (
-    <View pointerEvents="none" style={{ height: 0, marginBottom: -layout.rowGap }}>
+    <View pointerEvents="none">
       <AnimatedSurface hidesAccessibility style={[{ position: "absolute", left: 0, right: 0, top }, style]}>
         {children}
       </AnimatedSurface>

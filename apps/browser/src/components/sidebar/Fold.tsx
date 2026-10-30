@@ -120,6 +120,7 @@ export function Fold({
     return style;
   };
   const closed = { height: 0, marginBottom: -gap, opacity: 0, overflow: "hidden" as const };
+  const ghostRow = { height: 0, marginBottom: -gap };
   const slideStyles = useMemo(() => {
     if (!slide) return null;
     const { delta } = slide;
@@ -158,15 +159,16 @@ export function Fold({
   return (
     <Animated.View style={outer} pointerEvents={collapsed ? "box-none" : "auto"}>
       <Animated.View style={[{ gap, paddingTop: padTop, paddingBottom: padBottom, paddingLeft: indent }, measuring && outer && !moving ? { position: "absolute", left: 0, right: 0, top: 0 } : null, sliding ? slideStyles?.clip : null]}>
-        {entries.map(({ key, node }) => {
+        {entries.map(({ key, node, ghost }) => {
           const stays = key === kept;
           if (!stays && !mountAll) return null;
           const hidden = outerHidden || (restCollapsed && !stays);
           const folded = retained.current && collapsed && !moving && !stays;
+          const style = folded ? foldedRow : folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : sliding ? (stays ? slideStyles?.kept : slideStyles?.entry) : null;
           return (
             <Animated.View
               key={key}
-              style={folded ? foldedRow : folding && !stays ? (moving ? foldingStyle(heightOf(key)) : closed) : sliding ? (stays ? slideStyles?.kept : slideStyles?.entry) : null}
+              style={ghost ? [style, ghostRow] : style}
               pointerEvents={collapsed && !stays ? "none" : "auto"}
               presentationFolded={folded}
             >
