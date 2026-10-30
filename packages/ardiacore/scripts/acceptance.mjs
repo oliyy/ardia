@@ -1935,6 +1935,8 @@ try {
       await cdp(popupTarget, "Runtime.evaluate", { expression: "window.__acOld = 1" });
       const worker = await until("the extension's worker", async () =>
         (await targets()).find((t) => t.type === "service_worker" && t.url.includes(`${installed.id}/worker.js`)) ?? null, 10000);
+      await evalApp(`ac.actions.focus(${JSON.stringify(mainWindow)}); return true`);
+      await until("the browser window key again", async () => ((await engine("windows.list")).some((w) => w.key) ? true : null), 5000);
       const opened = (await cdp(worker, "Runtime.evaluate", { expression: "chrome.action.openPopup().then(() => 'ok', (e) => e.message)", awaitPromise: true, returnByValue: true })).result.value;
       if (opened !== "ok") throw new Error(`chrome.action.openPopup(): ${opened}`);
       await until("the popup reopened", async () => {
