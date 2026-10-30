@@ -127,6 +127,9 @@ type SessionV2 = {
 };
 
 let droppedPrivateDownloads = false;
+let hadSession = false;
+
+export const hadSessionBeforeLaunch = () => hadSession;
 
 function forgetStaging(id: string) {
   const s = useBrowser.getState();
@@ -138,6 +141,7 @@ function forgetStaging(id: string) {
 
 export function loadSession(): HydrateData | null {
   const session = read<SessionV2>("session.json");
+  hadSession = session !== null;
   if (session?.version !== 2) return null;
   const downloads = read<{ downloads: Download[] }>("downloads.json");
   droppedPrivateDownloads = (downloads?.downloads ?? []).some((d) => downloadSession(d) !== null);

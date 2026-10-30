@@ -1,5 +1,6 @@
 import { launchEnvironment, readDocument, stopIntroMusic, writeDocument } from "@ardia/shell";
 import { create } from "zustand";
+import { hadSessionBeforeLaunch } from "../../lib/persist";
 import { useBrowser } from "../../store/browser";
 import { resolveWindowId, tabLayoutOf } from "../../store/model";
 import type { Settings } from "../../store/settings";
@@ -327,6 +328,7 @@ export function startOnboarding(windowId?: string | null, step: OnboardingStep =
   endToolTour();
   useOnboarding.setState((s) => ({ ...FRESH, windowId: id, step, sub: 0, leaving: false, tourAfter: false, session: s.session + 1 }));
   save({ step, sub: 0, source: null, preset: "dia", picked: {} });
+  watchOnboardingWindow();
 }
 
 function resumeOnboarding(saved: Saved) {
@@ -348,6 +350,20 @@ function resumeOnboarding(saved: Saved) {
   }));
   const sub = Math.min(saved.sub ?? 0, questionsFor(step).length - 1);
   if (sub > 0) useOnboarding.setState({ sub });
+  watchOnboardingWindow();
+}
+
+let watchingWindow = false;
+
+function watchOnboardingWindow() {
+  if (watchingWindow) return;
+  watchingWindow = true;
+  useBrowser.subscribe((s, prev) => {
+    const { windowId, session } = useOnboarding.getState();
+    if (s.windows === prev.windows || !windowId || s.windows[windowId]) return;
+    finishOnboarding();
+    dismissOnboarding(session);
+  });
 }
 
 export function finishOnboarding(options: { tour?: boolean } = {}) {
@@ -369,7 +385,7 @@ export function maybeStartOnboarding() {
   const saved = readSaved();
   if (saved?.completedAt) return;
   if (saved?.startedAt) return resumeOnboarding(saved);
-  if (readDocument("session.json")) return markCompleted();
+  if (hadSessionBeforeLaunch()) return markCompleted();
   if (__DEV__ && launchEnvironment("ARDIA_ONBOARDING") !== "1") return;
   save({ startedAt: Date.now() });
   startOnboarding();
