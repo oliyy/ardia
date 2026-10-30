@@ -14,7 +14,11 @@ export const SECTION_TITLES: Record<PullRequestSection, string | null> = {
 
 export const PAGE_SIZE = 8;
 
-export const COMPLETED_SHOWN_MS = 24 * 3_600_000;
+export const COMPLETED_SHOWN_MS = 10 * 60_000;
+
+export const completedExpired = (c: CompletedItem, now = Date.now()) => now - c.at >= COMPLETED_SHOWN_MS;
+
+export const completedExpiry = (completed: CompletedItem[]) => (completed.length ? Math.min(...completed.map((c) => c.at)) + COMPLETED_SHOWN_MS : null);
 
 export const awaitsReview = (item: LiveItem) => item.section === "review" || item.section === "team";
 
@@ -27,7 +31,7 @@ export const hasShownUnread = (folder: Pick<LiveFolder, "hiddenRepos">, items: L
 
 export function shownCompleted(folder: Pick<LiveFolder, "showCompleted" | "hiddenRepos">, completed: CompletedItem[], now = Date.now()): CompletedItem[] {
   if (!folder.showCompleted) return [];
-  return completed.filter((c) => now - c.at < COMPLETED_SHOWN_MS && !inHiddenRepo(folder, c.item));
+  return completed.filter((c) => !completedExpired(c, now) && !inHiddenRepo(folder, c.item));
 }
 
 export const openItems = (items: LiveItem[], completed: CompletedItem[]) => (completed.length ? items.filter((it) => !completed.some((c) => c.item.id === it.id)) : items);

@@ -1,6 +1,7 @@
 import { readDocument, writeDocument } from "@ardia/shell";
 import { create } from "zustand";
 import { batchStoreUpdates } from "../store/browser";
+import { completedExpired } from "./rows";
 import type { CompletedItem, CompletionState, FolderStatus, LiveAccount, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId } from "./types";
 
 export type LiveConfig = {
@@ -81,6 +82,9 @@ const saved = load();
 
 const FOLDER_OPTION_DEFAULTS: Pick<LiveFolder, "groupStacks" | "showCompleted" | "hiddenRepos"> = { groupStacks: true, showCompleted: true, hiddenRepos: [] };
 
+const unexpired = (completed: Record<string, CompletedItem[]>, now = Date.now()) =>
+  Object.fromEntries(Object.entries(completed).map(([id, list]) => [id, list.filter((c) => !completedExpired(c, now))]));
+
 const withOptionDefaults = (f: LiveFolder): LiveFolder => ({ ...FOLDER_OPTION_DEFAULTS, ...f, filters: { ...f.filters, teamReviewRequests: f.filters.teamReviewRequests ?? f.filters.reviewRequests } });
 
 export const useLive = create<LiveState>()(() => ({
@@ -90,7 +94,7 @@ export const useLive = create<LiveState>()(() => ({
   known: saved.known ?? {},
   unread: saved.unread ?? {},
   hidden: saved.hidden ?? {},
-  completed: saved.completed ?? {},
+  completed: unexpired(saved.completed ?? {}),
   completing: {},
   completions: {},
   status: {},
@@ -329,6 +333,15 @@ export function finishCompleting(folderId: string, generation: number, token: nu
     const done = (s.completing[folderId] ?? []).filter((id) => tokens[id] === token);
     if (!s.folders[folderId] || (s.generations[folderId] ?? 0) !== generation || !done.length) return {};
     return { ...finished(s, folderId, done), revisions: revised(s, folderId) };
+  });
+}
+
+export function expireCompleted(folderId: string, now = Date.now()) {
+  setLive((s) => {
+    const completed = s.completed[folderId] ?? [];
+    const kept = completed.filter((c) => !completedExpired(c, now));
+    if (kept.length === completed.length) return {};
+    return { completed: { ...s.completed, [folderId]: kept }, revisions: s.revisions[folderId] ? revised(s, folderId) : s.revisions };
   });
 }
 

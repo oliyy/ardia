@@ -3,8 +3,9 @@ import { everySlowly } from "../lib/slowTimers";
 import { useBrowser } from "../store/browser";
 import { activeTabId, isIncognitoProfile, viewTabIds } from "../store/model";
 import { liveNode, migrateLivePlaces } from "../store/pinTree";
+import { completedExpiry } from "./rows";
 import { SOURCES } from "./sources";
-import { applyFetch, createFolder, finishCompleting, folderGeneration, live, markRead, removeFolder, setStatus, unhide, useLive, type LiveFolderSnapshot } from "./store";
+import { applyFetch, createFolder, expireCompleted, finishCompleting, folderGeneration, live, markRead, removeFolder, setStatus, unhide, useLive, type LiveFolderSnapshot } from "./store";
 import { LiveError, type CompletionState, type LiveFolder, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
 
 const ACTIVE_MS: Record<LiveFolderKind, number> = { pullRequests: 30_000, documents: 10 * 60_000 };
@@ -171,6 +172,23 @@ export function deleteLiveFolder(folderId: string): LiveFolderSnapshot | null {
   return removeFolder(folderId);
 }
 
+const expiries = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }>();
+
+function scheduleExpiry(folderId: string) {
+  const at = completedExpiry(live().completed[folderId] ?? []);
+  const scheduled = expiries.get(folderId);
+  if (scheduled?.at === at) return;
+  if (scheduled) clearTimeout(scheduled.timer);
+  expiries.delete(folderId);
+  if (at === null) return;
+  const timer = setTimeout(() => {
+    expiries.delete(folderId);
+    expireCompleted(folderId);
+    scheduleExpiry(folderId);
+  }, Math.max(0, at - Date.now()));
+  expiries.set(folderId, { at, timer });
+}
+
 let started = false;
 let appActive = true;
 const lastNudge = new Map<string, number>();
@@ -197,6 +215,12 @@ export function startLiveEngine() {
   orphans();
   useLive.subscribe((s, prev) => {
     if (s.folders !== prev.folders) orphans();
+  });
+
+  for (const id in live().completed) scheduleExpiry(id);
+  useLive.subscribe((s, prev) => {
+    if (s.completed === prev.completed) return;
+    for (const id of new Set([...Object.keys(s.completed), ...expiries.keys()])) if (s.completed[id] !== prev.completed[id]) scheduleExpiry(id);
   });
 
   useLive.subscribe((s, prev) => {

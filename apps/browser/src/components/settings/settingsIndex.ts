@@ -357,9 +357,9 @@ const ROWS: Record<SettingsPane, Section[]> = {
     {
       section: "Live folders",
       rows: {
-        folders: { title: "Live folders", description: "Live folders refresh every few minutes; items open as tabs that stay in the folder.", keywords: ["new live folder", "hidden", "refresh"] },
+        folders: { title: "Live folders", description: "Pull requests refresh every 30 seconds while you use Ardia and documents every 10 minutes; items open as tabs that stay in the folder.", keywords: ["new live folder", "hidden", "refresh"] },
         groupStacks: { title: "Group stacked pull requests", description: "Pull requests based on each other's branches sit together under one row.", keywords: ["stack", "stacked pull requests"] },
-        showCompleted: { title: "Show completed pull requests", description: "Merged, closed and reviewed pull requests stay listed for a day under Completed.", keywords: ["completed", "merged", "closed"] },
+        showCompleted: { title: "Show completed pull requests", description: "Merged, closed and reviewed pull requests stay listed for 10 minutes after they complete.", keywords: ["completed", "merged", "closed"] },
       },
     },
     {
