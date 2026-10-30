@@ -82,7 +82,7 @@ try {
   await rep.check("after onboarding the New Tab field is back and focused, in a bar of the same height", async () => {
     const r = await run(`return barHeight().then((during) => { acOnboarding.finish(); return settle(1500).then(() => Promise.all([act("ax"), act("type:"), barHeight()])).then(([ax, focus, after]) => ({ ax, focus, during, after })); });`);
     assert.equal(textFields(r.ax).length, 1, "the New Tab field");
-    assert.match(r.focus, /NSTextView|NSTextField/, `first responder: ${r.focus}`);
+    assert.match(r.focus, /NSTextView|NSTextField|PlainPasteFieldEditor/, `first responder: ${r.focus}`);
     assert.equal(r.after, r.during, "the bar's height");
     return `${r.focus}, bar ${r.during} -> ${r.after}`;
   });
