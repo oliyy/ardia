@@ -20,9 +20,9 @@ function mirroredGroups(s: BrowserState, tree: TabGroup[], windowId: string, pro
   return found;
 }
 
-export function regrouped(s: BrowserState, tree: TabGroup[], windowId: string, profileId: string, fresh: boolean): BrowserState {
+export function regrouped(s: BrowserState, tree: TabGroup[], windowId: string, profileId: string, fresh: boolean, given?: Map<string, string>): BrowserState {
   const mirrors = fresh ? new Map<string, TabGroup>() : mirroredGroups(s, tree, windowId, profileId);
-  const ids = new Map(tree.map((g) => [g.id, mirrors.get(g.id)?.id ?? (fresh || s.groups[g.id] ? newId("g") : g.id)]));
+  const ids = given ?? new Map(tree.map((g) => [g.id, mirrors.get(g.id)?.id ?? (fresh || s.groups[g.id] ? newId("g") : g.id)]));
   const groups = { ...s.groups };
   for (const g of tree) {
     const incoming = g.tabIds.filter((id) => s.tabs[id]?.windowId === windowId && s.tabs[id]?.profileId === profileId);

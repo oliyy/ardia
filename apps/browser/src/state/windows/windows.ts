@@ -35,7 +35,7 @@ import { focusedWindowOf } from "./ui";
 import { archivedEntries } from "../pins/archive";
 import { notePlainSpaceSwitch } from "./spaceSwitch";
 import { dropNodes, FAVORITES, placeNodes, tabNode } from "../pins/pinTree";
-import { withoutEmptiedFolders } from "../pins/placing";
+import { withFolderMovedToProfile } from "../pins/folderMoves";
 
 export type CreateWindowOptions = {
   profileId?: string;
@@ -314,7 +314,8 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     const tree = groupTree(s.groups, groupId);
     const kept = splitsWithin(s, g.tabIds);
     let next = g.tabIds.reduce((acc, id) => intoProfile(acc, id, profileId), s);
-    next = withoutEmptiedFolders(s, withSplitsBack(regrouped(next, tree, g.windowId, profileId, true), kept, g.windowId));
+    const ids = new Map(tree.map((x) => [x.id, newId("g")]));
+    next = withFolderMovedToProfile(s, withSplitsBack(regrouped(next, tree, g.windowId, profileId, true, ids), kept, g.windowId), g, profileId, ids);
     const last = findLast(g.tabIds, (id) => next.tabs[id]?.profileId === profileId);
     set(last ? apply(next, activated(next, last)) : next);
   },
