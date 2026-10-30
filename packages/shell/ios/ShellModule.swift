@@ -2919,6 +2919,7 @@ final class Surface: ExpoView {
       animation.keyTimes = keyTimes
       animation.duration = total
       animation.calculationMode = .linear
+      animation.fillMode = .backwards
       fadeRamp.add(animation, forKey: animation.keyPath)
     }
   }
