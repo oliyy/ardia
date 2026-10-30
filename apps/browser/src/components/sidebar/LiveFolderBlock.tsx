@@ -588,10 +588,11 @@ export function ItemIcon({
 
 const PENDING_PERIOD = 3;
 
-const BADGES: Record<Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed">, { symbol: string | null; color: keyof LiveColors; tip: string }> = {
+const BADGES: Record<Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed">, { symbol: string | null; color: keyof LiveColors; tip: string | ((pr: PullRequestInfo) => string) }> = {
   conflict: { symbol: "exclamationmark.triangle.fill", color: "conflict", tip: "Merge conflicts" },
   failing: { symbol: "xmark.circle.fill", color: "failure", tip: "Checks are failing" },
   changesRequested: { symbol: "arrow.uturn.backward.circle.fill", color: "failure", tip: "Changes Requested" },
+  unresolved: { symbol: "text.bubble.fill", color: "unresolved", tip: (pr) => (pr.unresolvedThreads === 1 ? "1 unresolved conversation" : `${pr.unresolvedThreads} unresolved conversations`) },
   pending: { symbol: null, color: "pending", tip: "Some checks haven't completed yet" },
   approved: { symbol: "checkmark.seal.fill", color: "success", tip: "Approved" },
 };
@@ -601,11 +602,12 @@ export function Trailing({ item, completion, colors, flat }: { item: LiveItem; c
     if (flat) return null;
     return <Text style={{ fontSize: 11, fontWeight: "500", color: colors[COMPLETION_GLYPH[completion].color], marginRight: 4 }}>{completion === "merged" ? "Merged" : completion === "reviewed" ? "Reviewed" : "Closed"}</Text>;
   }
-  const badge = item.pr ? prBadge(item.pr) : null;
+  if (!item.pr) return null;
+  const badge = prBadge(item.pr);
   if (!badge || badge === "passed") return null;
   const spec = BADGES[badge];
   return (
-    <View tooltip={spec.tip} style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
+    <View tooltip={typeof spec.tip === "string" ? spec.tip : spec.tip(item.pr)} style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
       {spec.symbol ? (
         <Symbol name={spec.symbol} size={11} weight="semibold" color={colors[spec.color]} style={{ width: 16, height: 16 }} />
       ) : (
