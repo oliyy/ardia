@@ -56,6 +56,7 @@ createServer(async (req, res) => {
     const id = url.searchParams.get("id");
     drop(id);
     state[id] = "OPEN";
+    if (prs.has(id)) Object.assign(prs.get(id), { viewerLatestReview: { state: "APPROVED" }, updatedAt: new Date().toISOString() });
     return send(res, 200, { ok: true });
   }
   if (p === "/mock/add") {
@@ -95,7 +96,6 @@ createServer(async (req, res) => {
       const error = { type: field ? "FORBIDDEN" : detailsError.type, path, message: `Mock ${detailsError.type} for ${detailsError.id}` };
       return send(res, 200, { data: { nodes: details }, errors: [error] });
     }
-    if (query.includes("LiveFolderGone")) return send(res, 200, { data: { nodes: variables.ids.map((id) => ({ id, state: state[id] ?? "OPEN" })) } });
     if (!query.includes("search(")) return send(res, 200, { data: { viewer: github.data.viewer } });
     return send(res, 200, github);
   }

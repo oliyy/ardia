@@ -73,7 +73,7 @@ async function run(folderId: string, generation: number, background: boolean) {
   for (const source of new Set(missing.map((it) => it.source))) {
     const resolve = SOURCES[source].resolveGone;
     if (!resolve) continue;
-    const resolved = await resolve(missing.filter((it) => it.source === source)).catch(() => ({}));
+    const resolved = await resolve(missing.filter((it) => it.source === source), folder).catch(() => ({}));
     if (!isCurrent(folderId, generation)) return;
     Object.assign(gone, resolved);
   }

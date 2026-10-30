@@ -5,8 +5,9 @@ import { hex, useTheme } from "../../lib/theme";
 import { openLiveItem } from "../../live/engine";
 import { summarizeChecks } from "../../live/github";
 import { ago } from "../../live/meetings";
+import { awaitsReview } from "../../live/rows";
 import { useLive } from "../../live/store";
-import type { LiveItem, PullRequestCheck } from "../../live/types";
+import type { CompletionState, LiveItem, PullRequestCheck } from "../../live/types";
 import { useBrowser } from "../../store/browser";
 import { useHover } from "../primitives";
 import { cardHoverProps, dismissHover } from "../sidebar/hover";
@@ -40,11 +41,12 @@ export function HoverSurface({ anchor, width, children }: { anchor: Anchor; widt
 
 export function LiveItemCard({ id, windowId, anchor }: { id: string; windowId: string; anchor: Anchor }) {
   const [, folderId = "", itemId = ""] = id.split("|");
-  const item = useLive((s) => s.items[folderId]?.find((i) => i.id === itemId));
+  const item = useLive((s) => s.items[folderId]?.find((i) => i.id === itemId) ?? s.completed[folderId]?.find((c) => c.item.id === itemId)?.item);
+  const done = useLive((s) => s.completed[folderId]?.find((c) => c.item.id === itemId)?.state ?? null);
   if (!item) return null;
   return (
     <HoverSurface anchor={anchor} width={item.pr ? 300 : 280}>
-      {item.pr ? <PullRequestPreview item={item} folderId={folderId} windowId={windowId} /> : <DocumentPreview item={item} />}
+      {item.pr ? <PullRequestPreview item={item} done={done} folderId={folderId} windowId={windowId} /> : <DocumentPreview item={item} />}
     </HoverSurface>
   );
 }
@@ -71,7 +73,7 @@ const open = (windowId: string, url: string) => {
   useBrowser.getState().newTab(windowId, { url });
 };
 
-function PullRequestPreview({ item, folderId, windowId }: { item: LiveItem; folderId: string; windowId: string }) {
+function PullRequestPreview({ item, done, folderId, windowId }: { item: LiveItem; done: CompletionState | null; folderId: string; windowId: string }) {
   const theme = useTheme();
   const colors = useLiveColors();
   const pr = item.pr!;
@@ -85,7 +87,7 @@ function PullRequestPreview({ item, folderId, windowId }: { item: LiveItem; fold
         <Text numberOfLines={1} style={{ flex: 1, fontSize: 12, color: theme.textSecondary }}>
           <Text style={{ fontWeight: "600", color: theme.textPrimary }}>{pr.author}</Text> · {pr.repo} #{pr.number}
         </Text>
-        {pr.draft ? <Chip text="Draft" color={colors.draft} /> : null}
+        {done === "merged" ? <Chip text="Merged" color={colors.stateMerged} /> : done === "closed" ? <Chip text="Closed" color={colors.stateClosed} /> : pr.draft ? <Chip text="Draft" color={colors.draft} /> : null}
       </View>
       <Text numberOfLines={3} style={{ fontSize: 13.5, lineHeight: 18, fontWeight: "600", color: theme.textPrimary }}>
         {item.title}
@@ -119,7 +121,7 @@ function PullRequestPreview({ item, folderId, windowId }: { item: LiveItem; fold
         <StatusLine
           symbol={pr.review === "approved" ? "checkmark.seal.fill" : pr.review === "changesRequested" ? "arrow.uturn.backward.circle.fill" : "eye"}
           color={pr.review === "approved" ? colors.success : pr.review === "changesRequested" ? colors.failure : theme.textSecondary}
-          text={pr.review === "approved" ? "Approved" : pr.review === "changesRequested" ? "Changes Requested" : item.section === "authored" ? "Review required" : "Needs your review"}
+          text={pr.review === "approved" ? "Approved" : pr.review === "changesRequested" ? "Changes Requested" : !done && awaitsReview(item) ? "Needs your review" : "Review required"}
         />
       ) : null}
 

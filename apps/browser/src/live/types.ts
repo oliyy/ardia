@@ -40,6 +40,7 @@ export type PullRequestInfo = {
   additions: number;
   deletions: number;
   changedFiles: number;
+  reviewed?: boolean;
   stack?: { id: string; position: number; size: number };
 };
 
@@ -58,6 +59,7 @@ export type LiveItem = {
   icon: string | null;
   updatedAt: number;
   section?: PullRequestSection;
+  tracked?: boolean;
   pr?: PullRequestInfo;
   doc?: DocumentInfo;
 };

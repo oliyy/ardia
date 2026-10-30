@@ -1,4 +1,4 @@
-import { LiveError, type CheckState, type LiveFolder, type LiveItem, type PullRequestCheck, type PullRequestInfo, type PullRequestSection } from "./types";
+import { LiveError, type CheckState, type CompletionState, type LiveFolder, type LiveItem, type PullRequestCheck, type PullRequestInfo, type PullRequestSection } from "./types";
 
 const PR_FIELDS = `
   ... on PullRequest {
@@ -8,6 +8,7 @@ const PR_FIELDS = `
     repository { nameWithOwner }
     author { login avatarUrl(size: 64) }
     comments { totalCount }
+    viewerLatestReview { state }
     reviewThreads(first: 50) { nodes { isResolved } }
     commits(last: 1) {
       nodes { commit { statusCheckRollup { state contexts(first: 60) { nodes {
@@ -35,10 +36,6 @@ export const GITHUB_VARIABLES = {
   direct: "is:pr is:open user-review-requested:@me archived:false",
 };
 
-export const GITHUB_STATE_QUERY = `query LiveFolderGone($ids: [ID!]!) {
-  nodes(ids: $ids) { ... on PullRequest { id state } }
-}`;
-
 export const VIEWER_QUERY = `query { viewer { login name avatarUrl(size: 64) } }`;
 
 type RawCheck =
@@ -64,6 +61,7 @@ export type RawPR = {
   repository: { nameWithOwner: string };
   author: { login: string; avatarUrl: string } | null;
   comments: { totalCount: number };
+  viewerLatestReview?: { state: string } | null;
   reviewThreads?: { nodes: { isResolved: boolean }[] };
   commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: RawCheck[] } } | null } }[] };
 };
@@ -121,6 +119,7 @@ function mapPR(raw: RawPR, section: PullRequestSection): LiveItem {
     additions: raw.additions,
     deletions: raw.deletions,
     changedFiles: raw.changedFiles,
+    reviewed: !!raw.viewerLatestReview && raw.viewerLatestReview.state !== "PENDING",
   };
   return {
     id: `github:${raw.id}`,
@@ -140,14 +139,17 @@ const idOf = (n: object) => ("id" in n ? (n.id as string) : "");
 
 const reviewSection = (direct: Set<string>, id: string): PullRequestSection => (direct.has(id) ? "review" : "team");
 const reviewListed = (filters: LiveFolder["filters"], section: PullRequestSection) => (section === "review" ? filters.reviewRequests : filters.teamReviewRequests);
+const sectionListed = (filters: LiveFolder["filters"], section: PullRequestSection) => (section === "authored" ? filters.authored : reviewListed(filters, section));
 
-export function detailIds(json: GithubResponse, filters: LiveFolder["filters"]): string[] {
+export const githubId = (item: LiveItem) => item.id.slice("github:".length);
+
+export function detailIds(json: GithubResponse, filters: LiveFolder["filters"], tracked: string[] = []): string[] {
   const data = json.data;
   if (!data) return [];
   const direct = new Set(data.direct.nodes.map(idOf));
   const authored = filters.authored ? data.authored.nodes.map(idOf) : [];
   const review = data.review.nodes.map(idOf).filter((id) => reviewListed(filters, reviewSection(direct, id)));
-  return [...new Set([...authored, ...review].filter(Boolean))];
+  return [...new Set([...authored, ...review, ...tracked].filter(Boolean))];
 }
 
 type GraphqlError = { type?: string; message: string; path?: (string | number)[] };
@@ -177,7 +179,7 @@ export function withDetails(json: GithubResponse, details: (RawPR | null)[]): Gi
   return { ...json, data: { ...data, authored: { nodes: fill(data.authored.nodes) }, review: { nodes: fill(data.review.nodes) } } };
 }
 
-export function mapGithub(json: GithubResponse, filters: LiveFolder["filters"]): LiveItem[] {
+export function mapGithub(json: GithubResponse, filters: LiveFolder["filters"], tracked: LiveItem[] = []): LiveItem[] {
   const data = json.data;
   if (!data) return [];
   const direct = new Set(data.direct.nodes.map(idOf));
@@ -191,7 +193,27 @@ export function mapGithub(json: GithubResponse, filters: LiveFolder["filters"]):
     const section = reviewSection(direct, n.id);
     if (reviewListed(filters, section)) (seen.add(n.id), out.push(mapPR(n, section)));
   }
+  for (const it of tracked) if (!seen.has(githubId(it)) && sectionListed(filters, it.section ?? "authored")) (seen.add(githubId(it)), out.push(it));
   return withStacks(out);
+}
+
+const TRACKED_MS = 30 * 86_400_000;
+
+export function stillOpen(tracked: LiveItem[], details: Map<string, RawPR>, now = Date.now()): LiveItem[] {
+  return tracked.flatMap((it) => {
+    const raw = details.get(githubId(it));
+    return raw?.state === "OPEN" && now - (Date.parse(raw.updatedAt) || 0) < TRACKED_MS ? [{ ...mapPR(raw, it.section ?? "authored"), tracked: true }] : [];
+  });
+}
+
+export function finishedStates(tracked: LiveItem[], details: Map<string, RawPR>): Record<string, CompletionState> {
+  const finished: Record<string, CompletionState> = {};
+  for (const it of tracked) {
+    const state = details.get(githubId(it))?.state;
+    if (state === "MERGED") finished[it.id] = "merged";
+    else if (state === "CLOSED") finished[it.id] = "closed";
+  }
+  return finished;
 }
 
 export function withStacks(items: LiveItem[]): LiveItem[] {

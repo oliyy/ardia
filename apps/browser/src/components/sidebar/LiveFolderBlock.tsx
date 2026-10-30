@@ -6,7 +6,7 @@ import { closeTab } from "../../lib/actions";
 import { hex, layout, useTheme } from "../../lib/theme";
 import { errorText, manualRefresh, openLiveItem, statusText } from "../../live/engine";
 import { githubAge, prBadge, summarizeChecks } from "../../live/github";
-import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
+import { awaitsReview, folderRows, hasShownUnread, liveTabPlace, openItems, reviewAnswered, shownCompleted, shownItems, type FolderRow } from "../../live/rows";
 import { liveFolderIcon, SOURCES } from "../../live/sources";
 import { live, setLive, updateFolder, useLive } from "../../live/store";
 import type { CompletedItem, CompletionState, LiveItem, PullRequestInfo } from "../../live/types";
@@ -140,7 +140,8 @@ export const LiveFolderBlock = memo(function LiveFolderBlock({ folderId, motion 
   const landed = useRef({ fetched, completed });
   const fromData = landed.current.fetched !== fetched || landed.current.completed !== completed;
   landed.current = { fetched, completed };
-  const source = useMemo<MotionSource>(() => ({ rows, strays, data: live() }), [rows, strays]);
+  const completing = useLive((s) => s.completing[folderId]);
+  const source = useMemo<MotionSource>(() => ({ rows, strays, data: live() }), [rows, strays, completing]);
   const ready = fromData && scope.enabled && !collapsed && (live().revisions[folderId] ?? 0) > 1;
   const rowMotion = useRowMotion(source, ready, (from) => placeFolder(folderId, from), (delta, timing) => {
     (chain.current ?? scope.fold?.pinned)?.(liveNode(folderId), delta, timing);
@@ -410,7 +411,7 @@ function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { fold
   const completing = useLive((s) => (!done && s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
   const completion = completing ?? done ?? null;
   const reviewDue = !completion && awaitsReview(item);
-  const { hovered, hoverProps } = useRowHover(windowId, completion ? null : { kind: "live", id: key });
+  const { hovered, hoverProps } = useRowHover(windowId, completing ? null : { kind: "live", id: key });
   const scope = useContext(ListMotionContext);
   const settled = (live().revisions[folderId] ?? 0) > 1;
   const animates = () => settled && scope.enabled && !hidden;
@@ -522,7 +523,7 @@ const CHECK_GLYPHS: Record<"success" | "pending" | "failure", { color: keyof Liv
 
 const GLYPH = "\uFFFC";
 
-function prMeta(pr: PullRequestInfo, done: CompletionState | null, colors: LiveColors): { text: string; glyphs: FadeLabelGlyph[] } {
+function prMeta(pr: PullRequestInfo, done: CompletionState | null, answered: boolean, colors: LiveColors): { text: string; glyphs: FadeLabelGlyph[] } {
   const parts = [`#${pr.number}`, pr.author];
   const glyphs: FadeLabelGlyph[] = [];
   const age = githubAge(pr.createdAt);
@@ -531,7 +532,7 @@ function prMeta(pr: PullRequestInfo, done: CompletionState | null, colors: LiveC
     parts.push(`${GLYPH} ${pr.stack.position}/${pr.stack.size}`);
     glyphs.push({ image: META_GLYPHS.stack, label: "Stack" });
   }
-  const word = done ? STATE_WORDS[done] : pr.draft ? "Draft" : null;
+  const word = done ? STATE_WORDS[done] : answered ? STATE_WORDS.reviewed : pr.draft ? "Draft" : null;
   if (word) parts.push(word);
   const checks = summarizeChecks(pr.checks);
   if (checks && checks.tone !== "neutral" && !(done && checks.tone === "pending")) {
@@ -543,7 +544,7 @@ function prMeta(pr: PullRequestInfo, done: CompletionState | null, colors: LiveC
 
 export function LiveSubtitle({ item, subtitle, done, colors, transitions = false }: { item: LiveItem; subtitle: string; done: CompletionState | null; colors: LiveColors; transitions?: boolean }) {
   const theme = useTheme();
-  const meta = item.pr ? prMeta(item.pr, done, colors) : null;
+  const meta = item.pr ? prMeta(item.pr, done, reviewAnswered(item), colors) : null;
   return <FadeLabel text={meta?.text ?? subtitle} glyphs={meta?.glyphs} fontSize={12} color={theme.textSecondary} transitions={transitions} style={{ height: 14 }} />;
 }
 

@@ -1,5 +1,5 @@
 import { CONFLUENCE_CQL, DRIVE_QUERY, mapBitbucket, mapConfluence, mapDrive, mapNotion, NOTION_SEARCH_BODY, type BitbucketPR, type BitbucketStatuses, type ConfluenceSearch, type DriveFiles, type NotionSearch, type NotionUsers } from "./documents";
-import { DETAILS_PAGE, detailIds, detailNodes, GITHUB_DETAILS_QUERY, GITHUB_QUERY, GITHUB_STATE_QUERY, GITHUB_VARIABLES, mapGithub, VIEWER_QUERY, withDetails, type DetailsResponse, type GithubResponse } from "./github";
+import { DETAILS_PAGE, detailIds, detailNodes, finishedStates, GITHUB_DETAILS_QUERY, GITHUB_QUERY, GITHUB_VARIABLES, githubId, mapGithub, stillOpen, VIEWER_QUERY, withDetails, type DetailsResponse, type GithubResponse, type RawPR } from "./github";
 import { basic, deleteSecret, endpoints, form, getSecret, request, setSecret } from "./net";
 import { live, setAccount, updateConfig } from "./store";
 import { LiveError, type CompletionState, type LiveAccount, type LiveFolder, type LiveItem, type LiveSourceId } from "./types";
@@ -10,7 +10,7 @@ export type LiveSource = {
   kind: LiveFolder["kind"];
   site: string;
   fetch(folder: LiveFolder): Promise<LiveItem[]>;
-  resolveGone?(items: LiveItem[]): Promise<Record<string, CompletionState>>;
+  resolveGone?(items: LiveItem[], folder: LiveFolder): Promise<Record<string, CompletionState>>;
   minInterval?(now: number): number;
   heldUntil?(): number;
 };
@@ -67,27 +67,40 @@ const githubFilters = (): LiveFolder["filters"] => {
   };
 };
 
-async function fetchGithub(token: string): Promise<GithubResponse> {
+const githubTracked = (folderId: string): LiveItem[] => {
+  const s = live();
+  const completing = s.completing[folderId] ?? [];
+  return [...(s.items[folderId] ?? []), ...(s.hidden[folderId] ?? [])].filter((it) => it.source === "github" && !completing.includes(it.id));
+};
+
+type GithubFetch = { json: GithubResponse; details: Map<string, RawPR> };
+
+async function fetchGithub(token: string, tracked: string[]): Promise<GithubFetch> {
   const json = await githubGraphql<GithubResponse>(token, GITHUB_QUERY, GITHUB_VARIABLES);
-  const ids = detailIds(json, githubFilters());
+  const ids = detailIds(json, githubFilters(), tracked);
   const pages = Array.from({ length: Math.ceil(ids.length / DETAILS_PAGE) }, (_, i) => ids.slice(i * DETAILS_PAGE, (i + 1) * DETAILS_PAGE));
   const page = async (ids: string[]) => detailNodes(ids, await githubGraphql<DetailsResponse>(token, GITHUB_DETAILS_QUERY, { ids }));
   const retry = (ids: string[]) => (error: unknown) =>
     error instanceof LiveError && (error.kind === "other" || error.kind === "network") ? page(ids) : Promise.reject(error);
-  const details = await Promise.all(pages.map((ids) => page(ids).catch(retry(ids))));
-  return withDetails(json, details.flat());
+  const details = (await Promise.all(pages.map((ids) => page(ids).catch(retry(ids))))).flat();
+  return { json: withDetails(json, details), details: new Map(details.map((d) => [d.id, d])) };
 }
 
-let githubShared: { token: string; task: Promise<GithubResponse> } | null = null;
+let githubShared: { token: string; tracked: Set<string>; task: Promise<GithubFetch> } | null = null;
 
-function sharedGithub(token: string): Promise<GithubResponse> {
-  if (githubShared?.token === token) return githubShared.task;
-  const task = fetchGithub(token).finally(() => {
+function sharedGithub(token: string, need: string[]): Promise<GithubFetch> {
+  const shared = githubShared;
+  if (shared?.token === token && need.every((id) => shared.tracked.has(id))) return shared.task;
+  const folders = Object.values(live().folders).filter((f) => f.sources.includes("github"));
+  const tracked = new Set([...need, ...folders.flatMap((f) => githubTracked(f.id).map(githubId))]);
+  const task = fetchGithub(token, [...tracked]).finally(() => {
     if (githubShared?.task === task) githubShared = null;
   });
-  githubShared = { token, task };
+  githubShared = { token, tracked, task };
   return task;
 }
+
+const githubFinished = new Map<string, Record<string, CompletionState>>();
 
 const github: LiveSource = {
   id: "github",
@@ -96,24 +109,14 @@ const github: LiveSource = {
   site: "https://github.com",
   async fetch(folder) {
     const token = await secret("github");
-    return mapGithub(await sharedGithub(token), folder.filters);
+    const tracked = githubTracked(folder.id);
+    const { json, details } = await sharedGithub(token, tracked.map(githubId));
+    githubFinished.set(folder.id, finishedStates(tracked, details));
+    return mapGithub(json, folder.filters, stillOpen(tracked, details));
   },
-  async resolveGone(items) {
-    const prs = items.filter((it) => it.source === "github");
-    if (!prs.length) return {};
-    const token = await secret("github");
-    const ids = prs.map((it) => it.id.slice("github:".length));
-    const json = await githubGraphql<{ data?: { nodes: ({ id: string; state: string } | null)[] } }>(token, GITHUB_STATE_QUERY, { ids });
-    const out: Record<string, CompletionState> = {};
-    for (const n of json.data?.nodes ?? []) {
-      if (!n) continue;
-      const item = prs.find((it) => it.id === `github:${n.id}`);
-      if (!item) continue;
-      if (n.state === "MERGED") out[item.id] = "merged";
-      else if (n.state === "CLOSED") out[item.id] = "closed";
-      else if (item.section === "review" || item.section === "team") out[item.id] = "reviewed";
-    }
-    return out;
+  async resolveGone(items, folder) {
+    const finished = githubFinished.get(folder.id) ?? {};
+    return Object.fromEntries(items.flatMap((it) => (finished[it.id] ? [[it.id, finished[it.id]!]] : [])));
   },
   minInterval: (now) =>
     githubBudget.limit > 0 && now < githubBudget.resetAt && githubBudget.remaining < githubBudget.limit * GITHUB_LOW_BUDGET ? GITHUB_SLOW_MS : 0,

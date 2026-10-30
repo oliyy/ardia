@@ -20,7 +20,9 @@ export const completedExpired = (c: CompletedItem, now = Date.now()) => now - c.
 
 export const completedExpiry = (completed: CompletedItem[]) => (completed.length ? Math.min(...completed.map((c) => c.at)) + COMPLETED_SHOWN_MS : null);
 
-export const awaitsReview = (item: LiveItem) => item.section === "review" || item.section === "team";
+export const awaitsReview = (item: LiveItem) => (item.section === "review" || item.section === "team") && !item.tracked;
+
+export const reviewAnswered = (item: LiveItem) => !!item.tracked && (item.section === "team" || (item.section === "review" && !!item.pr?.reviewed));
 
 export const inHiddenRepo = (folder: Pick<LiveFolder, "hiddenRepos">, item: LiveItem) => !!item.pr && folder.hiddenRepos.includes(item.pr.repo);
 
