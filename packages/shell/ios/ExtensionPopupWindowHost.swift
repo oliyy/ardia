@@ -76,13 +76,15 @@ final class ExtensionPopupWindowHost: ExpoView, NSWindowDelegate {
     made.delegate = self
     popup = made
     didUpdateReactSubviews()
-    made.setFrameTopLeftPoint(topLeft(of: made.frame.size, under: parent))
+    let origin = topLeft(of: made.frame.size, under: parent)
+    made.setFrameTopLeftPoint(origin)
     parentClosing = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: parent, queue: .main) {
       [weak self] _ in
       self?.dismiss()
       self?.onClose()
     }
     parent.addChildWindow(made, ordered: .above)
+    made.setFrameTopLeftPoint(origin)
     made.makeKeyAndOrderFront(nil)
   }
 
