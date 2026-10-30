@@ -38,7 +38,7 @@ writeFileSync(
     profiles: { default: { id: "default", name: "Personal", color: "plum", icon: null, createdAt: 0 } },
     profileOrder: ["default"],
     orphanedProfileData: [],
-    settings: { searchSuggestions: false, warnBeforeClosingLastTab: false, warnBeforeClosingWindow: false, sidebarWidth: 240 },
+    settings: { searchSuggestions: false, warnBeforeClosingLastTab: false, warnBeforeClosingWindow: false, sidebarWidth: 240, addressBar: "toolbar" },
     windows: [{ id: "w1", profileId: "default", incognito: false, tabIds: ids, activeTabIds: { default: "a" }, sidebarOpen: true, frame: [100, 100, 1200, 800], createdAt: 0 }],
     windowOrder: ["w1"],
     focusedWindowId: "w1",
