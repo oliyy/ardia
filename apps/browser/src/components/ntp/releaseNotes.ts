@@ -1,5 +1,6 @@
 import { launchEnvironment, readDocument, systemInfo, writeDocument } from "@ardia/shell";
 import { create } from "zustand";
+import { hadSessionBeforeLaunch } from "../../lib/persist";
 
 export type ReleaseNotes = {
   version: string;
@@ -61,7 +62,7 @@ export function trackAppVersion(): boolean {
   const version = systemInfo().appVersion;
   if (!version) return false;
   const saved = readSaved();
-  const updated = saved ? saved.lastVersion !== version : !!readDocument("session.json");
+  const updated = saved ? saved.lastVersion !== version : hadSessionBeforeLaunch();
   let pending = saved?.pending ?? null;
   if (__DEV__) {
     if (launchEnvironment("ARDIA_WHATS_NEW") === "1") pending = { version, since: Date.now() };
