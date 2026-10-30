@@ -3198,7 +3198,7 @@ index 152e76da136756ebc962ece4cc84e84df7cfce0e..3ca579b52ea91186f62abcbd435d2a25
 +RCT_EXTERN NSDictionary<NSNumber *, NSDictionary<NSNumber *, NSNumber *> *> *ArdiaPresentationFreezePostedGenerations(void);
 +#endif
 diff --git a/React/Views/RCTView.m b/React/Views/RCTView.m
-index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..c8080c54431ba186618b27bf47d860d1ce01a279 100644
+index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..6edf76eb1f996e29ae8c282b15eaa88d9e773344 100644
 --- a/React/Views/RCTView.m
 +++ b/React/Views/RCTView.m
 @@ -12,6 +12,7 @@
@@ -3217,7 +3217,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..c8080c54431ba186618b27bf47d860d1
  #endif // macOS]
  
  RCT_MOCK_DEF(RCTView, RCTContentInsets);
-@@ -136,1661 +138,4476 @@ - (RCTPlatformView *)react_findClipView // [macOS]
+@@ -136,1661 +138,4478 @@ - (RCTPlatformView *)react_findClipView // [macOS]
    return str;
  }
  
@@ -5828,7 +5828,8 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..c8080c54431ba186618b27bf47d860d1
 +{
 +    if (_shadowColor != shadowColor)
 +    {
-+        _shadowColor = shadowColor;
++        CGColorRelease(_shadowColor);
++        _shadowColor = CGColorRetain(shadowColor);
 +        [self didUpdateShadow];
 +    }
 +}
@@ -6044,6 +6045,7 @@ index 0a4efc1fff0a6e32ea1634ab5f863c211f452409..c8080c54431ba186618b27bf47d860d1
 +#if TARGET_OS_OSX
 +- (void)dealloc
 +{
++  CGColorRelease(_shadowColor);
 +  if (_removeClippedSubviews) {
 +    atomic_fetch_sub_explicit(&ArdiaViewsRemovingClippedSubviews, 1, memory_order_relaxed);
 +  }
