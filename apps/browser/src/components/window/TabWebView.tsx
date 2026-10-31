@@ -27,6 +27,7 @@ import type { Tab } from "../../state/browser/types";
 import { zoomChangedByUser } from "../../state/site/zoomBubble";
 import { markTabReady, patchPage, pageOf, popoverOf, setPopover } from "../../state/tabs/pageState";
 import { closeFolderPanelIn } from "../../state/sidebar/tileFolderUi";
+import { isAddressBarInSidebar } from "../../state/sidebar/current";
 import { popupBlocked, showAutofillPrompt, showPasswordPrompt } from "../../state/site/prompts";
 import { leftPage } from "../../state/tabs/pageEvents";
 import { copyLinkToSelection, searchSelection, setPageSelection } from "../../state/site/selection";
@@ -248,7 +249,8 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine, leading = null, r
       onProgress={(progress) => !prewarmOnly() && setPageProgress(tabId, progress)}
       onZoom={({ zoom, user }) => {
         updateTab(tabId, { zoom });
-        if (user) zoomChangedByUser(tabId);
+        const t = tab();
+        if (user && t && !isAddressBarInSidebar(t.windowId)) zoomChangedByUser(tabId);
       }}
       onFindResult={({ count, active }) => setFind(tabId, { count, active })}
       onFavicon={(favicon) => {
