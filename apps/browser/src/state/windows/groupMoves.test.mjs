@@ -59,6 +59,23 @@ test("Move to Profile takes a group's tabs to the profile and keeps it a group t
   assert.equal(S().tabs[ids[0]].profileId, "default");
 });
 
+for (const shared of [false, true]) {
+  test(`Move to Profile keeps a pinned group's saved URLs where its tabs have wandered${shared ? ", tabs shared across windows" : ""}`, () => {
+    const { w, ids } = windowWith("a", "b", "c");
+    if (shared) S().createWindow({ url: "https://x.com/" }), S().updateSettings({ shareTabsAcrossWindows: true });
+    const work = S().createProfile({ name: "Work" });
+    S().updateTab(ids[1], { url: "https://b.com/home", title: "B" }, {});
+    const g = S().groupTabs([ids[1], ids[2]], { name: "Docs" });
+    assert.equal(S().tabs[ids[1]].pinnedUrl, "https://b.com/home");
+    S().updateTab(ids[1], { url: "https://b.com/away", title: "B" }, {});
+    S().moveGroupToProfile(g, work);
+    const moved = Object.values(S().groups).find((x) => x.windowId === w && x.profileId === work && x.name === "Docs");
+    assert.ok(moved, "the group is in the profile");
+    const urls = moved.tabIds.map((id) => [S().tabs[id].url, S().tabs[id].pinnedUrl]);
+    assert.deepEqual(urls, [["https://b.com/away", "https://b.com/home"], ["https://c.com/", "https://c.com/"]]);
+  });
+}
+
 for (const nested of [false, true]) {
   test(`Move to Window with tabs shared across windows leaves the destination one copy of the group${nested ? " and its nested group" : ""}`, () => {
     const { w, ids } = windowWith("a", "b", "c");

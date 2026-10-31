@@ -48,7 +48,6 @@ class Mac {
     this.folder = folder;
     this.browser = browser;
     this.scopes = scopes;
-    this.sent = [];
     this.clock = new Clock(id, null, now);
   }
   enter() {
@@ -70,8 +69,6 @@ class Mac {
     let published = 0;
     try {
       for (const p of profiles) {
-        const state = (this.scopes[p] ??= emptyScope());
-        const before = new Map(Object.entries(state.records).map(([key, r]) => [key, r.h]));
         const result = await syncScope({
           scope: `p:${p}`,
           state: (this.scopes[p] ??= emptyScope()),
@@ -82,7 +79,6 @@ class Mac {
           now: () => wall,
         });
         published += result.published;
-        for (const [key, r] of Object.entries(state.records)) if (r.o[0] === this.id && before.get(key) !== r.h) this.sent.push({ p, key, v: r.v });
       }
     } finally {
       this.browser = S();
@@ -162,11 +158,6 @@ async function world(startRow) {
 const X_OTHER = "https://x.example/other";
 const M_REMOTE = "https://m.example/remote";
 const M_THIRD = "https://m.example/third";
-function sentBy(k, key, device) {
-  return (k.macs?.[device]?.sent ?? []).filter((x) => x.p === "default" && x.key === `pt:n:t:${key}`).map((x) => x.v);
-}
-const doneBy = (k, name) => [...k.done].find((d) => d.startsWith(`${name}@`))?.slice(name.length + 1);
-const everSent = (k, key, name, url) => sentBy(k, key, doneBy(k, name)).some((v) => v?.url === url);
 const inPinnedGroup = (key) => Object.values(S().groups).some((g) => g.pinned && g.tabIds.includes(tabFor(key)?.id));
 function navigate(key, url) {
   const t = tabFor(key);
@@ -279,7 +270,7 @@ const OPS = [
     touches: ["X", "G"],
     final: (k, mac) => {
       assert.ok(tabFor(k.X) && inContainer(S(), tabFor(k.X)), "X pinned, in G or on its own once G is gone");
-      assert.ok(everSent(k, k.X, "navXIntoG", X_OTHER), "the page X was moved with is sent");
+      assert.equal(record(mac, "default", `pt:n:t:${k.X}`)?.url, "https://x.example/", "X takes its pinned page into G, not the page it wandered to");
     },
   },
   {
@@ -297,7 +288,7 @@ const OPS = [
     name: "navM",
     steps: [(k) => { if (navigate(k.M, M_REMOTE)) done(k, "navM"); }],
     touches: ["M"],
-    final: (k) => { if (inPinnedGroup(k.M)) assert.ok(everSent(k, k.M, "navM", M_REMOTE), "M's new page is sent"); },
+    final: (k, mac) => { if (inPinnedGroup(k.M)) assert.equal(record(mac, "default", `pt:n:t:${k.M}`)?.url, "https://m.example/", "M's pinned page stays in its record"); },
   },
   {
     name: "navMThereAndBack",
@@ -309,7 +300,7 @@ const OPS = [
     touches: ["M"],
     final: (k, mac) => {
       if (!inPinnedGroup(k.M) || !k.done.has(`navMThereAndBack@${mac.id}`)) return;
-      assert.equal(sentBy(k, k.M, mac.id).at(-1)?.url, k.mStart[mac.id], "going back to where M started is sent");
+      assert.equal(record(mac, "default", `pt:n:t:${k.M}`)?.url, "https://m.example/", "M's pinned page stays in its record");
     },
   },
   {
@@ -326,7 +317,7 @@ const OPS = [
       (k) => { if (k.mNewer && S().windows[k.mHome]) (S().closeWindow(k.mHome), S().setFocusedWindow(k.mNewer), done(k, "navMThenMirrorAndClose")); },
     ],
     touches: ["M"],
-    final: (k) => { if (inPinnedGroup(k.M)) assert.ok(everSent(k, k.M, "navMThenMirrorAndClose", M_THIRD), "M's page, copied to a new mirror before it was sent, is sent"); },
+    final: (k, mac) => { if (inPinnedGroup(k.M)) assert.equal(record(mac, "default", `pt:n:t:${k.M}`)?.url, "https://m.example/", "M's pinned page stays in its record"); },
   },
   {
     name: "workRoundTrip",
@@ -470,7 +461,6 @@ async function runPair(startRow, opA, opB, schedule) {
   wall = base.wall;
   const folder = base.folder.clone();
   const w = { folder, a: base.a.fork(folder), b: base.b.fork(folder), k: { ...base.k, done: new Set() } };
-  w.k.macs = { [w.a.id]: w.a, [w.b.id]: w.b };
   const later = await SCHEDULES[schedule](w, opA, opB);
   const macs = [w.a, w.b, ...(w.c ? [w.c] : [])];
   for (let i = 0; i < 4; i++) for (const m of macs) await m.sync();
@@ -705,7 +695,7 @@ const PAGE_CASES = {
 };
 
 for (const [name, run] of Object.entries(PAGE_CASES)) {
-  test(`a page change settles in the record: ${name}`, async () => {
+  test(`a page change settles one pinned page in the record: ${name}`, async () => {
     for (const variant of [false, true]) {
       const base = await world(false);
       wall = base.wall;
@@ -716,7 +706,9 @@ for (const [name, run] of Object.entries(PAGE_CASES)) {
       await b.sync();
       await a.sync();
       const outcome = [record(b, "default", `pt:n:t:${key}`)?.url, record(a, "default", `pt:n:t:${key}`)?.url];
-      if (!variant) assert.deepEqual(outcome, [page, page], "both Macs hold the canonical page in the record");
+      const homes = [b, a].map((m) => m.with(() => Object.values(S().tabs).filter((x) => keyOf(x) === key).map((x) => x.pinnedUrl)));
+      assert.deepEqual(outcome, [outcome[0], outcome[0]], "both Macs hold one page in the record");
+      assert.ok(homes.flat().length && homes.flat().every((h) => h === outcome[0]), `every copy has the record's page as its pinned page: ${JSON.stringify([outcome, homes, page])}`);
     }
   });
 }
@@ -733,7 +725,7 @@ test("two Macs with a pin loaded at different pages settle on one page in its re
   for (let i = 0; i < 4; i++) for (const m of [a, b]) await m.sync();
   const settled = record(a, "default", `pt:n:t:${k.M}`).url;
   assert.equal(record(b, "default", `pt:n:t:${k.M}`).url, settled, "both Macs hold the same page in its record");
-  assert.ok(["https://m.example/on-a", "https://m.example/on-b"].includes(settled), "one of the two pages");
+  assert.equal(settled, "https://m.example/", "M's pinned page");
   assert.equal((await a.sync()) + (await b.sync()), 0, "and nothing more is sent");
   assert.equal(a.with(() => tabFor(k.M).url), "https://m.example/on-a", "A keeps its page open");
   assert.equal(b.with(() => tabFor(k.M).url), "https://m.example/on-b", "and so does B");

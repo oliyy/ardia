@@ -1,6 +1,5 @@
 import { assignPositions } from "../../platform/sync";
 import type { BrowserState } from "../browser/store";
-import { changedIds } from "../browser/changes";
 import { isPinnedRow, pinKeyOf, ROW_PIN, TILE_PIN } from "../browser/model";
 import type { BrowserWindow, ParkedPins, Tab, TabGroup, TabPin } from "../browser/types";
 import { splitTabIds } from "../splits/splits";
@@ -23,7 +22,7 @@ const NO_TABLE: PinTable = {};
 
 const inFolder = (parent: string | null | undefined) => !!parent && isGroupNode(parent);
 export function placedAt(was: PinPlace | undefined, parent: string | null, pos: string): PinPlace {
-  if (!was || inFolder(was.parent) !== inFolder(parent) || was.url === undefined) return { parent, pos };
+  if (!was || was.url === undefined) return { parent, pos };
   return { parent, pos, url: was.url, ...(was.title !== undefined ? { title: was.title } : {}) };
 }
 export const tableOf = (places: PinPlaces, profileId: string): PinTable => places[profileId] ?? NO_TABLE;
@@ -192,15 +191,15 @@ export function placeNodes(
   return next ? withTable(places, profileId, next) : places;
 }
 
-export function withLeafPages(places: PinPlaces, profileId: string, entering: Pick<Tab, "id" | "pinKey" | "url" | "title">[]): PinPlaces {
+export function withLeafPages(places: PinPlaces, profileId: string, entering: Pick<Tab, "id" | "pinKey" | "url" | "title" | "pinnedUrl">[]): PinPlaces {
   const table = tableOf(places, profileId);
   let next: PinTable | null = null;
   for (const t of entering) {
     const node = tabNode(pinKeyOf(t));
     const place = (next ?? table)[node];
-    if (!place || !inFolder(place.parent)) continue;
-    const entry: PinPlace = t.url ? { parent: place.parent, pos: place.pos, url: t.url, title: t.title } : { parent: place.parent, pos: place.pos };
-    if (entry.url === place.url && entry.title === place.title) continue;
+    const home = t.pinnedUrl || t.url;
+    if (!place || !inFolder(place.parent) || !home || place.url === home) continue;
+    const entry: PinPlace = { parent: place.parent, pos: place.pos, url: home, title: t.url === home ? t.title : "" };
     next ??= { ...table };
     next[node] = entry;
   }
@@ -283,6 +282,8 @@ type LegacyLiveFolder = { id: string; profileId: string; after?: string | null }
 
 type MigrationSource = Pick<BrowserState, "tabs" | "groups"> & Partial<Pick<BrowserState, "splits">>;
 
+const homePage = (t: { url: string; title: string; pinnedUrl?: string | null }) => ({ url: t.pinnedUrl || t.url, title: !t.pinnedUrl || t.pinnedUrl === t.url ? t.title : "" });
+
 function legacyTable(windows: BrowserWindow[], s: MigrationSource, profileId: string, park: ParkedPins | undefined): PinTable {
   const table: PinTable = {};
   const sequences = new Map<string | null, string[]>();
@@ -323,7 +324,7 @@ function legacyTable(windows: BrowserWindow[], s: MigrationSource, profileId: st
     const definitions = own.map((g) => ({ node: groupNode(pinKeyOf(g)), parent: g.parentId && groups.has(g.parentId) ? groupNode(pinKeyOf(groups.get(g.parentId)!)) : null, ids: g.tabIds }));
     const tabs = w.tabIds.flatMap((id) => {
       const t = s.tabs[id];
-      return !t || t.profileId !== profileId || t.liveItem ? [] : [{ id, node: tabNode(pinKeyOf(t)), pinned: !!t.pin, row: isPinnedRow(t) || paired.has(id), url: t.url, title: t.title }];
+      return !t || t.profileId !== profileId || t.liveItem ? [] : [{ id, node: tabNode(pinKeyOf(t)), pinned: !!t.pin, row: isPinnedRow(t) || paired.has(id), ...homePage(t) }];
     });
     collect(definitions, tabs);
   }
@@ -332,7 +333,7 @@ function legacyTable(windows: BrowserWindow[], s: MigrationSource, profileId: st
     const paired = new Set((park.splits ?? []).flatMap((v) => splitTabIds(v)));
     collect(
       park.groups.map((g) => ({ node: groupNode(g.id), parent: g.parentId && groups.has(g.parentId) ? groupNode(g.parentId) : null, ids: park.tabs.filter((t) => t.groupId === g.id).map((t) => t.id) })),
-      park.tabs.map((t) => ({ id: t.id, node: tabNode(t.id), pinned: !t.groupId, row: isPinnedRow(t) || paired.has(t.id), url: t.url, title: t.title, ...(t.groupId ? { group: groupNode(t.groupId) } : {}) })),
+      park.tabs.map((t) => ({ id: t.id, node: tabNode(t.id), pinned: !t.groupId, row: isPinnedRow(t) || paired.has(t.id), ...homePage(t), ...(t.groupId ? { group: groupNode(t.groupId) } : {}) })),
     );
   }
   for (const [parent, nodes] of sequences) {
@@ -372,23 +373,4 @@ export function migratedPlaces(s: Pick<BrowserState, "tabs" | "groups" | "window
     out = migrateLivePlaces(out, folders.filter((f) => f.profileId === profileId));
   }
   return out;
-}
-
-export function trackLeafAddresses(s: Pick<BrowserState, "tabs" | "pinPlace">, prev: Pick<BrowserState, "tabs">): PinPlaces {
-  if (s.tabs === prev.tabs) return s.pinPlace;
-  let places = s.pinPlace;
-  for (const id of changedIds(s.tabs, prev.tabs)) {
-    const t = s.tabs[id];
-    const was = prev.tabs[id];
-    if (!t || !was || t.liveItem || t.pin || t.page.kind === "frozen" || was.page.kind === "frozen") continue;
-    const table = places[t.profileId];
-    const node = tabNode(pinKeyOf(t));
-    const place = table?.[node];
-    if (!place || place.parent === null || place.parent === FAVORITES) continue;
-    let next = place;
-    if (t.url && t.url !== was.url && t.url !== place.url) next = { ...next, url: t.url, title: t.title !== was.title ? t.title : "" };
-    else if (t.title && t.title !== was.title && t.url === (next.url ?? t.url) && t.title !== next.title) next = { ...next, title: t.title };
-    if (next !== place) places = withTable(places, t.profileId, { ...tableOf(places, t.profileId), [node]: next });
-  }
-  return places;
 }

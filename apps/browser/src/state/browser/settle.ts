@@ -7,7 +7,6 @@ import { settlePeeks } from "../peek/peek";
 import { pinnedTabsLeaveLive, settlePinHomes } from "../pins/pinHomes";
 import { mirrorPins, settlePinHierarchy, trackHomeTitles, trackPinStructure } from "../pins/treeMirror";
 import { placementMayDiffer } from "../pins/pinPlacement";
-import { trackLeafAddresses } from "../pins/pinTree";
 import { settleSharedPins } from "../pins/pinShare";
 import { settleTileFolders } from "../pins/tileFolders";
 import { mirrorTabs, pagesIntoSplits, unshareTabs } from "../tabs/tabShare";
@@ -29,7 +28,7 @@ const pinStructure: SettleStep = (s, prev) => {
 const pinHierarchy: SettleStep = (s, prev) => (placementMayDiffer(s, prev) ? settlePinHierarchy(s) : null);
 
 const pinAddresses: SettleStep = (s, prev) => {
-  const pinPlace = trackHomeTitles({ tabs: s.tabs, pinPlace: trackLeafAddresses(s, prev) }, prev);
+  const pinPlace = trackHomeTitles(s, prev);
   return pinPlace === s.pinPlace ? null : { ...s, pinPlace };
 };
 

@@ -2,7 +2,7 @@ import type { BrowserState } from "../browser/store";
 import { changedIds } from "../browser/changes";
 import { innermostGroupOf } from "../groups/groups";
 import { IDLE_LIVE, isIncognitoProfile, makeTab, newId, pinKeyOf, ROW_PIN, samePin, TILE_PIN, without } from "../browser/model";
-import { ASLEEP, hasPage, wakeOf, withWake } from "../tabs/pageSession";
+import { ASLEEP, hasPage } from "../tabs/pageSession";
 import { mapSlotIds, removeFromSplits, splitTabIds, stackAt } from "../splits/splits";
 import { removeTabs } from "../tabs/tabs";
 import type { ParkedPins, Tab, TabGroup, TabPin } from "../browser/types";
@@ -69,7 +69,7 @@ const pinForRole = (from: Pick<Tab, "pin">, role: Role): TabPin | null => (role 
 function treeCopyOf(src: TabSource, windowId: string, profileId: string, key: string, role: Role, canonical?: PinPlace): Tab {
   const from = src.tab;
   const pinned = role !== "leaf";
-  const url = pinned ? homeOf(from) : canonical?.url || from.url;
+  const url = pinned ? homeOf(from) : canonical?.url || homeOf(from);
   const atSource = from.url === url;
   const paired = pinned ? homeTitle(canonical, url) : undefined;
   return {
@@ -77,7 +77,7 @@ function treeCopyOf(src: TabSource, windowId: string, profileId: string, key: st
       title: !pinned && canonical?.url ? (canonical.title ?? "") : (paired ?? (atSource ? from.title : "")),
       favicon: atSource ? from.favicon : null,
       pin: pinForRole(from, role),
-      pinnedUrl: pinned ? from.pinnedUrl || from.url || null : null,
+      pinnedUrl: from.pinnedUrl || from.url || null,
       customTitle: from.customTitle,
       customIcon: from.customIcon,
       muted: from.muted,
@@ -138,22 +138,19 @@ function conformWindow(s: BrowserState, windowId: string, profileId: string, tab
       const from = source.tab;
       const role = roleOf(table, node);
       const home = homeOf(from);
-      const moveHome = role !== "leaf" && !hasPage(tabs[keep]!) && !samePage(tabs[keep]!.url, home);
+      const moveHome = !hasPage(tabs[keep]!) && !samePage(tabs[keep]!.url, home);
       editTab(keep, {
         ...keyField(keep, key),
         customTitle: from.customTitle,
         customIcon: from.customIcon,
         ...(role === "tile" && !samePin(tabs[keep]!.pin, tilePinOf(from)) ? { pin: tilePinOf(from) } : {}),
-        ...(role === "leaf" ? {} : { pinnedUrl: from.pinnedUrl || from.url || null }),
+        pinnedUrl: from.pinnedUrl || from.url || null,
         ...(moveHome ? { url: home, title: homeTitle(table[node], home) ?? (from.url === home ? from.title : ""), favicon: from.favicon } : {}),
       });
     } else editTab(keep, keyField(keep, key));
     const canonical = table[node]!;
     const held = tabs[keep]!;
-    if (roleOf(table, node) === "leaf" && canonical.url && !hasPage(held) && held.page.kind !== "frozen") {
-      if (held.url !== canonical.url) editTab(keep, { url: canonical.url, title: canonical.title ?? "", favicon: null, ...(wakeOf(held) ? { page: withWake(held.page, undefined) } : {}) });
-      else if (canonical.title && held.title !== canonical.title) editTab(keep, { title: canonical.title });
-    } else if (roleOf(table, node) !== "leaf" && !hasPage(held) && held.page.kind !== "frozen" && held.pinnedUrl && held.url === held.pinnedUrl) {
+    if (!hasPage(held) && held.page.kind !== "frozen" && held.pinnedUrl && held.url === held.pinnedUrl) {
       const title = homeTitle(canonical, held.pinnedUrl);
       if (title !== undefined && held.title !== title) editTab(keep, { title });
     }
@@ -205,11 +202,11 @@ export function trackHomeTitles(s: Pick<BrowserState, "tabs" | "pinPlace">, prev
     const t = s.tabs[id];
     const was = prev.tabs[id];
     const home = t?.pinnedUrl;
-    if (!t || !was || !home || !t.pin || t.liveItem || t.page.kind === "frozen" || was.page.kind === "frozen") continue;
+    if (!t || !was || !home || t.liveItem || t.page.kind === "frozen" || was.page.kind === "frozen") continue;
     const table = tableOf(places, t.profileId);
     const node = tabNode(pinKeyOf(t));
     const place = table[node];
-    if (!place || (place.parent !== null && place.parent !== FAVORITES)) continue;
+    if (!place) continue;
     const eligible = hasPage(t) && samePage(t.url, home);
     let title: string;
     if (home !== was.pinnedUrl) {

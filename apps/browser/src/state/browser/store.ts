@@ -5,7 +5,7 @@ import { createBookmarksSlice, ensureRoots, type BookmarksSlice } from "../bookm
 import { changedIds } from "./changes";
 import { createGroupsSlice, nestGroups, type GroupsSlice } from "../groups/groups";
 import { createHistorySlice, type HistorySlice } from "../history/history";
-import { engineProfile, IDLE_LIVE, isIncognitoProfile } from "./model";
+import { engineProfile, IDLE_LIVE, isIncognitoProfile, pinKeyOf } from "./model";
 import { createOrganizeSlice, type OrganizeSlice } from "../pins/organize";
 import { createMuteSlice, type MuteSlice } from "../tabs/mute";
 import { createCleanUpSlice, type CleanUpSlice } from "../pins/tabCleanup";
@@ -14,7 +14,7 @@ import { notePinChoices } from "../pins/pinChoices";
 import { createPeekSlice, type PeekSlice } from "../peek/peek";
 import { pinHome } from "../pins/pinHomes";
 import { settlePinHierarchy } from "../pins/treeMirror";
-import { migratedPlaces } from "../pins/pinTree";
+import { isGroupNode, migratedPlaces, tabNode } from "../pins/pinTree";
 import { createProfilesSlice, DEFAULT_PROFILE, type ProfilesSlice } from "../profiles/profiles";
 import { engineProfiles } from "../profiles/engineProfiles";
 import { createSettingsSlice, parseSettings, parseSettingsMeta, type SettingsSlice } from "../settings/settings";
@@ -135,9 +135,14 @@ export const useBrowser = create<BrowserState>()(transactions.middleware(batched
     const rawWindows = data.windows ?? {};
     const profileOk = (p: string) => !!profiles[p] || isIncognitoProfile(p);
     const tabs: Record<string, Tab> = {};
+    const leafPlaceOf = (t: Tab) => {
+      const place = data.pinPlace?.[t.profileId]?.[tabNode(pinKeyOf(t))];
+      return place?.parent && isGroupNode(place.parent) ? place : undefined;
+    };
     for (const t of Object.values(data.tabs ?? {})) {
       if (!rawWindows[t.windowId] || !profileOk(t.profileId)) continue;
-      tabs[t.id] = { ...t, pinnedUrl: t.pinnedUrl ?? pinHome(t, !!t.pin) };
+      const leaf = leafPlaceOf(t);
+      tabs[t.id] = { ...t, pinnedUrl: t.pinnedUrl ?? pinHome(leaf ? { url: t.url, pinnedUrl: leaf.url ?? null } : t, !!t.pin || !!leaf) };
     }
     const windows: Record<string, BrowserWindow> = {};
     for (const w of Object.values(rawWindows)) {

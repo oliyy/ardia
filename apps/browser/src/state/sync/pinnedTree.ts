@@ -10,7 +10,7 @@ import { groupChoiceKey, orderChoiceKey, placeChoiceKey } from "../pins/pinChoic
 import { homeTitle } from "../pins/pinMirror";
 import { groupNode, isGroupNode, isLiveNode, isTabNode, keyOfNode, liveNode, nodesExisting, tableOf, tabNode, withTable, type PinPlace, type PinTable } from "../pins/pinTree";
 import { noteRemotePinDeletion } from "../pins/tabCleanup";
-import { ASLEEP, hasOwnOrSharedPage, hasPage, wakeOf, withWake } from "../tabs/pageSession";
+import { ASLEEP, hasOwnOrSharedPage, hasPage, wakeOf } from "../tabs/pageSession";
 import { removeTabs } from "../tabs/tabs";
 import { isPinNode, PIN_NODE, PIN_TREE, pinNodeRecord, type PinFolderRecord, type PinLiveProps, type PinLiveRecord, type PinNodeProps, type PinNodeRecord, type PinTabRecord } from "./pinRecords";
 import { choiceStillOut, homeWindow, settleChoices, store, windowsByFocus } from "./pinnedSyncState";
@@ -29,7 +29,7 @@ const placeEntryOf = (r: PinNodeRecord): PinPlace => (r.kind === "tab" ? { paren
 const sameEntry = (a: PinPlace, z: PinPlace) => a.parent === z.parent && a.pos === z.pos && a.url === z.url && a.title === z.title;
 
 function addressOf(place: PinPlace | undefined, own: Pick<Tab, "url" | "title"> & { pinnedUrl?: string | null }, others: Pick<Tab, "url" | "title">[] = []) {
-  if (isLeafPlace(place)) return place.url !== undefined ? { url: place.url, title: place.title ?? "" } : { url: own.url, title: own.title };
+  if (isLeafPlace(place) && place.url !== undefined) return { url: place.url, title: place.title ?? "" };
   const url = own.pinnedUrl || own.url;
   return { url, title: homeTitle(place, url) ?? [own, ...others].find((t) => t.title && samePage(t.url, url))?.title ?? own.title };
 }
@@ -133,7 +133,7 @@ function withoutRemoved(s: BrowserState, profileId: string, removed: Set<string>
 
 const parkedPlacement = (r: PinTabRecord, was?: TabPin | null) => {
   const groupId = folderKeyOf(r.parent);
-  return { pin: pinAt(r.parent, was), pinnedUrl: groupId === null ? r.url : null, groupId };
+  return { pin: pinAt(r.parent, was), pinnedUrl: r.url, groupId };
 };
 
 function parkedTabFrom(p: ParkedTab, r: PinTabRecord): ParkedTab {
@@ -186,18 +186,15 @@ function withReceived(s: BrowserState, profileId: string, received: Map<string, 
   };
   const claimed = new Set<string>();
   const placeTab = (key: string, r: PinTabRecord) => {
-    const leaf = folderKeyOf(r.parent) !== null;
     const ids = tabIdsOf.get(key) ?? [];
     for (const id of ids) {
       claimed.add(id);
       const t = tabs[id]!;
-      const staleRestore = leaf && !!wakeOf(t) && !hasOwnOrSharedPage(t) && !samePage(t.url, r.url);
       editTab(id, {
         customTitle: r.customTitle,
         customIcon: r.customIcon,
-        ...(leaf ? {} : { pinnedUrl: r.url }),
-        ...(staleRestore ? { page: withWake(t.page, undefined) } : {}),
-        ...(placeholder(t) || staleRestore ? { url: r.url, title: r.title, ...(t.url !== r.url ? { favicon: null } : {}) } : {}),
+        pinnedUrl: r.url,
+        ...(placeholder(t) ? { url: r.url, title: r.title, ...(t.url !== r.url ? { favicon: null } : {}) } : {}),
       });
     }
     parkTabs = unchangedOr(parkTabs, parkTabs.map((p) => (p.id === key ? parkedTabFrom(p, r) : p)));
@@ -211,7 +208,7 @@ function withReceived(s: BrowserState, profileId: string, received: Map<string, 
       ...makeTab(home.id, profileId, r.url, {
         title: r.title,
         pin: pinAt(r.parent, null),
-        pinnedUrl: leaf ? null : r.url,
+        pinnedUrl: r.url,
         customTitle: r.customTitle,
         customIcon: r.customIcon,
       }),

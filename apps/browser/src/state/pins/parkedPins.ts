@@ -114,7 +114,7 @@ export function adoptParkedPins(s: BrowserState, windowId: string, profileId: st
     if (!groupId && !splitPanes.has(id) && homes.some((h) => samePage(h, home))) continue;
     const paired = !groupId && samePage(snap.url, home) ? homeTitle(table[tabNode(id)], home) : undefined;
     const tab: Tab = {
-      ...makeTab(windowId, profileId, snap.url, { ...snap, ...(paired !== undefined ? { title: paired } : {}), profileId, pin: groupId ? null : (snap.pin ?? TILE_PIN), pinnedUrl: groupId ? null : home || null }),
+      ...makeTab(windowId, profileId, snap.url, { ...snap, ...(paired !== undefined ? { title: paired } : {}), profileId, pin: groupId ? null : (snap.pin ?? TILE_PIN), pinnedUrl: home || null }),
       ...(tabs[id] ? { id: newId("tab"), pinKey: id } : { id }),
       page: withWake(ASLEEP, restoreFrom && !tabs[id] ? restoreId(restoreFrom) : undefined),
     };
@@ -180,7 +180,7 @@ export function settleParkedPlacement(s: BrowserState): BrowserState {
       const row = parent === null;
       if (groupId === t.groupId && isPinnedRow(t) === row) return t;
       const pin = groupId ? null : row ? ROW_PIN : t.pin?.as === "tile" ? t.pin : TILE_PIN;
-      return { ...t, groupId, pin, pinnedUrl: groupId ? null : t.pinnedUrl || t.url || null };
+      return { ...t, groupId, pin, pinnedUrl: t.pinnedUrl || t.url || null };
     }).sort((a, z) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(z.id) ?? Number.MAX_SAFE_INTEGER));
     const groups = park.groups.map((g) => {
       const parent = tree.parent.get(groupNode(g.id));

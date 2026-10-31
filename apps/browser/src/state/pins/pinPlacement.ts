@@ -69,7 +69,7 @@ const homeOf = (t: Tab) => t.pinnedUrl || t.url || null;
 
 function flagged(t: Tab, kind: "tile" | "row" | "leaf"): Tab {
   const pin: TabPin | null = kind === "tile" ? (t.pin?.as === "tile" ? t.pin : TILE_PIN) : kind === "row" ? (t.pin?.as === "row" ? t.pin : ROW_PIN) : null;
-  const pinnedUrl = pin ? homeOf(t) : null;
+  const pinnedUrl = homeOf(t);
   if (t.pin === pin && t.pinnedUrl === pinnedUrl) return t;
   return { ...t, pin, pinnedUrl };
 }

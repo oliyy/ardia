@@ -62,7 +62,7 @@ export async function openArcTabMenu(windowId: string, tab: Tab) {
     { id: "rename", title: "Rename…" },
     { id: "mute", title: tab.muted ? "Unmute" : "Mute", enabled: tab.muted || playing },
     ...engineItem(s, tab),
-    ...(tab.pin
+    ...(pinned
       ? [{ id: "editPinned", title: "Edit Pinned Page", children: [{ id: "editPin", title: "Edit…" }, { id: "replacePin", title: "Replace Pinned URL with Current", enabled: awayFromPin(tab) }] }]
       : []),
     sep,

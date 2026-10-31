@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { BrowserState } from "../browser/store";
-import { activeTabId, newId, pinKeyOf, viewTabIds } from "../browser/model";
+import { activeTabId, inPinnedContainer, newId, pinKeyOf, viewTabIds } from "../browser/model";
 import { clickedSelection, dropping, type ClickMods, type Drop } from "../drag/drops";
 import type { Tab, TabGroup } from "../browser/types";
 import type { PinChoices } from "./pinChoices";
@@ -41,7 +41,7 @@ export function selectedTabIds(s: BrowserState, windowId: string): string[] {
 export const awayFromPin = (t: Pick<Tab, "url" | "pinnedUrl">) => !!t.pinnedUrl && !!t.url && !samePage(t.url, t.pinnedUrl);
 
 export function onUrlChange(s: BrowserState, tab: Tab, url: string): Partial<Tab> {
-  return tab.pin ? { pinnedUrl: pinHome({ ...tab, url }, true) } : {};
+  return inPinnedContainer(s, tab.id) ? { pinnedUrl: pinHome({ ...tab, url }, true) } : {};
 }
 
 export function pruneSelection(selection: Record<string, string[]>, gone: Set<string>): Record<string, string[]> {
@@ -124,7 +124,7 @@ export const createOrganizeSlice: StateCreator<BrowserState, [], [], OrganizeSli
   setPinnedUrl(tabId, url) {
     const t = get().tabs[tabId];
     const next = url ?? t?.url;
-    if (!t?.pin || !next) return;
+    if (!t || !next || !inPinnedContainer(get(), tabId)) return;
     get().updateTab(tabId, { pinnedUrl: next });
     if (url && !samePage(t.url, url)) get().navigate(tabId, url);
   },
