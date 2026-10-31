@@ -178,7 +178,7 @@ writeDocument(DOC, versionedJson(data, VERSION));
 - The field is `version`, except in `sync.json` (`v`) and `ardia-cli.json` (`schemaVersion`; its `version` is the
   installed CLI's version).
 - Covered: `session.json` (9), `downloads.json` (3), `launch-look.json` (2), `bookmarks-cache.json`, `telemetry.json`,
-  `telemetry-queue.json`, `telemetry-daily.json`, `release-notes.json`, `onboarding.json`,
+  `telemetry-queue.json`, `release-notes.json`, `onboarding.json`,
   `default-browser-offer.json`, `sync.json`, `sync-extensions.json`, `live.json`, `ardia-cli.json`,
   `bangs-state.json` and `Scripts/status.json` (all 1).
 - Native code reads through `ArdiaSavedDocument` (packages/ardiacore/ios), with the same rules: `session.json` and

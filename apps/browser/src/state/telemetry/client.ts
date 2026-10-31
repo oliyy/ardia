@@ -384,4 +384,4 @@ export function endSession() {
 export const crashCursor = () => saved.crashCursor;
 export const advanceCrashCursor = (to: number) => to > saved.crashCursor && save({ crashCursor: to });
 
-export const devState = () => ({ saved, queued: { events: queue.events.length, logs: queue.logs.length }, droppedWhileOff, canSend: mayPost("events") });
+export const devState = () => ({ saved, queued: { events: queue.events.length, logs: queue.logs.length }, droppedWhileOff, canSend: mayPost() });

@@ -11,7 +11,7 @@ export function ShareDiagnosticsSection() {
   const sharing = useTelemetry((s) => s.sharing);
   return (
     <>
-      <SectionHeader title="Crash reports and usage" description={SHARING_COPY.dailyCountShort} />
+      <SectionHeader title="Crash reports and usage" />
       <Group>
         <Row anchor="privacy.shareDiagnostics" title={SHARING_COPY.toggle} description={SHARING_COPY.summary}>
           <Toggle value={sharing} onChange={(on) => setSharing(on, "settings")} />

@@ -4,7 +4,7 @@ const REQUEST_LOG_DOC = "telemetry-requests.log";
 
 export type RequestLogEntry = {
   at: string;
-  kind: "events" | "logs" | "daily";
+  kind: "events" | "logs";
   url: string;
   count: number;
   bytes: number;

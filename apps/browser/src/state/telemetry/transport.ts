@@ -8,12 +8,11 @@ export const appInfo = () => (app ??= systemInfo());
 
 const devSendAllowed = () => devTestValue(DEV_SEND_TEST_KEY) === "1";
 
-export const mayPost = (kind: RequestLogEntry["kind"]) =>
-  kind === "daily" ? devSendAllowed() || (!__DEV__ && appInfo().isolatedInstance === false) : !__DEV__ || devSendAllowed();
+export const mayPost = () => !__DEV__ || devSendAllowed();
 
 export async function post(kind: RequestLogEntry["kind"], body: string, count: number, signal?: AbortSignal): Promise<number> {
   const entry: RequestLogEntry = { at: new Date().toISOString(), kind, url: LOGS_URL, count, bytes: body.length, status: null };
-  if (!mayPost(kind)) {
+  if (!mayPost()) {
     logRequest({ ...entry, dryRun: true }, body);
     return 200;
   }
