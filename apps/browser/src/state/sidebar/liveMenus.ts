@@ -18,6 +18,8 @@ import { liveNode } from "../pins/pinTree";
 import { addressBarInSidebar } from "../windows/layout";
 import { activeTabId } from "../browser/model";
 import { hintWhen, sections, sep, withAlternate } from "./menuParts";
+import { liveRowKey } from "./liveRowKey";
+import { liveSelectionIncludes, openLiveSelectionMenu } from "./liveSelection";
 
 export function newLiveFolderMenuItem(): MenuItem {
   return {
@@ -164,6 +166,8 @@ export function liveItemMenuItems(windowId: string, folderId: string, item: Live
 }
 
 export async function openLiveItemMenu(windowId: string, folderId: string, item: LiveItem, tabId: string | null) {
+  if (liveSelectionIncludes(windowId, liveRowKey(folderId, item.id))) return openLiveSelectionMenu(windowId);
+  if (useBrowser.getState().selection[windowId]?.length) useBrowser.getState().setSelection(windowId, []);
   const unread = !!live().unread[folderId]?.includes(item.id);
   const choice = await showMenu(liveItemMenuItems(windowId, folderId, item, tabId));
   if (choice === "open") openLiveItem(windowId, folderId, item);

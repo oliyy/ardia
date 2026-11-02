@@ -176,7 +176,7 @@ export function clickedSelection(s: BrowserState, windowId: string, tabId: strin
   }
   if (!mods.shiftKey) return null;
   const view = viewTabIds(s, windowId).filter((id) => !s.tabs[id]!.liveItem || !!s.tabs[id]!.pin);
-  const from = view.indexOf(anchor ?? active ?? tabId);
+  const from = view.indexOf(anchor && view.includes(anchor) ? anchor : (active ?? tabId));
   const to = view.indexOf(tabId);
   if (from < 0 || to < 0) return null;
   return { selection: view.slice(Math.min(from, to), Math.max(from, to) + 1), anchor };

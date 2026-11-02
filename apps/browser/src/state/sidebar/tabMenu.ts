@@ -21,6 +21,7 @@ import { openMultiMenu } from "./multiTabMenu";
 import { tileFolderOf } from "../pins/tileFolders";
 import { addressBarInSidebar } from "../windows/layout";
 import { openArcMultiMenu, openArcTabMenu } from "./arcTabMenu";
+import { liveSelectionIncludes, openLiveSelectionMenu } from "./liveSelection";
 
 const store = () => useBrowser.getState();
 
@@ -169,6 +170,7 @@ export async function openTabMenu(windowId: string, tab: Tab) {
   const s = store();
   const selected = selectedTabIds(s, windowId);
   const arc = addressBarInSidebar(s, windowId);
+  if (liveSelectionIncludes(windowId, tab.id)) return openLiveSelectionMenu(windowId);
   if (selected.length > 1 && selected.includes(tab.id)) return arc ? openArcMultiMenu(windowId, selected) : openMultiMenu(windowId, selected);
   if (s.selection[windowId]?.length) s.setSelection(windowId, []);
   if (arc) return openArcTabMenu(windowId, tab);

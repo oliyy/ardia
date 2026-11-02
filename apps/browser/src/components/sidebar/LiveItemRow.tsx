@@ -1,7 +1,6 @@
 import { useContext, useEffect, useRef, type ReactNode } from "react";
 import { Animated, Image, Pressable, Text, View, type ImageSourcePropType } from "react-native";
 import { closeTab } from "../../state/browser/actions";
-import { openLiveItem } from "../../state/live/engine";
 import { githubAge, prBadge, summarizeChecks } from "../../state/live/github";
 import { awaitsReview, reviewAnswered } from "../../state/live/rows";
 import { SOURCES } from "../../state/live/sources";
@@ -11,6 +10,9 @@ import { usePageProfileId } from "../../state/browser/hooks";
 import { useIsActiveIn, useLiveItemTab } from "../../state/sidebar/hooks";
 import { dismissHover } from "../../state/sidebar/hover";
 import { openLiveItemMenu } from "../../state/sidebar/liveMenus";
+import { liveRowKey } from "../../state/sidebar/liveRowKey";
+import { clickLiveItem } from "../../state/sidebar/liveSelection";
+import { useIsSelected } from "../../state/pins/hooks";
 import { registerRow } from "../../state/sidebar/sidebarUi";
 import { withShortcut } from "../../state/commands/commandShortcuts";
 import { useAddressBarInSidebar } from "../../state/windows/layout";
@@ -28,8 +30,6 @@ import { TabIcon } from "./TabIcon";
 import { useSidebarRowLook } from "./rowLook";
 import { ARC_SELECTED_INACTIVE, arcSelectedLabel, TABULAR_NUMS, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 
-const liveRowKey = (folderId: string, itemId: string) => `live|${folderId}|${itemId}`;
-
 export function LiveItemRow({ folderId, item, windowId, inStack = false, done }: { folderId: string; item: LiveItem; windowId: string; inStack?: boolean; done?: CompletionState }) {
   const indent = inStack ? STACK_INDENT : 0;
   const theme = useTheme();
@@ -44,6 +44,7 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
   const profileId = usePageProfileId();
   const tabId = useLiveItemTab(windowId, profileId, folderId, item.id);
   const active = useIsActiveIn(windowId, profileId, tabId);
+  const selected = useIsSelected(windowId, key);
   const { closeTabHint } = useSidebarRowLook();
   const unread = useLive((s) => !done && !!s.unread[folderId]?.includes(item.id));
   const completing = useLive((s) => (!done && s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
@@ -56,7 +57,8 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
   const badge = item.pr ? prBadge(item.pr) : null;
   const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr, done ?? null) : "doc";
   const trailingState = completion ? (flat ? "none" : `c:${completion}`) : badge && badge !== "passed" ? badge : "none";
-  const fill = active ? tokens.selectedFill : hovered ? theme.tabHover : ink.clear;
+  const fill = active ? tokens.selectedFill : selected ? tokens.multiSelected : hovered ? theme.tabHover : ink.clear;
+  const border = selected && !active && !flat ? 0.5 : 0;
   const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
 
   return (
@@ -77,7 +79,7 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
           <Pressable
             onPress={(e) => {
               dismissHover();
-              openLiveItem(windowId, folderId, item, { background: modifiersOf(e).metaKey });
+              clickLiveItem(windowId, folderId, item, modifiersOf(e));
             }}
           >
             {({ pressed }) => (
@@ -85,7 +87,9 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
                 fill={hex(!active && pressed ? theme.tabPressed : fill)}
                 inactiveFillOpacity={arcLabel && active ? ARC_SELECTED_INACTIVE : undefined}
                 cornerRadius={layout.rowRadius}
-                style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent, paddingRight: flat ? 7 : 6 }}
+                borderWidth={border}
+                borderColor={border ? hex(tokens.multiSelectedStroke) : undefined}
+                style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent - border, paddingRight: (flat ? 7 : 6) - border }}
               >
                 {(unread || reviewDue) && !flat ? <PulseDot color={theme.accent} pulsing={reviewDue} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
                 <Morph state={iconState} animates={animates}>

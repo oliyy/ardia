@@ -9,6 +9,7 @@ import { placing, type TabPlacement } from "./placing";
 import { pinnedGroupMembers } from "../browser/structure";
 import { samePage } from "../../lib/url";
 import { pinHome } from "./pinHomes";
+import { isLiveRowKey } from "../sidebar/liveRowKey";
 import { anchorFor, dropNodes, FAVORITES, groupNode, isTabNode, placeNodes, splitNodes, tableOf, tabNode, withLeafPages, type PinPlaces } from "./pinTree";
 
 export type OrganizeSlice = {
@@ -17,7 +18,7 @@ export type OrganizeSlice = {
   pinChoices: PinChoices;
   pinPlace: PinPlaces;
 
-  setSelection(windowId: string, ids: string[]): void;
+  setSelection(windowId: string, ids: string[], anchor?: string): void;
   clickTab(windowId: string, tabId: string, mods?: ClickMods): void;
   placeTabs(ids: string[], placement: TabPlacement): void;
   dropTabs(ids: string[], drop: Drop): boolean;
@@ -63,13 +64,14 @@ export const createOrganizeSlice: StateCreator<BrowserState, [], [], OrganizeSli
   pinChoices: {},
   pinPlace: {},
 
-  setSelection(windowId, ids) {
+  setSelection(windowId, ids, anchor) {
     set((s) => {
       const view = new Set(viewTabIds(s, windowId));
-      const next = [...new Set(ids)].filter((id) => view.has(id));
+      const next = [...new Set(ids)].filter((id) => view.has(id) || isLiveRowKey(id));
       const prev = s.selection[windowId] ?? [];
-      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return {};
-      return { selection: { ...s.selection, [windowId]: next } };
+      const anchors = anchor && anchor !== s.selectionAnchors[windowId] ? { selectionAnchors: { ...s.selectionAnchors, [windowId]: anchor } } : {};
+      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return anchors;
+      return { selection: { ...s.selection, [windowId]: next }, ...anchors };
     });
   },
 
