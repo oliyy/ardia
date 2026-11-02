@@ -288,7 +288,7 @@ index 61242af88da2f235e5ae506e79dfb9898742eb51..d942993deacd63a73a361fdb9f559c76
  @property (nonatomic, assign) CGFloat pointScaleFactor;
  
 diff --git a/Libraries/Text/TextInput/Singleline/RCTUITextField.mm b/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
-index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d476b12e82861ba314d5b559221d61ddb1d9233e 100644
+index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..ad60ce27d4bae0846ea85f5d8130098b9090ba6b 100644
 --- a/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
 +++ b/Libraries/Text/TextInput/Singleline/RCTUITextField.mm
 @@ -15,10 +15,119 @@
@@ -649,6 +649,24 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..d476b12e82861ba314d5b559221d61dd
  #endif // macOS]
    [self _updatePlaceholder];
  }
+@@ -359,14 +649,14 @@ - (void)setDefaultTextAttributes:(NSDictionary<NSAttributedStringKey, id> *)defa
+   _defaultTextAttributes = defaultTextAttributes;
+ #if !TARGET_OS_OSX // [macOS]
+   [super setDefaultTextAttributes:defaultTextAttributes];
+-#endif // [macOS]
++#else // [Ardia: the font goes on the cell before the placeholder update, which sets the field editor up again from the cell when the field is being edited. A secure cell hands its font to the editor's NSSecureTextStorage as the bullet font, and an autofocused field was being edited before its first text attributes came, so it kept a nil one, and the first character typed or pasted threw (attempt to insert nil value (key: NSFont)), fatal under Chromium
++  self.font = [[self defaultTextAttributes] objectForKey:NSFontAttributeName];
++#endif // Ardia]
+   [self _updatePlaceholder];
+ 
+ #if TARGET_OS_OSX // [macOS
+   [self setAttributedText:[[NSAttributedString alloc] initWithString:[self text]
+                                                           attributes:[self defaultTextAttributes]]];
+-
+-  self.font = [[self defaultTextAttributes] objectForKey:NSFontAttributeName];
+ #endif // macOS]
+ }
+ 
 @@ -385,6 +675,20 @@ - (void)_updatePlaceholder
    _isUpdatingPlaceholderText = YES;
    self.placeholderAttributedString = [[NSAttributedString alloc] initWithString:self.placeholder ?: @""
