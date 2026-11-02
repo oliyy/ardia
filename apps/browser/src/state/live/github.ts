@@ -13,7 +13,7 @@ const PR_FIELDS = `
     commits(last: 1) {
       nodes { commit { statusCheckRollup { state contexts(first: 60) { nodes {
         __typename
-        ... on CheckRun { name status conclusion detailsUrl }
+        ... on CheckRun { name status conclusion detailsUrl startedAt checkSuite { workflowRun { workflow { name } } } }
         ... on StatusContext { context state targetUrl }
       } } } } }
     }
@@ -39,7 +39,15 @@ export const GITHUB_VARIABLES = {
 export const VIEWER_QUERY = `query { viewer { login name avatarUrl(size: 64) } }`;
 
 type RawCheck =
-  | { __typename: "CheckRun"; name: string; status: string; conclusion: string | null; detailsUrl: string | null }
+  | {
+      __typename: "CheckRun";
+      name: string;
+      status: string;
+      conclusion: string | null;
+      detailsUrl: string | null;
+      startedAt?: string | null;
+      checkSuite?: { workflowRun: { workflow: { name: string } } | null } | null;
+    }
   | { __typename: "StatusContext"; context: string; state: string; targetUrl: string | null };
 
 export type RawPR = {
@@ -95,9 +103,29 @@ export function checkState(c: RawCheck): CheckState {
   }
 }
 
+function checkKey(c: RawCheck): string {
+  if (c.__typename === "StatusContext") return `status:${c.context}`;
+  return `run:${c.checkSuite?.workflowRun?.workflow.name ?? ""}/${c.name}`;
+}
+
+function startedAtMs(c: RawCheck): number {
+  if (c.__typename === "StatusContext" || !c.startedAt) return Infinity;
+  return Date.parse(c.startedAt) || 0;
+}
+
+function latestChecks(nodes: RawCheck[]): RawCheck[] {
+  const latest = new Map<string, RawCheck>();
+  for (const c of nodes) {
+    const key = checkKey(c);
+    const seen = latest.get(key);
+    if (!seen || startedAtMs(c) >= startedAtMs(seen)) latest.set(key, c);
+  }
+  return [...latest.values()];
+}
+
 function mapPR(raw: RawPR, section: PullRequestSection): LiveItem {
   const rollup = raw.commits.nodes[0]?.commit.statusCheckRollup;
-  const checks: PullRequestCheck[] = (rollup?.contexts.nodes ?? []).map((c) => ({
+  const checks: PullRequestCheck[] = latestChecks(rollup?.contexts.nodes ?? []).map((c) => ({
     name: c.__typename === "CheckRun" ? c.name : c.context,
     state: checkState(c),
     url: c.__typename === "CheckRun" ? c.detailsUrl : c.targetUrl,
