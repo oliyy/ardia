@@ -50,8 +50,9 @@ For the architecture and the test tooling, read `docs/agent-brief.md`.
   Keep test data in a scratch dir, not in `~/Documents`.
 - **Dia is a read-only reference.** You may take screenshots and read its app bundle; never click or type
   in it, and never read its user data or any browser's real profile.
-- **No AI features.** This is the owner's decision. Dia's AI rows in `docs/dia-feature-parity.md`
-  stay ⏸.
+- **No AI features, except Tidy.** This is the owner's decision. Dia's AI rows in `docs/dia-feature-parity.md`
+  stay ⏸. The one exception is Tidy (the sidebar's Tidy button and Tidy Tabs), which the owner asked to have
+  sort a space's unpinned tabs into folders with Claude Opus 5.5 through OpenRouter, using their own key.
 
 ## Building features
 - **Conventions.** Folders, import direction, tokens, state, names, the translation layer and environment
