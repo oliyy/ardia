@@ -5,7 +5,7 @@ import { layout, useTheme } from "../ui/theme";
 import { useIsIncognito, useSettings } from "../../state/browser/hooks";
 import { isIncognitoProfile } from "../../state/browser/model";
 import { newCapture } from "../../state/sidebar/listCapture";
-import { useCanTidyPins, useCapturedSidebarEntries, useKeptPin, usePinnedCollapsed } from "../../state/sidebar/hooks";
+import { useCanTidyTabs, useCapturedSidebarEntries, useKeptPin, usePinnedCollapsed } from "../../state/sidebar/hooks";
 import { capture } from "../../state/sidebar/listCapture";
 import { usePinnedRoot } from "../../state/sidebar/pinnedTree";
 import { entryHeightNow, firstPaintEntriesNow, rootLift, rootTrail, usePendingEntriesHeight, type Section } from "../../state/sidebar/geometry";
@@ -68,7 +68,7 @@ export function PageRows({ windowId, profileId, current, rows, lazy, offScreen, 
   const pending = usePendingEntriesHeight(windowId, profileId, all, mountedRows, growing);
   const showClear = useSettings((s) => s.showClearButton);
   const clearable = showClear && !offScreen && all.length > 0;
-  const tidy = useCanTidyPins(windowId, profileId, offScreen);
+  const tidy = useCanTidyTabs(windowId, profileId, offScreen);
   const pinnedSection = pinned.length > 0;
   const addressBar = useAddressBarInSidebar();
   const incognito = useIsIncognito();

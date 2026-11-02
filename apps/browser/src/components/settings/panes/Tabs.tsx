@@ -12,6 +12,7 @@ import { Group, Row, SectionHeader, SettingToggle } from "../Form";
 import { PictureChoice } from "../PictureChoice";
 import { setting, type SettingId } from "../settingsIndex";
 import { useSettingsColors } from "../useSettingsColors";
+import { TidyKeySection } from "./TidyKey";
 
 const PEEK_WITH: { value: PeekModifier; title: string }[] = [
   { value: "shift", title: "⇧-click" },
@@ -133,6 +134,8 @@ export function TabsPane() {
         description="Closes tabs you haven't used (and duplicates) automatically, like the tab menu's Clean Up Daily. Pinned, playing and selected tabs stay; cleaned tabs are listed under Recently Cleaned."
       />
       <CleanUpRow minutes={cleanUpMinutes} />
+
+      <TidyKeySection />
     </View>
   );
 }

@@ -3,7 +3,7 @@ import type { BrowserCommand } from "../../platform/commands";
 import { isBookmarked } from "../bookmarks/bookmarks";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { activeTab, bookmarkProfileId, isPinnedRow, pinnedSectionTitle } from "../browser/model";
-import { canTidyPins } from "../pins/tidyPins";
+import { canTidyTabs } from "../tidy/tidyTabs";
 import { commandBarTitle, commandSymbol } from "../commands/commandCatalog";
 import { menuBarRevision, shortcutHint } from "../commands/commandShortcuts";
 import type { Tab } from "../browser/types";
@@ -19,7 +19,7 @@ type ActionDef = {
   title?: (c: Context) => string;
   icon?: string;
   keywords?: string[];
-  needs?: "page" | "tab" | "profiles" | "pins";
+  needs?: "page" | "tab" | "profiles" | "tidy";
 };
 
 const page = "page" as const;
@@ -48,8 +48,8 @@ const DEFS: ActionDef[] = [
   { command: "duplicateTab", needs: "tab" },
   { command: "renameTab", needs: "tab" },
   { command: "searchTabs" },
-  { command: "cleanUpTabs", keywords: ["tidy tabs"] },
-  { command: "tidyPins", keywords: ["tidy pinned tabs", "organize pins", "pinned folders", "remove duplicate pins"], needs: "pins" },
+  { command: "cleanUpTabs", keywords: ["close old tabs"] },
+  { command: "tidyTabs", keywords: ["tidy", "organize tabs", "sort tabs into folders", "group tabs", "ai", "claude"], needs: "tidy" },
   { command: "newGroupWithTabs", keywords: ["tab group"], needs: "tab" },
   { command: "reload", keywords: ["refresh"], needs: page },
   { command: "forceReload", keywords: ["hard reload", "hard refresh"], needs: page },
@@ -108,7 +108,7 @@ export function barActions(s: BrowserState, windowId: string): CommandAction[] {
     if (d.needs === "page" && !tab?.url) continue;
     if (d.needs === "tab" && !tab) continue;
     if (d.needs === "profiles" && w?.kind === "private") continue;
-    if (d.needs === "pins" && !canTidyPins(s, windowId)) continue;
+    if (d.needs === "tidy" && !(w && canTidyTabs(s, windowId, w.profileId))) continue;
     const id = actionId(d);
     const hint = shortcutHint(id, s);
     out.push({

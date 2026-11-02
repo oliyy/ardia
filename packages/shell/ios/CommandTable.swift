@@ -79,7 +79,7 @@ enum CommandTable {
     case newTabInGroup
     case newGroupWithTabs
     case cleanUpTabs
-    case tidyPins
+    case tidyTabs
     case searchTabs
     case renameTab
     case changeTabIcon
@@ -194,7 +194,7 @@ enum CommandTable {
     "newTabInGroup": "New Tab in Group",
     "newGroupWithTabs": "New Group with Tab",
     "cleanUpTabs": "Clean Up Tabs",
-    "tidyPins": "Tidy Pins",
+    "tidyTabs": "Tidy Tabs",
     "searchTabs": "Search Tabs…",
     "renameTab": "Rename…",
     "changeTabIcon": "Change Icon…",

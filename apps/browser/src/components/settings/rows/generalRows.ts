@@ -223,6 +223,16 @@ export const generalRows = {
         },
       },
     },
+    {
+      section: "Tidy",
+      rows: {
+        openRouterKey: {
+          title: "OpenRouter API key",
+          description: "Tidy, next to ↓ Clear, sorts a space's unpinned tabs into folders with Claude Opus 5.5 through OpenRouter, on your key. It sends their titles and full addresses, and the names of your folders. The key stays in your keychain and is never synced.",
+          keywords: ["tidy", "tidy tabs", "ai", "claude", "opus", "openrouter", "api key", "folders", "organize", "sort tabs"],
+        },
+      },
+    },
   ],
   appearance: [
     {

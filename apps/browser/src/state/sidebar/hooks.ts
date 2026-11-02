@@ -5,7 +5,9 @@ import { liveTabPlace } from "../live/rows";
 import type { Tab } from "../browser/types";
 import { cleanedTabsFor } from "../pins/closedTabs";
 import { groupLabel } from "../pins/tabGrouping";
-import { canTidyPins } from "../pins/tidyPins";
+import { canTidyTabs } from "../tidy/tidyTabs";
+import { useTidyKey } from "../tidy/hooks";
+import { useTidyRunning } from "../tidy/tidyUi";
 import { folderIn } from "../pins/tileFolders";
 import { useStoreWhile } from "../tabs/tabWatch";
 import { splitOf, splitRowPanes } from "../splits/splits";
@@ -97,7 +99,13 @@ const NO_CELLS: string[] = [];
 export const useSidebarCells = (windowId: string, profileId: string, offScreen: boolean) =>
   useBrowser((s) => (offScreen ? NO_CELLS : sidebarEntries(s, windowId, profileId).cells));
 
-export const useCanTidyPins = (windowId: string, profileId: string, offScreen: boolean) => useBrowser((s) => !offScreen && canTidyPins(s, windowId, profileId));
+export function useCanTidyTabs(windowId: string, profileId: string, offScreen: boolean): boolean {
+  const saved = useTidyKey();
+  const can = useBrowser((s) => !offScreen && canTidyTabs(s, windowId, profileId));
+  return can && saved;
+}
+
+export const useTidyingTabs = (profileId: string) => useTidyRunning((s) => !!s.profiles[profileId]);
 
 export const useCleanedCount = (windowId: string) => useBrowser((s) => cleanedTabsFor(s, windowId).length);
 

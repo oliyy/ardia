@@ -12,7 +12,7 @@ import { libraryAvailable, openLibrary } from "../library/actions";
 import { toggleNewTabBar } from "../omnibox/newTabBar";
 import { movePinnedTitle, togglePinnedRows } from "./movePinned";
 import { setSidebarUi } from "./sidebarUi";
-import { tidyPins } from "./tidyPinsUi";
+import { tidyTabs } from "../tidy/tidyUi";
 import { switcherStep } from "./switcher";
 
 export function runSidebarCommand(command: BrowserCommand, arg: string | null, windowId: string): boolean {
@@ -35,8 +35,8 @@ export function runSidebarCommand(command: BrowserCommand, arg: string | null, w
     case "closeAllTabs":
       closeAllTabs(windowId);
       return true;
-    case "tidyPins":
-      tidyPins(windowId);
+    case "tidyTabs":
+      void tidyTabs(windowId);
       return true;
     case "searchTabs":
       setSidebarUi({ searchTabs: windowId, hover: null });

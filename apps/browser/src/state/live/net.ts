@@ -21,6 +21,7 @@ export const endpoints = {
   googleAuth: mock ? `${mock}/google/auth` : "https://accounts.google.com/o/oauth2/v2/auth",
   googleToken: mock ? `${mock}/google/token` : "https://oauth2.googleapis.com/token",
   drive: mock ? `${mock}/google/drive/v3` : "https://www.googleapis.com/drive/v3",
+  openRouter: mock ? `${mock}/openrouter/api/v1` : "https://openrouter.ai/api/v1",
 };
 
 export async function request<T>(url: string, init: RequestInit = {}, seen?: (headers: Headers) => void): Promise<T> {
