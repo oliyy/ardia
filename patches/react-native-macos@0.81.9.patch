@@ -654,7 +654,7 @@ index 137d0ee9f51616ea27c397a8bf595fe2c0ff5e91..ad60ce27d4bae0846ea85f5d8130098b
  #if !TARGET_OS_OSX // [macOS]
    [super setDefaultTextAttributes:defaultTextAttributes];
 -#endif // [macOS]
-+#else // [Ardia: the font goes on the cell before the placeholder update, which sets the field editor up again from the cell when the field is being edited. A secure cell hands its font to the editor's NSSecureTextStorage as the bullet font, and an autofocused field was being edited before its first text attributes came, so it kept a nil one, and the first character typed or pasted threw (attempt to insert nil value (key: NSFont)), fatal under Chromium
++#else // [Ardia: font before placeholder
 +  self.font = [[self defaultTextAttributes] objectForKey:NSFontAttributeName];
 +#endif // Ardia]
    [self _updatePlaceholder];
