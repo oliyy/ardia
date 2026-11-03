@@ -13,7 +13,7 @@ import { iconSymbol } from "../../lib/customIcon";
 import { useLiveColors } from "../live/tokens";
 import { ARC_FOLDER_INDENT, GROUP_BORDER, GROUP_PAD, GROUP_RADIUS } from "./geometry";
 import { FolderGlyph, useFolderColors } from "./FolderGlyph";
-import { ItemIcon, LiveSubtitle, Trailing } from "./LiveItemRow";
+import { ItemIcon, LiveSubtitle, RunningChecks, Trailing } from "./LiveItemRow";
 import { TabIcon } from "./TabIcon";
 import { groupSurface, TABULAR_NUMS, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 import { itemShot, rowShot, type EntrySnapshot, type GroupShot, type LiveItemShot, type LiveRowShot, type LiveShot, type SplitShot, type TabShot } from "./ghostShots";
@@ -216,6 +216,7 @@ function LiveItemGhost({ shot, label, flat }: { shot: LiveItemShot; label: strin
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.textPrimary, opacity: 0.9 }} />
           </View>
         ) : null}
+        <RunningChecks item={item} completion={completion} colors={colors} />
         <Trailing item={item} completion={completion} colors={colors} flat={flat} />
       </HoverSlot>
     </View>

@@ -320,13 +320,13 @@ export function githubAge(at: number, now = Date.now()): string | null {
   return weeks === 1 ? "last week" : unitsAgo(weeks, "week");
 }
 
-export function prBadge(pr: PullRequestInfo): "conflict" | "failing" | "changesRequested" | "unresolved" | "pending" | "approved" | "passed" | null {
+export function prBadge(pr: PullRequestInfo): "conflict" | "failing" | "changesRequested" | "unresolved" | "approvedPending" | "pending" | "approved" | "passed" | null {
   if (pr.mergeable === "conflicting") return "conflict";
   const summary = summarizeChecks(pr.checks);
   if (summary?.tone === "failure") return "failing";
   if (pr.review === "changesRequested") return "changesRequested";
   if (pr.unresolvedThreads > 0) return "unresolved";
-  if (summary?.tone === "pending") return "pending";
+  if (summary?.tone === "pending") return pr.review === "approved" ? "approvedPending" : "pending";
   if (pr.review === "approved") return "approved";
   if (summary?.tone === "success") return "passed";
   return null;

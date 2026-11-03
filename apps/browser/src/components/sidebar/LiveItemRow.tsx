@@ -69,7 +69,9 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
   const animates = () => settled && scope.enabled && !hidden;
   const badge = item.pr ? prBadge(item.pr) : null;
   const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr, done ?? null) : "doc";
-  const trailingState = completion ? (flat ? "none" : `c:${completion}`) : badge && badge !== "passed" ? badge : "none";
+  const checksRunning = !completion && badge === "approvedPending";
+  const trailingState = completion ? (flat ? "none" : `c:${completion}`) : checksRunning ? "approved" : badge && badge !== "passed" ? badge : "none";
+  const trailingWidth = (trailingState === "none" ? 0 : BADGE_BOX) + (checksRunning ? BADGE_BOX : 0);
   const fill = active ? tokens.selectedFill : selected ? tokens.multiSelected : hovered && !(flat && resettable) ? theme.tabHover : ink.clear;
   const border = selected && !active && !flat ? 0.5 : 0;
   const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
@@ -179,12 +181,15 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
                   hover={<Button variant="icon" icon="xmark" size={10} weight="semibold" box={22} radius={radius.m} onPress={() => tabId && void closeTab(tabId)} tooltip={withShortcut("Close Tab", closeTabHint)} />}
                 >
                   {(unread || reviewDue) && flat ? (
-                    <Glide x={trailingState === "none" ? 0 : -BADGE_BOX} animates={animates}>
+                    <Glide x={-trailingWidth} animates={animates}>
                       <View style={{ width: 22, height: 22, alignItems: "center", justifyContent: "center" }}>
                         <PulseDot color={theme.textPrimary} pulsing={reviewDue} style={{ width: 6, height: 6, opacity: 0.9 }} />
                       </View>
                     </Glide>
                   ) : null}
+                  <Morph state={checksRunning ? "pending" : "none"} animates={animates}>
+                    <RunningChecks item={item} completion={completion} colors={colors} />
+                  </Morph>
                   <Morph state={trailingState} animates={animates}>
                     <Trailing item={item} completion={completion} colors={colors} flat={flat} />
                   </Morph>
@@ -311,7 +316,9 @@ export function ItemIcon({
 const PENDING_PERIOD = 3;
 export const BADGE_BOX = 22;
 
-const BADGES: Record<Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed">, { symbol: string | null; color: keyof LiveColors; tip: string | ((pr: PullRequestInfo) => string) }> = {
+type BadgeKind = Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed" | "approvedPending">;
+
+const BADGES: Record<BadgeKind, { symbol: string | null; color: keyof LiveColors; tip: string | ((pr: PullRequestInfo) => string) }> = {
   conflict: { symbol: "exclamationmark.triangle.fill", color: "conflict", tip: "Merge conflicts" },
   failing: { symbol: "xmark.circle.fill", color: "failure", tip: "Checks are failing" },
   changesRequested: { symbol: "arrow.uturn.backward.circle.fill", color: "failure", tip: "Changes Requested" },
@@ -328,9 +335,18 @@ export function Trailing({ item, completion, colors, flat }: { item: LiveItem; c
   if (!item.pr) return null;
   const badge = prBadge(item.pr);
   if (!badge || badge === "passed") return null;
+  return <Badge pr={item.pr} badge={badge === "approvedPending" ? "approved" : badge} colors={colors} />;
+}
+
+export function RunningChecks({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }): ReactNode {
+  if (completion || !item.pr || prBadge(item.pr) !== "approvedPending") return null;
+  return <Badge pr={item.pr} badge="pending" colors={colors} />;
+}
+
+function Badge({ pr, badge, colors }: { pr: PullRequestInfo; badge: BadgeKind; colors: LiveColors }) {
   const spec = BADGES[badge];
   return (
-    <View tooltip={typeof spec.tip === "string" ? spec.tip : spec.tip(item.pr)} style={{ width: BADGE_BOX, height: BADGE_BOX, alignItems: "center", justifyContent: "center" }}>
+    <View tooltip={typeof spec.tip === "string" ? spec.tip : spec.tip(pr)} style={{ width: BADGE_BOX, height: BADGE_BOX, alignItems: "center", justifyContent: "center" }}>
       {spec.symbol ? (
         <Symbol name={spec.symbol} size={11} weight="semibold" color={colors[spec.color]} style={{ width: 16, height: 16 }} />
       ) : (
