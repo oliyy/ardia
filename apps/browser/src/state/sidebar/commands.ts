@@ -4,6 +4,7 @@ import type { MenuEntry } from "../../platform/menus";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { activeTabId, pinSection, plural } from "../browser/model";
 import { awayFromPin, selectedTabIds } from "../pins/organize";
+import { awayFromLiveHome, returnToLiveItem } from "../live/liveHome";
 import { groupOf } from "../pins/tabGrouping";
 import { newGroupWithSelection, openIconPicker, startRename } from "./actions";
 import { closeAllTabs } from "./clearTabs";
@@ -51,7 +52,8 @@ export function runSidebarCommand(command: BrowserCommand, arg: string | null, w
       togglePinnedRows(windowId);
       return true;
     case "returnToPinnedUrl":
-      if (tabId) s.returnToPinnedUrl(tabId);
+      if (tabId && s.tabs[tabId] && awayFromLiveHome(s.tabs[tabId])) returnToLiveItem(tabId);
+      else if (tabId) s.returnToPinnedUrl(tabId);
       return true;
     case "tabSwitcher":
       switcherStep(windowId, arg === "backward");
@@ -65,7 +67,7 @@ export function sidebarMenuState(s: BrowserState, windowId: string | undefined) 
   const titles: Record<string, string> = {};
   const tab = windowId ? s.tabs[activeTabId(s, windowId) ?? ""] : undefined;
   if (windowId) {
-    if (!tab || !awayFromPin(tab)) disabled.push("returnToPinnedUrl");
+    if (!tab || !(awayFromPin(tab) || awayFromLiveHome(tab))) disabled.push("returnToPinnedUrl");
     titles.togglePinnedRow = movePinnedTitle(s, tab);
     const selected = selectedTabIds(s, windowId).filter((id) => pinSection(s.tabs[id]) !== "tile");
     if (!selected.length) disabled.push("newGroupWithTabs");

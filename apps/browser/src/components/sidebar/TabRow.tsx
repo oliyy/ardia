@@ -31,7 +31,7 @@ import { entryKey } from "../../state/sidebar/entryKey";
 import type { RowSection } from "./dragModel";
 
 const AnimatedSurface = Animated.createAnimatedComponent(Surface);
-const AWAY_LABEL_SHIFT = 2;
+export const AWAY_LABEL_SHIFT = 2;
 const RESET_HINT_LIFT = 7;
 const RESET_HINT_TOP = 10.5;
 
@@ -220,7 +220,7 @@ export const TabRow = memo(function TabRow({ tabId, onto = false, shift = null, 
   );
 });
 
-function ResetHintTitle({ title, color, hinting, separate }: { title: string; color: string; hinting: boolean; separate: boolean }) {
+export function ResetHintTitle({ title, color, hinting, separate }: { title: string; color: string; hinting: boolean; separate: boolean }) {
   const [shown] = useState(() => new Animated.Value(hinting ? 1 : 0));
   const [motion] = useState(() => ({
     lift: shown.interpolate({ inputRange: [0, 1], outputRange: [0, -RESET_HINT_LIFT] }),

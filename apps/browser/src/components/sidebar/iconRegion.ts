@@ -9,7 +9,7 @@ export const ICON_REGION_WIDTH = 2 * layout.rowPadding + ICON_WIDTH;
 
 type Point = { x: number; y: number };
 type Rect = { x: number; y: number; width: number; height: number };
-type Gesture = { touch: NativeTouchEvent["identifier"]; origin: Point; last: Point; optimistic: boolean; owner: "icon" | "body" | null; rect: Rect | null; measure: number };
+type Gesture = { touch: NativeTouchEvent["identifier"]; origin: Point; last: Point; optimistic: boolean; owner: "icon" | "body" | null; rect: Rect | null; measure: number; regionWidth: number };
 
 const NONE = { hovered: false, pressed: false };
 
@@ -17,14 +17,14 @@ const pointOf = (t: NativeTouchEvent): Point | null => (Number.isFinite(t.pageX)
 const leftButton = (t: NativeTouchEvent) => (t as NativeTouchEvent & { button?: number }).button === 0;
 const touchOf = (e: GestureResponderEvent, id: NativeTouchEvent["identifier"]) =>
   e.nativeEvent.changedTouches?.find((t) => t.identifier === id) ?? (e.nativeEvent.identifier === id ? e.nativeEvent : undefined);
-const within = (r: Rect, p: Point) => p.x >= r.x && p.x < r.x + Math.min(ICON_REGION_WIDTH, r.width) && p.y >= r.y && p.y < r.y + r.height;
+const within = (r: Rect, p: Point, regionWidth: number) => p.x >= r.x && p.x < r.x + Math.min(regionWidth, r.width) && p.y >= r.y && p.y < r.y + r.height;
 
 function held(g: Gesture) {
-  const inRegion = g.rect ? within(g.rect, g.last) : g.optimistic;
+  const inRegion = g.rect ? within(g.rect, g.last, g.regionWidth) : g.optimistic;
   return { hovered: inRegion, pressed: g.owner === "icon" ? inRegion : g.owner === null && g.optimistic };
 }
 
-export function useIconRegion(windowId: string, enabled: boolean, rowHovered: boolean, row: RefObject<View | null>) {
+export function useIconRegion(windowId: string, enabled: boolean, rowHovered: boolean, row: RefObject<View | null>, regionWidth = ICON_REGION_WIDTH) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const gesture = useRef<Gesture | null>(null);
   const released = useRef<boolean | null>(null);
@@ -60,7 +60,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
       if (!g) return;
       gesture.current = null;
       lastPress.current = keepContainment && held(g).pressed;
-      released.current = keepContainment && g.rect ? within(g.rect, g.last) : null;
+      released.current = keepContainment && g.rect ? within(g.rect, g.last, g.regionWidth) : null;
       if (released.current === null) watch(false);
       rerender();
     },
@@ -73,7 +73,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
         if (gesture.current !== g || g.measure !== request) return;
         if (![width, height, pageX, pageY].every(Number.isFinite) || width <= 0 || height <= 0) return;
         g.rect = { x: pageX, y: pageY, width, height };
-        if (g.owner === null) g.owner = within(g.rect, g.origin) ? "icon" : "body";
+        if (g.owner === null) g.owner = within(g.rect, g.origin, g.regionWidth) ? "icon" : "body";
         rerender();
       });
     },
@@ -104,7 +104,7 @@ export function useIconRegion(windowId: string, enabled: boolean, rowHovered: bo
       finish(false);
       lastPress.current = false;
       clearReleased();
-      const g: Gesture = { touch: t.identifier, origin: p, last: p, optimistic, owner: null, rect: null, measure: 0 };
+      const g: Gesture = { touch: t.identifier, origin: p, last: p, optimistic, owner: null, rect: null, measure: 0, regionWidth };
       gesture.current = g;
       watch(true);
       measure(g);

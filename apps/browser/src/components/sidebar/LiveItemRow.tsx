@@ -1,5 +1,5 @@
-import { useContext, useEffect, useRef, type ReactNode } from "react";
-import { Animated, Image, Pressable, Text, View, type ImageSourcePropType } from "react-native";
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Animated, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 import { closeTab } from "../../state/browser/actions";
 import { githubAge, prBadge, summarizeChecks } from "../../state/live/github";
 import { awaitsReview, reviewAnswered } from "../../state/live/rows";
@@ -7,7 +7,8 @@ import { SOURCES } from "../../state/live/sources";
 import { live, useLive } from "../../state/live/store";
 import type { CompletedItem, CompletionState, LiveItem, PullRequestInfo } from "../../state/live/types";
 import { usePageProfileId } from "../../state/browser/hooks";
-import { useIsActiveIn, useLiveItemTab } from "../../state/sidebar/hooks";
+import { returnToLiveItem, separateFromLiveItem } from "../../state/live/liveHome";
+import { useIsActiveIn, useLiveItemTab, useLiveTabAway } from "../../state/sidebar/hooks";
 import { dismissHover } from "../../state/sidebar/hover";
 import { openLiveItemMenu } from "../../state/sidebar/liveMenus";
 import { liveRowKey } from "../../state/sidebar/liveRowKey";
@@ -18,15 +19,17 @@ import { withShortcut } from "../../state/commands/commandShortcuts";
 import { useAddressBarInSidebar } from "../../state/windows/layout";
 import { modifiersOf } from "../../lib/keys";
 import { HoverSlot } from "../ui/HoverSlot";
-import { ActivitySpinner, Button, ContextMenuArea, FadeLabel, ink, PulseDot, radius, Surface, Symbol, type FadeLabelGlyph } from "../ui";
+import { ActivitySpinner, ArcTabRowBackground, Button, ContextMenuArea, FadeLabel, ink, PulseDot, radius, Surface, Symbol, useHover, type FadeLabelGlyph } from "../ui";
 import { hex, layout, useTheme } from "../ui/theme";
 import { useLiveColors, type LiveColors } from "../live/tokens";
 import { useFoldHidden } from "./Fold";
 import { useRowHover } from "./hoverController";
+import { ICON_REGION_WIDTH, ICON_WIDTH, useIconRegion } from "./iconRegion";
 import { Glide, Morph } from "./LiveMotion";
 import { ListMotionContext } from "./ListMotion";
 import { STACK_INDENT } from "./LiveFolderRows";
 import { TabIcon } from "./TabIcon";
+import { AWAY_LABEL_SHIFT, ResetHintTitle } from "./TabRow";
 import { useSidebarRowLook } from "./rowLook";
 import { ARC_SELECTED_INACTIVE, arcSelectedLabel, TABULAR_NUMS, useArcLabel, useArcTitle, useSidebarTokens } from "./tokens";
 
@@ -45,31 +48,57 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
   const tabId = useLiveItemTab(windowId, profileId, folderId, item.id);
   const active = useIsActiveIn(windowId, profileId, tabId);
   const selected = useIsSelected(windowId, key);
-  const { closeTabHint } = useSidebarRowLook();
+  const { closeTabHint, backToPinHint } = useSidebarRowLook();
   const unread = useLive((s) => !done && !!s.unread[folderId]?.includes(item.id));
   const completing = useLive((s) => (!done && s.completing[folderId]?.includes(item.id) ? (s.completed[folderId]?.find((c) => c.item.id === item.id)?.state ?? "merged") : null));
   const completion = completing ?? done ?? null;
   const reviewDue = !completion && awaitsReview(item);
   const { hovered, hoverProps } = useRowHover(windowId, completing ? null : { kind: "live", id: key });
+  const resettable = useLiveTabAway(tabId, item) && !completion;
+  const rowView = useRef<View | null>(null);
+  const backToPin = useHover();
+  const [separateKey, setSeparateKey] = useState(false);
+  const onSeparateKey = useCallback((e: { nativeEvent: { held: boolean } }) => setSeparateKey(e.nativeEvent.held), []);
+  const regionWidth = ICON_REGION_WIDTH + 2 * indent;
+  const region = useIconRegion(windowId, flat && resettable && !hidden, hovered, rowView, regionWidth);
+  const resetting = !flat && resettable && backToPin.hovered;
+  const hinting = flat && resettable && region.regionHovered;
+  const hint = separateKey ? "Separate From Pinned Tab" : "Back to Pinned URL";
   const scope = useContext(ListMotionContext);
   const settled = (live().revisions[folderId] ?? 0) > 1;
   const animates = () => settled && scope.enabled && !hidden;
   const badge = item.pr ? prBadge(item.pr) : null;
   const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr, done ?? null) : "doc";
   const trailingState = completion ? (flat ? "none" : `c:${completion}`) : badge && badge !== "passed" ? badge : "none";
-  const fill = active ? tokens.selectedFill : selected ? tokens.multiSelected : hovered ? theme.tabHover : ink.clear;
+  const fill = active ? tokens.selectedFill : selected ? tokens.multiSelected : hovered && !(flat && resettable) ? theme.tabHover : ink.clear;
   const border = selected && !active && !flat ? 0.5 : 0;
   const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
+  const labelGap = layout.rowLabelGap + (flat && resettable ? AWAY_LABEL_SHIFT : 0);
+  const icon = (
+    <View tooltip={flat && resettable ? withShortcut("Reset Tab", backToPinHint) : undefined}>
+      <Morph state={iconState} animates={animates}>
+        <ItemIcon item={item} completing={completing} done={done ?? null} colors={colors} animate={false} />
+      </Morph>
+    </View>
+  );
 
   return (
     <View presentationGate>
       <View
         ref={(v) => {
+          rowView.current = v;
           registerRow(windowId, key, hidden ? null : v);
           if (tabId) registerRow(windowId, tabId, hidden ? null : v);
         }}
         {...hoverProps}
+        onMouseLeave={(event) => {
+          hoverProps.onMouseLeave(event);
+          region.rowLeft();
+        }}
+        {...(flat && resettable ? region.touchProps : null)}
+        onLayout={flat && resettable ? region.onLayout : undefined}
       >
+        {flat && resettable ? <View pointerEvents="none" {...region.overlayProps} style={{ position: "absolute", left: 0, top: 0, width: regionWidth, height: layout.rowHeight }} /> : null}
         <ContextMenuArea
           onContextMenu={() => {
             dismissHover();
@@ -79,7 +108,13 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
           <Pressable
             onPress={(e) => {
               dismissHover();
-              clickLiveItem(windowId, folderId, item, modifiersOf(e));
+              const mods = modifiersOf(e);
+              if (tabId && flat && resettable && region.pressedInRegion()) {
+                if (mods.metaKey) separateFromLiveItem(tabId);
+                else returnToLiveItem(tabId);
+                return;
+              }
+              clickLiveItem(windowId, folderId, item, mods);
             }}
           >
             {({ pressed }) => (
@@ -91,18 +126,46 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
                 borderColor={border ? hex(tokens.multiSelectedStroke) : undefined}
                 style={{ height: layout.rowHeight, flexDirection: "row", alignItems: "center", paddingLeft: layout.rowPadding + indent - border, paddingRight: (flat ? 7 : 6) - border }}
               >
+                {flat && resettable ? (
+                  <ArcTabRowBackground
+                    dark={theme.dark}
+                    hovered={hovered}
+                    canReset
+                    iconMinX={layout.rowPadding + indent}
+                    iconWidth={ICON_WIDTH}
+                    regionHovered={region.regionHovered}
+                    regionPressed={region.regionPressed}
+                    onSeparateKey={onSeparateKey}
+                    pointerEvents="none"
+                    style={StyleSheet.absoluteFill}
+                  />
+                ) : null}
                 {(unread || reviewDue) && !flat ? <PulseDot color={theme.accent} pulsing={reviewDue} style={{ position: "absolute", left: 2 + indent, width: 5, height: 5 }} /> : null}
-                <Morph state={iconState} animates={animates}>
-                  <ItemIcon item={item} completing={completing} done={done ?? null} colors={colors} animate={false} />
-                </Morph>
-                {flat && subtitle ? (
-                  <View style={{ flex: 1, marginLeft: layout.rowLabelGap }}>
-                    <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} transitions={settled} style={{ height: 18 }} />
-                    <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} transitions={settled} />
+                {resettable && !flat && tabId ? (
+                  <View {...backToPin.hoverProps}>
+                    <Pressable onPress={() => returnToLiveItem(tabId)} tooltip={withShortcut("Back to Pinned URL", backToPinHint)}>
+                      {resetting ? (
+                        <View style={{ width: 16, height: 16, alignItems: "center", justifyContent: "center" }}>
+                          <Symbol name="arrow.uturn.backward" size={11} weight="semibold" color={active ? theme.tabSelectedText : theme.textTab} style={{ width: 16, height: 16 }} />
+                        </View>
+                      ) : (
+                        icon
+                      )}
+                    </Pressable>
                   </View>
                 ) : (
+                  icon
+                )}
+                {flat && subtitle ? (
+                  <View style={{ flex: 1, marginLeft: labelGap }}>
+                    <FadeLabel text={item.title} fontSize={layout.rowFontSize} color={label} transitions={settled} style={{ height: 18 }} />
+                    <LiveSubtitle item={item} subtitle={subtitle} done={completion} colors={colors} transitions={settled} hint={hinting ? hint : null} />
+                  </View>
+                ) : flat && resettable ? (
+                  <ResetHintTitle title={item.title} color={label} hinting={hinting} separate={separateKey} />
+                ) : (
                   <FadeLabel
-                    text={item.title}
+                    text={resetting ? "Back to Pinned URL" : item.title}
                     fontSize={layout.rowFontSize}
                     weight={unread && !flat ? "medium" : undefined}
                     color={label}
@@ -111,7 +174,7 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
                   />
                 )}
                 <HoverSlot
-                  hovered={hovered && !!tabId && !completing}
+                  hovered={hovered && !!tabId && !completing && !hinting}
                   width={22}
                   hover={<Button variant="icon" icon="xmark" size={10} weight="semibold" box={22} radius={radius.m} onPress={() => tabId && void closeTab(tabId)} tooltip={withShortcut("Close Tab", closeTabHint)} />}
                 >
@@ -184,10 +247,24 @@ function prMeta(pr: PullRequestInfo, done: CompletionState | null, answered: boo
   return { text: parts.join(" · "), glyphs };
 }
 
-export function LiveSubtitle({ item, subtitle, done, colors, transitions = false }: { item: LiveItem; subtitle: string; done: CompletionState | null; colors: LiveColors; transitions?: boolean }) {
+export function LiveSubtitle({
+  item,
+  subtitle,
+  done,
+  colors,
+  transitions = false,
+  hint = null,
+}: {
+  item: LiveItem;
+  subtitle: string;
+  done: CompletionState | null;
+  colors: LiveColors;
+  transitions?: boolean;
+  hint?: string | null;
+}) {
   const theme = useTheme();
   const meta = item.pr ? prMeta(item.pr, done, reviewAnswered(item), colors) : null;
-  return <FadeLabel text={meta?.text ?? subtitle} glyphs={meta?.glyphs} fontSize={12} color={theme.textSecondary} transitions={transitions} style={{ height: 14 }} />;
+  return <FadeLabel text={hint ?? meta?.text ?? subtitle} glyphs={hint ? undefined : meta?.glyphs} fontSize={12} color={theme.textSecondary} transitions={transitions} style={{ height: 14 }} />;
 }
 
 export const COMPLETION_GLYPH: Record<CompletedItem["state"], { symbol: string; color: keyof LiveColors }> = {
