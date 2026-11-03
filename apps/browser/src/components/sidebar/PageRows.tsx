@@ -24,7 +24,6 @@ import { PinnedGrid } from "./PinnedGrid";
 import { SCROLL_EDGE } from "./ScrollEdge";
 import { ROW_PITCH, ROWS_PER_FRAME, type SidebarGeometry } from "./pageLayout";
 import { NewTabRow } from "./NewTabRow";
-import { CleanUpUpsell } from "./CleanUpUpsell";
 import { SpaceHeader } from "./SpaceHeader";
 import { SplitRowItem, TabRowItem } from "./TabRow";
 import { SIDEBAR_TYPE, sidebarTokens } from "./tokens";
@@ -178,7 +177,6 @@ export function PageRows({ windowId, profileId, current, rows, lazy, offScreen, 
             <Tail section="list" />
             {!newTabsAtTop && inlineNewTab ? <NewTabRow windowId={windowId} shift={motion.tail} clip={motion.tailClip} /> : null}
           </View>
-          {current ? <CleanUpUpsell windowId={windowId} shift={motion.tail} /> : null}
         </Animated.View>
       </View>
     </ListMotionContext.Provider>

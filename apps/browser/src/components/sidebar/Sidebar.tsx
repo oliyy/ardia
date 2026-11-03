@@ -15,7 +15,6 @@ import { closeFolderPanel } from "../../state/sidebar/tileFolderUi";
 import { openSidebarMenu } from "../../state/sidebar/menus";
 import { openLibraryMenu } from "../../state/sidebar/arcMenus";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../state/sidebar/sidebarWidth";
-import { useUpsellShift } from "../../state/sidebar/upsellShift";
 import { DownloadsButton } from "../downloads/DownloadsButton";
 import { LibraryPanel } from "../library/LibraryPanel";
 import { useLibraryMotion } from "../library/motion";
@@ -122,12 +121,9 @@ export function Sidebar({ width, resizing, receipt }: { width: number; resizing:
   const nothingPinned = useNoTiles(windowId, current);
   const tileCells = useTileCellCount(windowId, current);
   const balancedTiles = useSettings((s) => s.balancedTopApps);
-  const upsellShift = useUpsellShift((u) => u[windowId] ?? 0);
   const rowLook = useSidebarRowLookSource();
   const gridAt = (width: number) => pinGridHeight(tileCells, width - layout.sidebarInset * 2, layout.pinnedHeight, pinColumnCap(addressBar), balancedTiles);
   const tileShift = tileCells ? gridAt(LIVE_MIN) - gridAt(LIVE_MAX) : 0;
-  const slack = geometry.current.content - scrollY.current - geometry.current.viewport;
-  const shiftBound = tileShift + (upsellShift && slack < tileShift + upsellShift ? upsellShift : 0);
 
   const sidebarHover = useSidebarHoverProps(windowId);
   useRevealTabs(windowId, scroll, scrollY, geometry, pageReady);
@@ -161,7 +157,7 @@ export function Sidebar({ width, resizing, receipt }: { width: number; resizing:
                   {...sidebarHover}
                   collapsable={false}
                   presentationSession={resizing}
-                  presentationShiftBound={shiftBound}
+                  presentationShiftBound={tileShift}
                   pointerEvents={shown === current ? "auto" : "none"}
                   style={{
                     position: "absolute",
