@@ -276,6 +276,15 @@ Engine files are in `engine/ardiacore/src/ardia/core`, app files in `packages/ar
 - Dia fidelity: when you build UI, match Dia, and check it with numbers against a Dia capture
   (same crop, same state) before calling it a match (`docs/dia-spec.md`, `docs/dia-feature-parity.md`).
 
+## Local MCP server
+
+The app serves MCP on `http://127.0.0.1:53815/mcp` (Settings › General › MCP Server, `settings.mcpServer`, on by default) so the owner's agents can organize tabs. `packages/shell/ios/McpServer.swift` (with `McpConnection.swift`, module `ArdiaMcp` in `McpModule.swift`) is a loopback-only `NWListener` that frames HTTP: POST `/mcp` only (`GET`/`DELETE` get 405), Host and Origin must be `127.0.0.1` or `localhost` with the port (403 otherwise), bodies up to 1 MB (413), and a request JS doesn't answer within 30 s gets 504. JS speaks the protocol and runs the tools in `state/mcp/` (`protocol.ts`, `tools.ts`; reads and the lock rule in `spaces.ts`; compound writes in `writes.ts`, each one store change). Tools: `list_spaces`, `list_tabs`, `open_tab`, `close_tabs`, `move_tabs`, `create_folder`, `rename_folder`, `delete_folder`, `activate_tab`, `pin_tab`, `add_favorite`. Favorites, pinned tabs, pinned folders and live-folder tabs are locked (`isLockedTab`, `isLockedFolder`): only `pin_tab` and `add_favorite` add new ones, at the end, and any write naming a locked id changes nothing. Incognito profiles and private or Little Ardia windows are never listed. A hidden test instance must pass `--instance mcpPort=<free port>`; never bind 53815 from a test. Drive it with curl:
+
+```sh
+curl -s http://127.0.0.1:$PORT/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tabs","arguments":{}}}'
+```
+
 ## Launch variables
 
 The only variables the app and engine read, through `ArdiaLaunchConfig` (`packages/ardiacore/ios`; JS:
@@ -298,6 +307,7 @@ The only variables the app and engine read, through `ArdiaLaunchConfig` (`packag
 | | `cliHome=<dir>` · `cliBinDir=<dir>` · `cliUrl=<url>` | Where the `ardia` command installs, links and downloads from (`docs/cli.md`); a test instance installs only with the first two |
 | | `syncFolder=<dir>` | The sync folder (`packages/sync/scripts/e2e.mjs`) |
 | | `importSourceDir=<dir>` · `importSafariHome=<dir>` | Where import looks for other browsers and Safari's home, so a scratch instance never sees the owner's profiles |
+| | `mcpPort=<port>` | The local MCP server's port instead of 53815; a test instance must set it so it never takes the owner's |
 | `ARDIA_SWITCHES` | `name=on\|off,…` | Kill switches (`platform/killSwitches.ts` `SWITCHES`, at most 8, on by default) and experiments (`EXPERIMENTS`: `beginFrameBridge`, `serverWindowDrag`, `serverWindowDragAllOpen`, `webkitSignIn`, off by default). Honoured in every build (`docs/kill-switches.md`) |
 | `ARDIA_TRACE` | `visibility` | Occlusion and each WebView attach/detach, `[ardiacore-vis]` in the system log |
 | | `pip` · `pipZoom` | PiP windows to `/tmp/ac-pip-trace.log` · PiP zoom gestures, `[pip-zoom]` |
