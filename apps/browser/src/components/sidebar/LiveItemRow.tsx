@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 import { closeTab } from "../../state/browser/actions";
-import { githubAge, prBadge, summarizeChecks } from "../../state/live/github";
+import { githubAge, prBadges, summarizeChecks, type PrIssue } from "../../state/live/github";
 import { awaitsReview, reviewAnswered } from "../../state/live/rows";
 import { SOURCES } from "../../state/live/sources";
 import { live, useLive } from "../../state/live/store";
@@ -67,11 +67,11 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
   const scope = useContext(ListMotionContext);
   const settled = (live().revisions[folderId] ?? 0) > 1;
   const animates = () => settled && scope.enabled && !hidden;
-  const badge = item.pr ? prBadge(item.pr) : null;
   const iconState = completing ? `c:${completing}` : item.pr ? prState(item.pr, done ?? null) : "doc";
-  const checksRunning = !completion && badge === "approvedPending";
-  const trailingState = completion ? (flat ? "none" : `c:${completion}`) : checksRunning ? "approved" : badge && badge !== "passed" ? badge : "none";
-  const trailingWidth = (trailingState === "none" ? 0 : BADGE_BOX) + (checksRunning ? BADGE_BOX : 0);
+  const badges = item.pr && !completion ? prBadges(item.pr) : null;
+  const leadState = badges?.approved && badges.issue ? badges.issue : "none";
+  const trailingState = completion ? (flat ? "none" : `c:${completion}`) : badges?.approved ? "approved" : (badges?.issue ?? "none");
+  const trailingWidth = (trailingState === "none" ? 0 : BADGE_BOX) + (leadState === "none" ? 0 : BADGE_BOX);
   const fill = active ? tokens.selectedFill : selected ? tokens.multiSelected : hovered && !(flat && resettable) ? theme.tabHover : ink.clear;
   const border = selected && !active && !flat ? 0.5 : 0;
   const label = (completing ? null : arcTitle) ?? (active ? (arcSelectedLabel(arcLabel) ?? theme.tabSelectedText) : completing ? theme.textSecondary : (arcLabel ?? theme.textTab));
@@ -187,8 +187,8 @@ export function LiveItemRow({ folderId, item, windowId, inStack = false, done }:
                       </View>
                     </Glide>
                   ) : null}
-                  <Morph state={checksRunning ? "pending" : "none"} animates={animates}>
-                    <RunningChecks item={item} completion={completion} colors={colors} />
+                  <Morph state={leadState} animates={animates}>
+                    <LeadBadge item={item} completion={completion} colors={colors} />
                   </Morph>
                   <Morph state={trailingState} animates={animates}>
                     <Trailing item={item} completion={completion} colors={colors} flat={flat} />
@@ -316,7 +316,7 @@ export function ItemIcon({
 const PENDING_PERIOD = 3;
 export const BADGE_BOX = 22;
 
-type BadgeKind = Exclude<NonNullable<ReturnType<typeof prBadge>>, "passed" | "approvedPending">;
+type BadgeKind = PrIssue | "approved";
 
 const BADGES: Record<BadgeKind, { symbol: string | null; color: keyof LiveColors; tip: string | ((pr: PullRequestInfo) => string) }> = {
   conflict: { symbol: "exclamationmark.triangle.fill", color: "conflict", tip: "Merge conflicts" },
@@ -333,14 +333,15 @@ export function Trailing({ item, completion, colors, flat }: { item: LiveItem; c
     return <Text style={{ fontSize: 11, fontWeight: "500", color: colors[COMPLETION_GLYPH[completion].color], marginRight: 4 }}>{completion === "merged" ? "Merged" : completion === "reviewed" ? "Reviewed" : "Closed"}</Text>;
   }
   if (!item.pr) return null;
-  const badge = prBadge(item.pr);
-  if (!badge || badge === "passed") return null;
-  return <Badge pr={item.pr} badge={badge === "approvedPending" ? "approved" : badge} colors={colors} />;
+  const { issue, approved } = prBadges(item.pr);
+  const badge = approved ? "approved" : issue;
+  return badge ? <Badge pr={item.pr} badge={badge} colors={colors} /> : null;
 }
 
-export function RunningChecks({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }): ReactNode {
-  if (completion || !item.pr || prBadge(item.pr) !== "approvedPending") return null;
-  return <Badge pr={item.pr} badge="pending" colors={colors} />;
+export function LeadBadge({ item, completion, colors }: { item: LiveItem; completion: CompletedItem["state"] | null; colors: LiveColors }): ReactNode {
+  if (completion || !item.pr) return null;
+  const { issue, approved } = prBadges(item.pr);
+  return approved && issue ? <Badge pr={item.pr} badge={issue} colors={colors} /> : null;
 }
 
 function Badge({ pr, badge, colors }: { pr: PullRequestInfo; badge: BadgeKind; colors: LiveColors }) {
