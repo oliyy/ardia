@@ -130,7 +130,7 @@ export function moveTabsInto(s: BrowserState, ids: string[], targetId: string): 
   return next;
 }
 
-function intoProfile(s: BrowserState, tabId: string, profileId: string): BrowserState {
+export function intoProfile(s: BrowserState, tabId: string, profileId: string): BrowserState {
   const tab = s.tabs[tabId];
   const w = tab && s.windows[tab.windowId];
   if (!tab || !w || w.kind === "private" || !s.profiles[profileId] || tab.profileId === profileId || adoptionRequired(tab)) return s;

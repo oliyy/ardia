@@ -9,6 +9,7 @@ export * from "./focus";
 export * from "./inlineCompletion";
 export * from "./lifecycle";
 export * from "./live";
+export * from "./mcp";
 export * from "./menus";
 export * from "./notifications";
 export * from "./scripting";

@@ -8,6 +8,7 @@ import type { FocusNative } from "./focus";
 import type { InlineCompletionNative } from "./inlineCompletion";
 import type { ShellNative } from "./lifecycle";
 import type { CalendarNative, KeychainNative } from "./live";
+import type { McpNative } from "./mcp";
 import type { MenusNative } from "./menus";
 import type { NotificationsNative } from "./notifications";
 import type { ScriptingNative } from "./scripting";
@@ -41,6 +42,7 @@ export type ShellNativeModules = {
   ArdiaFileDrop: FileDropNative;
   ArdiaCli: CliNative;
   ArdiaUserScripts: UserScriptsNative;
+  ArdiaMcp: McpNative;
 };
 
 export const nativeModule = <Name extends keyof ShellNativeModules>(name: Name) => requireNativeModule<ShellNativeModules[Name]>(name);

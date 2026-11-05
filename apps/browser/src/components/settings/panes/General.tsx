@@ -16,6 +16,7 @@ import { useResource } from "../../../state/settings/resources";
 import { openImport } from "../../../state/settings/settingsWindows";
 import { ExportBookmarksRow } from "./ExportBookmarksRow";
 import { SetupCodeRow } from "./SetupCodeRow";
+import { McpServerSection } from "./McpServerSection";
 import { UI_LOCALE } from "../../../lib/uiLocale";
 import { LinkDefaultPopUp } from "./Links";
 
@@ -98,6 +99,8 @@ export function GeneralPane() {
         <ExportBookmarksRow />
         <SetupCodeRow />
       </Group>
+
+      <McpServerSection />
     </View>
   );
 }

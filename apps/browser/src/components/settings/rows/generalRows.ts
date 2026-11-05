@@ -77,6 +77,17 @@ export const generalRows = {
         },
       },
     },
+    {
+      section: "MCP Server",
+      rows: {
+        mcpServer: {
+          title: "MCP server",
+          description: `Lets agents on this Mac, like Claude Code, organize your tabs and folders across spaces. They can add new pinned tabs and favorites, but never change or remove yours.`,
+          keywords: ["mcp", "model context protocol", "claude", "claude code", "agent", "ai", "automation", "organize tabs", "localhost"],
+        },
+        mcpSetup: { title: "Set up Claude Code", description: "Copies the command that adds Ardia to Claude Code.", keywords: ["mcp", "claude mcp add", "setup", "terminal"] },
+      },
+    },
   ],
   profiles: [
     { section: "New windows open with", rows: { defaultProfile: { title: "Default profile", description: "Used for new windows. Links from other apps open in the profile you used last.", keywords: ["new window"] } } },

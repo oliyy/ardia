@@ -263,6 +263,15 @@ const cli: Modules["ArdiaCli"] = {
   addListener: cliEvents.addListener,
 };
 
+const mcpEvents = nativeEvents();
+const mcp: Modules["ArdiaMcp"] = {
+  port: 53815,
+  start: () => Promise.resolve("listening"),
+  stop: () => {},
+  respond: () => {},
+  addListener: mcpEvents.addListener,
+};
+
 const noUserScripts: UserScriptsHost = { watching: [], writes: [], status: null, change: null, read: async () => ({ state: "empty" }) };
 const userScriptsHost = () => testGlobals.acTestUserScripts ?? noUserScripts;
 const userScripts: Modules["ArdiaUserScripts"] = {
@@ -298,6 +307,7 @@ export const shellNativeModules: Modules = {
   ArdiaDockSelection: { iconTheme: () => Promise.resolve(null) },
   ArdiaInlineCompletion: { complete: () => Promise.resolve(0) },
   ArdiaTranslate: translate,
+  ArdiaMcp: mcp,
   ArdiaMagnifyArea: magnifyArea,
   ArdiaFileDrop: fileDrop,
   ArdiaCli: cli,

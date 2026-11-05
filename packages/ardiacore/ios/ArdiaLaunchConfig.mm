@@ -18,7 +18,7 @@ NSString *const kSwitchesCacheDocument = @"switches-cache.json";
 NSArray<NSString *> *InstanceKeys() {
   return @[
     @"jsLocation", @"chromiumSwitches", @"downloadsDir", @"updateFeed", @"allowAudio", @"allowOcclusion", @"releaseNotes",
-    @"cliHome", @"cliBinDir", @"cliUrl", @"syncFolder", @"importSourceDir", @"importSafariHome",
+    @"cliHome", @"cliBinDir", @"cliUrl", @"syncFolder", @"importSourceDir", @"importSafariHome", @"mcpPort",
   ];
 }
 
