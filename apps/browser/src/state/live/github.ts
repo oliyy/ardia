@@ -9,6 +9,7 @@ const PR_FIELDS = `
     author { login avatarUrl(size: 64) }
     comments { totalCount }
     viewerLatestReview { state }
+    latestOpinionatedReviews(first: 20) { nodes { state } }
     reviewThreads(first: 50) { nodes { isResolved } }
     commits(last: 1) {
       nodes { commit { statusCheckRollup { state contexts(first: 60) { nodes {
@@ -70,6 +71,7 @@ export type RawPR = {
   author: { login: string; avatarUrl: string } | null;
   comments: { totalCount: number };
   viewerLatestReview?: { state: string } | null;
+  latestOpinionatedReviews?: { nodes: { state: string }[] };
   reviewThreads?: { nodes: { isResolved: boolean }[] };
   commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: RawCheck[] } } | null } }[] };
 };
@@ -123,6 +125,15 @@ function latestChecks(nodes: RawCheck[]): RawCheck[] {
   return [...latest.values()];
 }
 
+function reviewOf(raw: RawPR): PullRequestInfo["review"] {
+  if (raw.reviewDecision === "APPROVED") return "approved";
+  if (raw.reviewDecision === "CHANGES_REQUESTED") return "changesRequested";
+  if (raw.reviewDecision === "REVIEW_REQUIRED") return "required";
+  const states = (raw.latestOpinionatedReviews?.nodes ?? []).map((r) => r.state);
+  if (states.includes("CHANGES_REQUESTED")) return "changesRequested";
+  return states.includes("APPROVED") ? "approved" : null;
+}
+
 function mapPR(raw: RawPR, section: PullRequestSection): LiveItem {
   const rollup = raw.commits.nodes[0]?.commit.statusCheckRollup;
   const checks: PullRequestCheck[] = latestChecks(rollup?.contexts.nodes ?? []).map((c) => ({
@@ -139,7 +150,7 @@ function mapPR(raw: RawPR, section: PullRequestSection): LiveItem {
     createdAt: Date.parse(raw.createdAt) || 0,
     headRef: raw.headRefName,
     baseRef: raw.baseRefName,
-    review: raw.reviewDecision === "APPROVED" ? "approved" : raw.reviewDecision === "CHANGES_REQUESTED" ? "changesRequested" : raw.reviewDecision === "REVIEW_REQUIRED" ? "required" : null,
+    review: reviewOf(raw),
     mergeable: raw.mergeable === "CONFLICTING" ? "conflicting" : raw.mergeable === "MERGEABLE" ? "mergeable" : "unknown",
     checks,
     comments: raw.comments.totalCount,
