@@ -48,25 +48,63 @@ export function folderIn(s: BrowserState, id: unknown): TabGroup {
 
 export const isFavorite = (tab: Tab) => pinSection(tab) === "tile";
 
-export const isLockedTab = (s: BrowserState, id: string) => inPinnedContainer(s, id) || !!s.tabs[id]?.liveItem;
+export const isLiveTab = (tab: Tab) => !!tab.liveItem;
 
-export const isLockedFolder = (s: BrowserState, g: TabGroup) => g.pinned || ancestorIds(s.groups, g.id).some((a) => s.groups[a]?.pinned);
+export const isFixedTab = (tab: Tab) => isFavorite(tab) || isLiveTab(tab);
 
-const lockedTabMessage = (s: BrowserState, id: string) =>
-  isFavorite(s.tabs[id]!) ? `${id} is a favorite; favorites can't be changed here` : `${id} is pinned; pinned tabs can't be changed here`;
+export const isPinnedTab = (s: BrowserState, id: string) => !!s.tabs[id] && !isFixedTab(s.tabs[id]!) && inPinnedContainer(s, id);
+
+export const isPinnedFolder = (s: BrowserState, g: TabGroup) => g.pinned || ancestorIds(s.groups, g.id).some((a) => s.groups[a]?.pinned);
+
+const fixedTabMessage = (tab: Tab) =>
+  isFavorite(tab) ? `${tab.id} is a favorite; favorites can't be changed here` : `${tab.id} is in a live folder; live-folder tabs can't be changed here`;
+
+export function tabsIn(s: BrowserState, ids: unknown): Tab[] {
+  if (!Array.isArray(ids) || !ids.length) return fail("ids must list one or more tab ids");
+  return [...new Set(ids)].map((id) => tabIn(s, id));
+}
+
+export function editableTab(s: BrowserState, id: unknown): Tab {
+  const tab = tabIn(s, id);
+  if (isFixedTab(tab)) fail(fixedTabMessage(tab));
+  return tab;
+}
+
+export function editableTabs(s: BrowserState, ids: unknown): Tab[] {
+  const tabs = tabsIn(s, ids);
+  const fixed = tabs.find(isFixedTab);
+  if (fixed) fail(fixedTabMessage(fixed));
+  return tabs;
+}
 
 export function unpinnedTabs(s: BrowserState, ids: unknown): Tab[] {
-  if (!Array.isArray(ids) || !ids.length) return fail("ids must list one or more tab ids");
-  const tabs = [...new Set(ids)].map((id) => tabIn(s, id));
-  const locked = tabs.find((t) => isLockedTab(s, t.id));
-  if (locked) fail(lockedTabMessage(s, locked.id));
+  const tabs = editableTabs(s, ids);
+  const pinned = tabs.find((t) => isPinnedTab(s, t.id));
+  if (pinned) fail(`${pinned.id} is pinned; pinned tabs can't be closed here`);
   return tabs;
+}
+
+export function refuseUnpinning(s: BrowserState, tabs: Tab[], hint: string) {
+  const pinned = tabs.find((t) => isPinnedTab(s, t.id));
+  if (pinned) fail(`${pinned.id} is pinned and that would unpin it; ${hint}`);
 }
 
 export function unpinnedFolder(s: BrowserState, id: unknown): TabGroup {
   const group = folderIn(s, id);
-  if (isLockedFolder(s, group)) fail(`${group.id} is a pinned folder; pinned folders can't be changed here`);
+  if (isPinnedFolder(s, group)) fail(`${group.id} is a pinned folder; pinned folders can't be deleted here`);
   return group;
+}
+
+export function keepsPins(before: BrowserState, after: BrowserState, movedFolders: ReadonlyMap<string, string> = new Map()) {
+  if (before === after) return;
+  for (const id of Object.keys(before.tabs)) {
+    if (isPinnedTab(before, id) && !(after.tabs[id] && isPinnedTab(after, id))) fail(`That would close or unpin pinned tab ${id}, so nothing changed`);
+  }
+  for (const g of Object.values(before.groups)) {
+    if (!isPinnedFolder(before, g)) continue;
+    const now = after.groups[movedFolders.get(g.id) ?? g.id];
+    if (!now || !isPinnedFolder(after, now)) fail(`That would delete or unpin pinned folder ${g.id}, so nothing changed`);
+  }
 }
 
 export function sameWindow(tabs: Tab[]): string {
@@ -84,12 +122,13 @@ function tabEntry(s: BrowserState, id: string, active: string | undefined) {
     url: t.url || t.pinnedUrl || "",
     ...(folder ? { folder } : {}),
     ...(id === active ? { active: true } : {}),
-    ...(isLockedTab(s, id) ? { locked: true } : {}),
+    ...(isPinnedTab(s, id) ? { pinned: true } : {}),
+    ...(isFixedTab(t) ? { locked: true } : {}),
   };
 }
 
 function folderEntry(s: BrowserState, g: TabGroup) {
-  return { id: g.id, name: groupLabel(s, g), ...(g.parentId ? { parent: g.parentId } : {}), ...(isLockedFolder(s, g) ? { locked: true } : {}) };
+  return { id: g.id, name: groupLabel(s, g), ...(g.parentId ? { parent: g.parentId } : {}), ...(isPinnedFolder(s, g) ? { pinned: true } : {}) };
 }
 
 function tileFolders(s: BrowserState, ids: string[]) {
@@ -111,13 +150,14 @@ export function listTabs(s: BrowserState, profileId: string) {
     .filter((g) => g.windowId === w.id && g.profileId === profileId)
     .sort((a, z) => at(a) - at(z));
   const favorites = ids.filter((id) => isFavorite(s.tabs[id]!));
-  const pinned = ids.filter((id) => !isFavorite(s.tabs[id]!) && isLockedTab(s, id));
-  const unpinned = ids.filter((id) => !isLockedTab(s, id));
+  const pinned = ids.filter((id) => isPinnedTab(s, id) || isLiveTab(s.tabs[id]!));
+  const pinnedSet = new Set(pinned);
+  const unpinned = ids.filter((id) => !isFavorite(s.tabs[id]!) && !pinnedSet.has(id));
   return {
     space: { id: profileId, name: s.profiles[profileId]?.name ?? profileId },
     favorites: { tabs: favorites.map((id) => tabEntry(s, id, active)), folders: tileFolders(s, favorites) },
-    pinned: { tabs: pinned.map((id) => tabEntry(s, id, active)), folders: groups.filter((g) => isLockedFolder(s, g)).map((g) => folderEntry(s, g)) },
-    unpinned: { tabs: unpinned.map((id) => tabEntry(s, id, active)), folders: groups.filter((g) => !isLockedFolder(s, g)).map((g) => folderEntry(s, g)) },
+    pinned: { tabs: pinned.map((id) => tabEntry(s, id, active)), folders: groups.filter((g) => isPinnedFolder(s, g)).map((g) => folderEntry(s, g)) },
+    unpinned: { tabs: unpinned.map((id) => tabEntry(s, id, active)), folders: groups.filter((g) => !isPinnedFolder(s, g)).map((g) => folderEntry(s, g)) },
   };
 }
 

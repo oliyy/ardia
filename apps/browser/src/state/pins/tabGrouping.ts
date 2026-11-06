@@ -118,7 +118,7 @@ export function groupPinPlaces(s: Pick<BrowserState, "pinPlace" | "tabs">, g: Ta
   return promoteChildren(places, g.profileId, node);
 }
 
-export function withRowsGrouped(s: BrowserState, asked: string[], o: { name?: string; pinned?: boolean }): [BrowserState, string] {
+export function withRowsGrouped(s: BrowserState, asked: string[], o: { name?: string; pinned?: boolean; parentId?: string | null }): [BrowserState, string] {
   const ids = withSplitRows(s, asked);
   const rows = ids.filter((id) => isPinnedRow(s.tabs[id]));
   if (!rows.length) return withGroup(s, ids, o);

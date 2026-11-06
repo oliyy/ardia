@@ -6,7 +6,6 @@ import {
   incognitoProfileId,
   inPinnedContainer,
   isIncognitoProfile,
-  isPinnedRow,
   navigationTo,
   newId,
   pinKeyOf,
@@ -16,8 +15,7 @@ import {
   without,
 } from "../browser/model";
 import { restoringGroup } from "../pins/closedTabs";
-import { markPinned } from "../pins/pinChoices";
-import { adoptionRequired, hasLoadedPage, hasPage, IDLE, isAsleep, loadedPage, withWake } from "../tabs/pageSession";
+import { adoptionRequired, hasLoadedPage, hasPage, IDLE, isAsleep, loadedPage } from "../tabs/pageSession";
 import { adoptParkedPins, parkWindowPins } from "../pins/parkedPins";
 import { settleMovedPins } from "../pins/pinMirror";
 import { returnSharedPages } from "../pins/pinShare";
@@ -34,8 +32,7 @@ import { orderSections } from "../groups/groups";
 import { focusedWindowOf } from "./ui";
 import { archivedEntries } from "../pins/archive";
 import { notePlainSpaceSwitch } from "./spaceSwitch";
-import { dropNodes, FAVORITES, placeNodes, tabNode } from "../pins/pinTree";
-import { withFolderMovedToProfile } from "../pins/folderMoves";
+import { groupIntoProfile, intoProfile } from "./profileMoves";
 
 export type CreateWindowOptions = {
   profileId?: string;
@@ -128,34 +125,6 @@ export function moveTabsInto(s: BrowserState, ids: string[], targetId: string): 
     if (recent) next = apply(next, activated(next, src.activeTabIds[recent.profileId] ?? recent.id));
   }
   return next;
-}
-
-export function intoProfile(s: BrowserState, tabId: string, profileId: string): BrowserState {
-  const tab = s.tabs[tabId];
-  const w = tab && s.windows[tab.windowId];
-  if (!tab || !w || w.kind === "private" || !s.profiles[profileId] || tab.profileId === profileId || adoptionRequired(tab)) return s;
-  const next = removeTabs(s, [tabId], false);
-  const base = next.windows[w.id] ?? { ...w, tabIds: [], activeTabIds: {} };
-  const loaded = hasLoadedPage(tab);
-  const moved: Tab = { ...tab, profileId, page: loaded ? loadedPage(navigationTo(tab.url)) : hasPage(tab) ? IDLE : withWake(tab.page, undefined), lastActiveAt: Date.now() };
-  const pinChoices = tab.pin ? markPinned(next.pinChoices, profileId, { tabs: [pinKeyOf(moved)], placed: [pinKeyOf(moved)] }) : next.pinChoices;
-  const movedNode = tabNode(pinKeyOf(moved));
-  const held = Object.values(next.tabs).some((t) => t.id !== tabId && t.profileId === tab.profileId && !t.liveItem && pinKeyOf(t) === pinKeyOf(tab));
-  let pinPlace = held ? next.pinPlace : dropNodes(next.pinPlace, tab.profileId, [movedNode]);
-  if (tab.pin) pinPlace = placeNodes(pinPlace, profileId, [movedNode], isPinnedRow(tab) ? null : FAVORITES, null);
-  const tabs = { ...next.tabs, [tabId]: moved };
-  const index = Math.min(w.tabIds.indexOf(tabId), base.tabIds.length);
-  const tabIds = [...base.tabIds];
-  tabIds.splice(index, 0, tabId);
-  return {
-    ...next,
-    tabs,
-    pinChoices,
-    pinPlace,
-    live: { ...next.live, [tabId]: IDLE_LIVE },
-    windows: { ...next.windows, [w.id]: { ...base, tabIds: orderSections(tabIds, tabs, next.groups) } },
-    windowOrder: next.windowOrder.includes(w.id) ? next.windowOrder : s.windowOrder,
-  };
 }
 
 export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice> = (set, get) => ({
@@ -310,12 +279,8 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
   moveGroupToProfile(groupId, profileId) {
     const s = get();
     const g = s.groups[groupId];
-    if (!g || g.profileId === profileId || !s.profiles[profileId] || isIncognitoProfile(g.profileId)) return;
-    const tree = groupTree(s.groups, groupId);
-    const kept = splitsWithin(s, g.tabIds);
-    let next = g.tabIds.reduce((acc, id) => intoProfile(acc, id, profileId), s);
-    const ids = new Map(tree.map((x) => [x.id, newId("g")]));
-    next = withFolderMovedToProfile(s, withSplitsBack(regrouped(next, tree, g.windowId, profileId, true, ids), kept, g.windowId), g, profileId, ids);
+    const [next] = groupIntoProfile(s, groupId, profileId);
+    if (!g || next === s) return;
     const last = findLast(g.tabIds, (id) => next.tabs[id]?.profileId === profileId);
     set(last ? apply(next, activated(next, last)) : next);
   },
