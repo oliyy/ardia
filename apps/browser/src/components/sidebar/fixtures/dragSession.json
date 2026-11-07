@@ -1471,6 +1471,14 @@
         "parent": null,
         "pinned": true,
         "collapsed": false
+       },
+       "G(H)": {
+        "tabIds": [
+         "h1"
+        ],
+        "parent": "G(G)",
+        "pinned": true,
+        "collapsed": false
        }
       },
       "pinnedArea": [
@@ -1491,6 +1499,7 @@
       ],
       "orderChoices": [
        "group:G(G)",
+       "group:G(H)",
        "place:g1",
        "place:h1",
        "place:g2",
