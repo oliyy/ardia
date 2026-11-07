@@ -17,7 +17,7 @@ backed out without another build. `apps/browser/src/platform/killSwitches.ts` is
 ## The file
 
 ```json
-{ "version": 1, "switches": { "newTabPrewarm": false } }
+{ "version": 1, "switches": { "updatePrewarm": false } }
 ```
 
 Only names the app knows and booleans count; anything else is ignored. Leaving a switch out means on (the cache follows
@@ -35,7 +35,7 @@ another. Disclosed in Settings › What's Sent (“Even with sharing off”) and
 
 ## For a bench or a test instance
 
-`ARDIA_SWITCHES="newTabPrewarm=off,lazySidebarRows=off"` sets a launch's values over everything else, in every build.
+`ARDIA_SWITCHES="updatePrewarm=off,lazySidebarRows=off"` sets a launch's values over everything else, in every build.
 `ArdiaLaunchConfig` parses it once; native code asks it (`switchOn:`, `experimentOn:`), JS through
 `platform/launchConfig.ts`, and the engine gets it as `--ardia-switches` (the GPU process too). A test instance has no
 updater, so it never fetches.
@@ -44,7 +44,6 @@ updater, so it never fetches.
 
 | Switch | Off means | Live |
 |---|---|---|
-| `newTabPrewarm` | a New Tab page's tab is made by Enter, as before the prewarm | yes |
 | `lazySidebarRows` | a launch mounts 64 rows per page and every profile page at once | no |
 | `updatePrewarm` | a staged update installs without the hidden first run, at quit or at once from Install and Relaunch (read natively: `UpdatePrewarm.swift`) | yes |
 | `launchTab` | session.json keeps no launch hint and a launch claims nothing: the restored page loads once its window's content mounts, and the early window stays off | no |
