@@ -63,7 +63,7 @@ const memo = new Map<string, { inputs: unknown[]; result: SidebarEntries }>();
 
 export function sidebarEntries(s: BrowserState, windowId: string, profileId?: string): SidebarEntries {
   const w = s.windows[windowId];
-  const inputs = [tabsShape(s.tabs), w?.tabIds, profileId ? null : w?.profileId, groupsShape(s.groups), s.splits, s.settings.newTabOpens, s.pinPlace, s.parkedPins];
+  const inputs = [tabsShape(s.tabs), w?.tabIds, profileId ? null : w?.profileId, groupsShape(s.groups), s.splits, s.pinPlace, s.parkedPins];
   const key = profileId ? `${windowId}|${profileId}` : windowId;
   const cached = memo.get(key);
   if (cached && cached.inputs.every((v, i) => v === inputs[i])) return cached.result;

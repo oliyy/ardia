@@ -3,7 +3,7 @@ import type { ComponentProps, RefObject } from "react";
 import { TextInput } from "react-native";
 import { useTheme } from "../ui";
 import { PASTED_TYPES } from "./omniboxKeys";
-import { BAR, BAR_TYPE } from "./tokens";
+import { BAR, BAR_TYPE, NEW_TAB_BAR_COLORS, NEW_TAB_BAR_TYPE } from "./tokens";
 
 type InputProps = ComponentProps<typeof TextInput>;
 
@@ -20,13 +20,14 @@ export function BarField({
   inputRef: RefObject<TextInput | null>;
   focusEcho: RefObject<boolean>;
   onSelection(next: { start: number; end: number }): void;
-  variant: "panel" | "hero" | "sidebar";
+  variant: "panel" | "sidebar" | "newTab";
   floating: boolean;
   scope: SearchScope | null;
   incognito: boolean;
 } & Pick<InputProps, "value" | "onLayout" | "onChangeText" | "onSubmitEditing" | "onFocus" | "onBlur" | "keyDownEvents" | "onKeyDown">) {
   const theme = useTheme();
-  const type = variant === "hero" ? BAR_TYPE.heroField : variant === "sidebar" || floating ? BAR_TYPE.floatingField : BAR_TYPE.panelField;
+  const newTabBar = variant === "newTab";
+  const type = newTabBar ? NEW_TAB_BAR_TYPE.field : variant === "sidebar" || floating ? BAR_TYPE.floatingField : BAR_TYPE.panelField;
   return (
     <TextInput
       ref={inputRef}
@@ -44,8 +45,8 @@ export function BarField({
         }
         onSelection(next);
       }}
-      placeholder={scope ? `Search ${scope.name}` : incognito ? "Search privately or enter address" : "Search or enter address"}
-      placeholderTextColor={theme.placeholder}
+      placeholder={scope ? `Search ${scope.name}` : newTabBar ? "Search or Enter URL..." : incognito ? "Search privately or enter address" : "Search or enter address"}
+      placeholderTextColor={newTabBar ? NEW_TAB_BAR_COLORS[theme.dark ? "dark" : "light"].placeholder : theme.placeholder}
       pastedTypes={PASTED_TYPES}
       selectionColor={theme.selection}
       enableFocusRing={false}

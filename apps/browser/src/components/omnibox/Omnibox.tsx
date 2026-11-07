@@ -9,13 +9,12 @@ import { journeyBarCommitted, journeyBarFocused, journeyKeystroke, journeyNaviga
 import { sampleOmniboxLatency, trackSuggestionChosen } from "../../state/telemetry/track";
 import { useSettings, useTab, useWindow, useWindowId, useWindowProfileId } from "../../state/browser/hooks";
 import { removeHistory } from "../../state/history/actions";
-import { useWindowUiOf } from "../../state/windows/hooks";
 import { defaultSearchEngine } from "../../state/settings/settings";
 import { runBarAction, runBarExtension } from "../../state/omnibox/runBar";
 import { createBangSubmitter, mayBeBang } from "../../state/omnibox/bangs";
 import { traceOmnibox, useOmniboxDriver } from "./devDriver";
-import { claimFocusTag, commandBarFocus, heroBarFocus } from "../../state/focus/focusClaims";
-import { registerHeroBar, saveNtpQuery, type BarDismissal, type BarSnapshot } from "../../state/omnibox/barState";
+import { claimFocusTag, commandBarFocus } from "../../state/focus/focusClaims";
+import type { BarDismissal } from "../../state/omnibox/barState";
 import { openFromBar, otherOpenTabs, switchFromBar, type Disposition } from "../../state/omnibox/openFromBar";
 import { openFromNewTabBar } from "../../state/omnibox/newTabBar";
 import { routeTyped } from "../../state/omnibox/typedRoutes";
@@ -26,18 +25,20 @@ import { SuggestionIcon, SuggestionList, isRemovable, type RowActions } from "./
 import { keywordScope } from "../../state/omnibox/scopes";
 import { setPopover } from "../../state/tabs/pageState";
 import { AddChip } from "./AddChip";
-import { INCOGNITO_ICON } from "../ntp/IncognitoHeading";
+import { INCOGNITO_ICON } from "../ui/tokens";
 import { BarField } from "./BarField";
 import { destinationLabel } from "./GoButton";
 import { BottomRow, DropdownFrame, PanelFrame } from "./OmniboxFrame";
 import { barKeyDown, barKeyDownEvents, type BarKeyEvent } from "./omniboxKeys";
 import { ADD_CHIP, BAR } from "./tokens";
+import { NewTabBarFrame } from "./NewTabBarFrame";
+import { NewTabBarList } from "./NewTabBarRows";
 import { useBarItems } from "./useBarItems";
 import { useBarText } from "./useBarText";
 
 export { PANEL_TEXT_LEFT } from "./tokens";
 
-type Variant = "panel" | "hero" | "sidebar";
+type Variant = "panel" | "sidebar" | "newTab";
 
 export function Omnibox({
   variant,
@@ -64,11 +65,11 @@ export function Omnibox({
   const profileId = useWindowProfileId();
   const engine = useSettings((st) => defaultSearchEngine(st));
   const currentUrl = useTab(tabId, (t) => (opensTab ? "" : (t?.url ?? "")));
-  const hero = variant === "hero";
   const dropdown = variant === "sidebar";
+  const newTabBar = variant === "newTab";
 
-  const noneSelected = opensTab ? -1 : 0;
-  const bar = useBarText(hero, tabId, initialText, noneSelected);
+  const noneSelected = 0;
+  const bar = useBarText(initialText, noneSelected);
   const { typed, edited, suppressCompletion, selected, scope, scopeFrom, pendingSelection, dispatch, selection } = bar;
   const input = useRef<TextInput>(null);
   const [bangEnter] = useState(createBangSubmitter);
@@ -91,38 +92,20 @@ export function Omnibox({
     currentUrl,
   });
 
-  const snapshot = useRef<BarSnapshot | null>(null);
-  snapshot.current = { typed, edited, selection: selection.current, selected, scope, scopeFrom };
   const fieldText = useRef(value);
   fieldText.current = value;
   const editing = useRef(false);
   const focusEcho = useRef(false);
-  const panelOpen = useWindowUiOf(windowId, (ui) => hero && !!ui?.panel.open);
-  const [listAway, setListAway] = useState(false);
-  if (panelOpen && !listAway) setListAway(true);
   const focusField = () => {
     if (!editing.current && fieldText.current) focusEcho.current = true;
     input.current?.focus();
   };
-  useEffect(() => {
-    if (!hero) return;
-    const focus = () => {
-      focusField();
-      dispatch({ kind: "select", selection: { start: 0, end: fieldText.current.length } });
-    };
-    const unregister = registerHeroBar(windowId, tabId, focus);
-    return () => {
-      unregister();
-      saveNtpQuery(tabId, snapshot.current && { ...snapshot.current, selection: selection.current });
-    };
-  }, [hero, windowId, tabId]);
-
   useLayoutEffect(() => {
     if (!pendingSelection) return;
     input.current?.setSelection(pendingSelection.start, pendingSelection.end);
     selection.note(pendingSelection);
     dispatch({ kind: "selectionApplied" });
-    if (editing.current) claimFocusTag(windowId, hero ? heroBarFocus(tabId) : commandBarFocus, () => findNodeHandle(input.current));
+    if (editing.current) claimFocusTag(windowId, commandBarFocus, () => findNodeHandle(input.current));
   }, [pendingSelection]);
 
   const reset = () => {
@@ -133,7 +116,7 @@ export function Omnibox({
 
   const dismiss = () => {
     bangEnter.cancel();
-    return hero ? reset() : onDone?.();
+    return onDone?.();
   };
 
   const go = (url: string, disposition: Disposition = "current") => {
@@ -177,7 +160,6 @@ export function Omnibox({
       case "page":
         if (s.tabId && disposition === "current") {
           switchFromBar(s.tabId, s.url, tabId, disposition);
-          if (hero && disposition === "current") reset();
           return;
         }
         return go(s.url, disposition);
@@ -205,7 +187,7 @@ export function Omnibox({
   };
 
   const onKeyDown = (e: BarKeyEvent) =>
-    barKeyDown(e, { bar, hero, shownCompletion, items, selectedIndex, current, tabScope, onDone, reset, forceSearch, go, choose, cancelBang: () => bangEnter.cancel(), removeRow: (url) => rowActions.remove(url) });
+    barKeyDown(e, { bar, shownCompletion, items, selectedIndex, current, tabScope, onDone, forceSearch, go, choose, cancelBang: () => bangEnter.cancel(), removeRow: (url) => rowActions.remove(url) });
 
   const onContextMenu = async () => {
     const pick = await showFieldMenu(value, selection);
@@ -244,7 +226,7 @@ export function Omnibox({
     const bySpace = scope ? null : keywordBySpace(typed, next);
     const keyword = bySpace ? keywordScope(bySpace.keyword, windowId) : null;
     if (bySpace && keyword) return dispatch({ kind: "enteredScope", scope: keyword, from: bySpace.from });
-    dispatch({ kind: "typed", text: change.typed, suppress: change.suppress, selected: opensTab && !change.typed.trim() ? -1 : 0 });
+    dispatch({ kind: "typed", text: change.typed, suppress: change.suppress, selected: 0 });
   };
 
   useOmniboxDriver(`${windowId}:${variant}`, {
@@ -260,11 +242,11 @@ export function Omnibox({
     state: () => ({ typed, value, selection: selection.current, completion: shownCompletion, suggested: completion, preventInline: suppressCompletion, selectionBefore: selection.before, selected: selectedIndex, scope, scopeFrom, tabScope, items }),
   });
 
-  const leadingIcon =
-    current && (typed || scope) && current.kind !== "search" ? (
-      <SuggestionIcon suggestion={current} color={theme.textPrimary} />
+  const leading = current && (typed || scope) && current.kind !== "search" ? current : null;
+  const leadingIcon = leading ? (
+      <SuggestionIcon suggestion={leading} color={theme.textPrimary} />
     ) : (
-      <Symbol name={incognito ? INCOGNITO_ICON : "magnifyingglass"} size={BAR.leadingIcon} weight="medium" color={hero ? theme.textSecondary : theme.textPrimary} style={{ width: BAR.iconSlot, height: BAR.iconSlot }} />
+      <Symbol name={incognito ? INCOGNITO_ICON : "magnifyingglass"} size={BAR.leadingIcon} weight="medium" color={theme.textPrimary} style={{ width: BAR.iconSlot, height: BAR.iconSlot }} />
     );
 
   const focused = useRef(false);
@@ -274,7 +256,7 @@ export function Omnibox({
     focusField();
     const { start, end } = selection.current;
     input.current?.setSelection(start, end);
-    claimFocusTag(windowId, hero ? heroBarFocus(tabId) : commandBarFocus, () => findNodeHandle(input.current));
+    claimFocusTag(windowId, commandBarFocus, () => findNodeHandle(input.current));
     journeyBarFocused(tabId);
   };
 
@@ -296,7 +278,6 @@ export function Omnibox({
       onSubmitEditing={() => choose(current, "current", true)}
       onFocus={() => {
         editing.current = true;
-        setListAway(false);
       }}
       onBlur={() => {
         editing.current = false;
@@ -338,6 +319,18 @@ export function Omnibox({
   );
 
   const onBarContextMenu = () => void onContextMenu();
+  if (newTabBar)
+    return (
+      <NewTabBarFrame
+        rootRef={root}
+        onContextMenu={onBarContextMenu}
+        leading={leading}
+        incognito={incognito}
+        scope={scope}
+        field={field}
+        list={items.length ? <NewTabBarList items={items} selectedIndex={selectedIndex} trailing={tabScope ? `Search ${tabScope.name}  ⇥` : null} actions={rowActions} /> : null}
+      />
+    );
   if (dropdown)
     return (
       <DropdownFrame
@@ -357,16 +350,14 @@ export function Omnibox({
       leadingIcon={leadingIcon}
       scope={scope}
       field={field}
-      list={listAway ? null : suggestionList}
-      hero={hero}
+      list={suggestionList}
       rowHeight={fieldRowHeight}
       bottom={
         <BottomRow
-          hero={hero}
           addChip={<AddChip onPress={barActions.openTabOrFile} />}
           onDictate={barActions.dictate}
           label={destinationLabel(current)}
-          enabled={!hero || !!typed.trim()}
+          enabled
           onGo={barActions.choose}
         />
       }

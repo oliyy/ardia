@@ -271,6 +271,8 @@ export const PROFILE_COLORS: Record<ProfileColor, ProfileColorSpec> = {
 
 export const INCOGNITO_TINT = "#3A3A3C";
 
+export const INCOGNITO_ICON = "eyeglasses";
+
 export const space = {
   none: 0,
   xxs: 2,

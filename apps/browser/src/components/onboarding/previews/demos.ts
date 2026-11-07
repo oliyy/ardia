@@ -1,7 +1,7 @@
 import type { PreviewId } from "../../../state/onboarding/previewIds";
 import type { Scene } from "./scene";
 import { block } from "./scenes/BlockingScenes";
-import { CmdlCentred, CmdlField, NewTabOpensBar, NewTabOpensPage, newTabAt, typed } from "./scenes/CommandBarScenes";
+import { CmdlCentred, CmdlField, newTabAt, typed } from "./scenes/CommandBarScenes";
 import { quit, tidy, windows } from "./scenes/LifecycleScenes";
 import { links } from "./scenes/LinkScenes";
 import { appearance, siteColor } from "./scenes/LookScenes";
@@ -16,8 +16,6 @@ export const DEMOS: Record<PreviewId, { duration: number; Scene: Scene }> = {
   "address-sidebar": { duration: sceneMs.address, Scene: addressMove(true) },
   "cmdl-field": { duration: sceneMs.commandBar, Scene: CmdlField },
   "cmdl-centred": { duration: sceneMs.commandBar, Scene: CmdlCentred },
-  "newtab-page": { duration: sceneMs.newTab, Scene: NewTabOpensPage },
-  "newtab-commandbar": { duration: sceneMs.newTab, Scene: NewTabOpensBar },
   "newtabpos-bottom": { duration: sceneMs.newTabPosition, Scene: newTabAt("bottom") },
   "newtabpos-top": { duration: sceneMs.newTabPosition, Scene: newTabAt("top") },
   "newtabpos-next": { duration: sceneMs.newTabPosition, Scene: newTabAt("next") },

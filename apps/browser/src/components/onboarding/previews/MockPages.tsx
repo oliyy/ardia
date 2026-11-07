@@ -4,6 +4,7 @@ import { NOTES, TABS, type Article } from "./content";
 import { fill, hairline, type Geo } from "./geometry";
 import { Favicon, Glyph, Label } from "./Kit";
 import { pick, type Look } from "./look";
+import { ink } from "../../ui/tokens";
 
 export function Hero({ g, look, a, height }: { g: Geo; look: Look; a: Article; height: number }) {
   const h = a.hero;
@@ -51,24 +52,28 @@ export function Page({ g, look, a = NOTES, top = 0, children }: { g: Geo; look: 
   );
 }
 
-export function NewTabPage({ g, look, top = 0, width }: { g: Geo; look: Look; top?: number; width: number }) {
-  const barW = Math.min(520, width - 60);
+export function FreshWindowBar({ g, look, width }: { g: Geo; look: Look; width: number }) {
+  const barW = Math.min(420, width - 60);
   return (
-    <View style={[fill, { top: top * g.s, alignItems: "center", backgroundColor: look.card }]} pointerEvents="none">
-      <View style={{ marginTop: 120 * g.s, width: barW * g.s, height: 43 * g.s, borderRadius: 14 * g.s, backgroundColor: look.t.ntpBarSolid, borderWidth: hairline, borderColor: look.t.ntpBarBorder, flexDirection: "row", alignItems: "center", paddingHorizontal: 14 * g.s, gap: 9 * g.s }}>
-        <Glyph g={g} name="magnifyingglass" size={14} color={look.t.textSecondary} weight="medium" box={18} />
-        <Label g={g} size={15} color={look.t.placeholder}>
-          Search or enter address
-        </Label>
-      </View>
-      <View style={{ flexDirection: "row", gap: 16 * g.s, marginTop: 30 * g.s }}>
-        {TABS.slice(0, 6).map((t) => (
-          <View key={t.title} style={{ alignItems: "center", gap: 6 * g.s }}>
-            <View style={{ width: 46 * g.s, height: 46 * g.s, borderRadius: 12 * g.s, backgroundColor: look.t.pinnedResting, alignItems: "center", justifyContent: "center" }}>
-              <Favicon g={g} t={t} size={22} />
+    <View style={[fill, { alignItems: "center" }]} pointerEvents="none">
+      <View style={{ marginTop: 130 * g.s, width: barW * g.s, borderRadius: 10 * g.s, backgroundColor: look.t.ntpBarSolid, borderWidth: hairline, borderColor: look.t.ntpBarBorder }}>
+        <View style={{ height: 40 * g.s, flexDirection: "row", alignItems: "center", paddingHorizontal: 14 * g.s, gap: 9 * g.s }}>
+          <Glyph g={g} name="magnifyingglass" size={13} color={look.t.textPrimary} weight="semibold" box={18} />
+          <Label g={g} size={14} color={look.t.placeholder}>
+            Search or Enter URL...
+          </Label>
+        </View>
+        <View style={{ height: hairline, marginHorizontal: 8 * g.s, backgroundColor: look.t.ntpBarBorder }} />
+        <View style={{ padding: 6 * g.s, gap: 3 * g.s }}>
+          {TABS.slice(0, 3).map((t, i) => (
+            <View key={t.title} style={{ height: 26 * g.s, borderRadius: 5 * g.s, flexDirection: "row", alignItems: "center", paddingHorizontal: 8 * g.s, gap: 8 * g.s, backgroundColor: i === 0 ? look.t.accent : undefined }}>
+              <Favicon g={g} t={t} size={13} />
+              <Label g={g} size={11.5} color={i === 0 ? ink.white : look.t.textPrimary} weight="600">
+                {t.title}
+              </Label>
             </View>
-          </View>
-        ))}
+          ))}
+        </View>
       </View>
     </View>
   );

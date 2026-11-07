@@ -142,7 +142,7 @@ test("groups stay contiguous; splits need two panes", () => {
   const sp = S().createSplit([a, b]);
   S().closeTab(b);
   assert.equal(S().splits[sp], undefined);
-  S().closeTab(a);
+  S().closeWindow(w);
   assert.equal(S().closedWindows.at(-1).groups.length, 1);
 });
 

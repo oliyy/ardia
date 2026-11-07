@@ -1,25 +1,15 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { GlassBacking, solidFill } from "./GlassBacking";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, View } from "react-native";
 import { PROFILE_COLORS } from "../ui/theme";
-import { useTabLayout, useWindow } from "../../state/browser/hooks";
+import { useWindow } from "../../state/browser/hooks";
 import { choosePresetColor } from "../../state/profiles/themeActions";
 import { themeAccent } from "../../lib/profileLook";
 import { CompactThemeEditor, CustomSwatch, useThemeDraft } from "../settings/ThemeEditor";
 import { settingsInk } from "../settings/tokens";
-import { toggleTabLayout } from "../../state/splits/actions";
 import type { ProfileColor, ProfileTheme } from "../../state/browser/types";
-import { Radio, useHover } from "../ui";
-import { useOnboardingColors } from "./Parts";
+import { useHover } from "../ui";
 import { curve } from "../ui/motion";
-import { font, weight } from "../ui/tokens";
-import { onboardingMotion, onboardingType } from "./tokens";
-
-export const PERSONALIZE_COPY = {
-  title: "Make it yours",
-  subtitle: "Pick the theme color and layout that feel right for you.",
-  layouts: "Choose how you would like to view your tabs:",
-} as const;
+import { onboardingMotion } from "./tokens";
 
 const COLORS = Object.keys(PROFILE_COLORS) as ProfileColor[];
 
@@ -110,70 +100,6 @@ function ColorButton({ name, ring, fill, size, selected, onPress }: { name: stri
             >
               {typeof fill === "string" ? null : fill}
             </Animated.View>
-          </View>
-        )}
-      </Pressable>
-    </View>
-  );
-}
-
-export function TabLayoutPicker({ windowId }: { windowId: string }) {
-  const layout = useTabLayout(windowId);
-  const pick = (next: "sidebar" | "top") => {
-    if (next !== layout) toggleTabLayout(windowId);
-  };
-  return (
-    <View style={{ flexDirection: "row", gap: 10 }} accessibilityRole="radiogroup" accessibilityLabel="Tab layout">
-      <LayoutButton kind="sidebar" title="Sidebar" subtitle="Tabs down the side" selected={layout === "sidebar"} onPress={() => pick("sidebar")} />
-      <LayoutButton kind="top" title="Classic" subtitle="Tabs along the top" selected={layout === "top"} onPress={() => pick("top")} />
-    </View>
-  );
-}
-
-function LayoutButton({ kind, title, subtitle, selected, onPress }: { kind: "sidebar" | "top"; title: string; subtitle: string; selected: boolean; onPress: () => void }) {
-  const colors = useOnboardingColors();
-  const { hovered, hoverProps } = useHover();
-  const bar = { backgroundColor: colors.progressTrack, borderRadius: 2 };
-  return (
-    <View {...hoverProps} style={{ flex: 1 }}>
-      <Pressable onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={title}>
-        {({ pressed }) => (
-          <View
-            mouseDownCanMoveWindow={false}
-            style={{
-              padding: 10,
-              gap: 10,
-              borderRadius: 12,
-              backgroundColor: solidFill(hovered || selected ? colors.button : colors.row),
-              borderWidth: selected ? 1.5 : StyleSheet.hairlineWidth * 2,
-              borderColor: selected ? colors.title : colors.rowBorder,
-              transform: [{ scale: pressed ? 0.98 : 1 }],
-            }}
-          >
-            <GlassBacking fill={colors.row} radius={12} border={selected ? 1.5 : StyleSheet.hairlineWidth * 2} raised={selected} highlight={hovered || selected ? colors.outlinedHover : null} />
-            <View style={{ height: 64, borderRadius: 7, padding: 5, gap: 4, backgroundColor: colors.preview, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.previewBorder, flexDirection: kind === "sidebar" ? "row" : "column" }}>
-              {kind === "sidebar" ? (
-                <View style={{ width: "26%", gap: 3, paddingTop: 7 }}>
-                  {[1, 0.8, 0.9].map((w, i) => (
-                    <View key={i} style={[bar, { height: 5, width: `${w * 100}%`, opacity: i === 0 ? 1 : 0.6 }]} />
-                  ))}
-                </View>
-              ) : (
-                <View style={{ flexDirection: "row", gap: 3, height: 7, paddingLeft: 12 }}>
-                  {[0, 1, 2].map((i) => (
-                    <View key={i} style={[bar, { width: "22%", height: 7, opacity: i === 0 ? 1 : 0.6 }]} />
-                  ))}
-                </View>
-              )}
-              <View style={{ flex: 1, borderRadius: 4, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.previewBorder }} />
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Radio on={selected} look="ring" />
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...onboardingType.bodyCompact, fontWeight: weight.medium, color: colors.title }}>{title}</Text>
-                <Text style={{ ...font.caption, color: colors.rowSubtitle }}>{subtitle}</Text>
-              </View>
-            </View>
           </View>
         )}
       </Pressable>

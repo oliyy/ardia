@@ -84,7 +84,7 @@ export const SuggestionList = memo(function SuggestionList({
   );
 });
 
-function sameSuggestion(a: Suggestion, b: Suggestion): boolean {
+export function sameSuggestion(a: Suggestion, b: Suggestion): boolean {
   if (a === b) return true;
   const ka = Object.keys(a) as (keyof Suggestion)[];
   return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);

@@ -11,7 +11,7 @@ import { usePinnedRoot } from "../../state/sidebar/pinnedTree";
 import { entryHeightNow, firstPaintEntriesNow, rootLift, rootTrail, usePendingEntriesHeight, type Section } from "../../state/sidebar/geometry";
 import { parseEntry } from "../../state/sidebar/entryKey";
 import { useAddressBarInSidebar } from "../../state/windows/layout";
-import { INCOGNITO_ICON } from "../ntp/IncognitoHeading";
+import { INCOGNITO_ICON } from "../ui/tokens";
 import { ClearDivider, dividerHeight } from "./ClearDivider";
 import { useDragController, useDragItem } from "./DragProvider";
 import { tailKey } from "./dragModel";

@@ -65,12 +65,6 @@ export const CURRENT: Suggestion[] = [
   { icon: "magnifyingglass", title: "coast trail walks" },
 ];
 
-export const FRESH: Suggestion[] = [
-  { fav: tab(1), title: "Inbox", hint: "Switch to Tab" },
-  { fav: tab(3), title: "Q4 roadmap", detail: "docs.new" },
-  { icon: "clock", title: "coast trail walks" },
-];
-
 export function SuggestionList({ g, look, t, rows, ms }: { g: Geo; look: Look; t: Tracker; rows: Suggestion[]; ms: number }) {
   return (
     <View style={{ paddingHorizontal: 9 * g.s, paddingTop: 4 * g.s }}>

@@ -3,7 +3,6 @@ import { create } from "zustand";
 import { openUrls } from "../browser/actions";
 import { useBrowser } from "../browser/store";
 import { activeTabId, resolveWindowId, tabLayoutOf } from "../browser/model";
-import { closeReleaseNotes } from "../releaseNotes/releaseNotes";
 import { splitOf } from "../splits/splits";
 import { useUrlAnchors } from "../windows/layout";
 
@@ -42,7 +41,7 @@ const TOUR_STOPS: TourStop[] = [
     body: "Type a question, an address or the name of an open tab. ⌘L brings the command bar up from any page, and ⌘T opens a new tab.",
     anchor: "commandBar",
     placement: "below",
-    radius: 20,
+    radius: 12,
     pad: 6,
   },
   {
@@ -93,7 +92,6 @@ export async function startToolTour(windowId?: string | null) {
   if (!id) return;
   const session = useTour.getState().session + 1;
   useTour.setState({ windowId: null, stops: [], index: 0, session });
-  closeReleaseNotes();
   const found = await Promise.all(TOUR_STOPS.map((stop) => (stop.anchor ? locateAnchor(id, stop.anchor) : Promise.resolve(true))));
   if (useTour.getState().session !== session) return;
   useTour.setState({ windowId: id, stops: TOUR_STOPS.filter((_, i) => !!found[i]) });

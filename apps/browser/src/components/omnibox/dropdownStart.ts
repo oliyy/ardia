@@ -31,15 +31,29 @@ export function useDropdownStart(enabled: boolean, tabId: string, profileId: str
 }
 
 const NO_TABS: Suggestion[] = [];
+const START_TABS = 4;
+const START_SITES = 1;
 
-export function useOpenTabsStart(enabled: boolean, windowId: string, profileId: string): Suggestion[] {
+export function useNewTabStart(enabled: boolean, windowId: string, profileId: string): Suggestion[] {
   const tabs = useTabs((all) => (enabled ? all : null));
   const peeks = usePeeks((all) => (enabled ? all : null));
+  const history = useProfileHistory(enabled ? profileId : null);
   const shared = useSettings((st) => !!st.shareTabsAcrossWindows);
   const active = useWindow(windowId, (w) => (enabled ? w?.activeTabIds[profileId] : undefined));
   return useMemo(() => {
     if (!tabs || !peeks) return NO_TABS;
-    const rows = openTabsByUse(tabs, peeks, { profileId, windowId, shared }).map(({ tab: t, lastActiveAt }) => ({ id: t.id, url: t.url, title: tabTitle(t), favicon: t.favicon, lastActiveAt }));
-    return recentTabSuggestions(rows, { exclude: active });
-  }, [tabs, peeks, active, profileId, shared, windowId]);
+    const open = openTabsByUse(tabs, peeks, { profileId, windowId, shared });
+    const rows = open.map(({ tab: t, lastActiveAt }) => ({ id: t.id, url: t.url, title: tabTitle(t), favicon: t.favicon, lastActiveAt }));
+    const switches = recentTabSuggestions(rows, { exclude: active, limit: START_TABS });
+    const seen = new Set(open.map(({ tab: t }) => withoutFragment(t.url)));
+    const sites: Suggestion[] = [];
+    for (const h of [...history].sort((a, b) => b.lastVisit - a.lastVisit)) {
+      if (sites.length === START_SITES) break;
+      const key = withoutFragment(h.url);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sites.push({ kind: "page", url: h.url, title: h.title, favicon: h.favicon, visited: true });
+    }
+    return [...switches, ...sites];
+  }, [tabs, peeks, history, active, profileId, shared, windowId]);
 }

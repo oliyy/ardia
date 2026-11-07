@@ -26,10 +26,9 @@ import { requestClearData } from "../profiles/clearDataRequest";
 import { openInternalPage } from "../pages/urls";
 import { isUtilityWindowId, openImport, openSettings, SETTINGS_WINDOW_ID } from "../settings/settingsWindows";
 import { focusSettingsSearch } from "../settings/searchState";
-import { closePanelToHeroBar, focusHeroBar } from "../omnibox/barState";
+import { closePanelToPage } from "../omnibox/barState";
 import { closeNewTabBar, isEmptyCardTab, showNewTabBar, toggleNewTabBar } from "../omnibox/newTabBar";
 import { NEW_TAB_BAR_POLICY } from "../omnibox/newTabBarPolicy";
-import { addressBarInSidebar, commandBarCentred } from "../windows/layout";
 import { addFolderToSidebar, restoreArcFolders } from "../bookmarks/bookmarkGroups";
 import { withLivePage } from "../tabs/livePage";
 import { webviews } from "../../platform/webviews";
@@ -155,16 +154,14 @@ export function runCommand({ command, arg, windowId: requested }: CommandEvent) 
     case "focusCommandBar":
       if (page) return s.openPanel(windowId, page.url);
       if (isEmptyCardTab(s, tab) && showNewTabBar(windowId)) return;
-      if (tab && addressBarInSidebar(s, windowId) && !commandBarCentred(s, windowId)) return s.openPanel(windowId, "");
-      if (!focusHeroBar(windowId, tabId)) return tab ? s.openPanel(windowId, "") : undefined;
-      return ui?.panel.open ? s.closePanel(windowId) : undefined;
+      return tab ? s.openPanel(windowId, "") : undefined;
     case "closeTab":
       if (ui?.panel.newTab) {
         closeNewTabBar(windowId);
         if (NEW_TAB_BAR_POLICY.closeTabKeyOnlyDismissesBar || !tabId) return;
         return void closeTab(tabId);
       }
-      if (ui?.panel.open) return tabId ? closePanelToHeroBar(windowId, tabId, "closeKey") : s.closePanel(windowId);
+      if (ui?.panel.open) return tabId ? closePanelToPage(windowId, tabId, "closeKey") : s.closePanel(windowId);
       return tabId ? void closeTab(tabId) : undefined;
     case "print":
       return void web?.print();

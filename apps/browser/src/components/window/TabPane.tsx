@@ -1,9 +1,7 @@
 import { memo, useEffect, useLayoutEffect } from "react";
-import { Animated, View } from "react-native";
-import { usePrewarm } from "../../state/tabs/prewarm";
+import { Animated, StyleSheet, View } from "react-native";
 import { activate } from "../../state/tabs/actions";
 import { shallowEqual, useBrowserWhile, useStoreWhile, useTabValue } from "../../state/tabs/tabWatch";
-import { useSettings } from "../../state/browser/hooks";
 import { splitOf } from "../../state/splits/splits";
 import type { Tab } from "../../state/browser/types";
 import { BookmarksBar, bookmarksBarShown, type BookmarksBarMode } from "../bookmarks/BookmarksBar";
@@ -11,7 +9,6 @@ import { useBookmarksBarHeight } from "../bookmarks/barSize";
 import type { Rect, ToolbarGeometry } from "./geometry";
 import { patchPage, usePages } from "../../state/tabs/pageState";
 import { SplitEmptyState } from "../split/SplitEmptyState";
-import { NewTabPage } from "../ntp/NewTabPage";
 import { EmptyCard } from "./EmptyCard";
 import { InternalPage } from "../pages";
 import { ShareBar } from "../media/ShareBar";
@@ -26,7 +23,7 @@ import { paneBar, type CardChrome } from "./paneChrome";
 import { PageOverlays } from "./PageOverlays";
 import { useProfileTheme } from "./ThemeScope";
 import { useCardGeometry } from "../../state/windows/layout";
-import { pagerFor } from "../../state/windows/profilePager";
+import { windowColors } from "./tokens";
 import { CardLoadingLine } from "./CardLoadingLine";
 import type { ViewportLeading } from "./CardFrame";
 
@@ -86,16 +83,14 @@ export const TabPane = memo(function TabPane({
   const cardRadius = useCardGeometry().radius;
   const toolbarHeight = useToolbarRow().height;
   const isNewTab = !own.url;
-  const emptyCard = useSettings((st) => isNewTab && st.newTabOpens === "commandBar");
   const newTabShown = useStoreWhile(usePages, live, (s) => !!s.pages[tabId]?.newTabShown);
   const inSomeSplit = useBrowserWhile(!!warm, (s) => !!warm && !!splitOf(s, tabId));
   const inSplit = visible ? inActiveSplit : inSomeSplit;
+  const emptySurface = visible && isNewTab && !small && !inSplit;
   const frame = rect ?? warm ?? { x: 0, y: 0, width: fullWidth, height: fullHeight };
   useEffect(() => {
     if (visible && isNewTab && !mounted) patchPage(tabId, { wasNewTab: true });
   }, [visible, isNewTab, mounted]);
-  const pagerSettled = useStoreWhile(pagerFor(windowId).state, visible && isNewTab, (st) => !st.moving);
-  const prewarmed = usePrewarm(visible && isNewTab && !emptyCard && !mounted && !small && !inSplit, pagerSettled);
   const toolbar = chrome.kind !== "none";
   const bar = paneBar(chrome, { visible, fullscreen, lingering });
   const autoLayout = bar.kind === "autoHide";
@@ -125,7 +120,8 @@ export const TabPane = memo(function TabPane({
         borderRadius: fullscreen ? 0 : cardRadius,
         overflow: "hidden",
         opacity: covered ? 0 : 1,
-        backgroundColor: visible && !fullscreen && !seeThrough ? theme.card : undefined,
+        backgroundColor: visible && !fullscreen && !seeThrough ? (emptySurface ? windowColors(theme.dark).emptySurface : theme.card) : undefined,
+        ...(emptySurface && !fullscreen ? { borderWidth: StyleSheet.hairlineWidth, borderColor: windowColors(theme.dark).emptySurfaceEdge } : null),
       }}
     >
       {bar.kind === "toolbar" && <Toolbar tabId={tabId} geometry={geometry} windowId={windowId} inSplit={inSplit} focused={focused || !inSplit} />}
@@ -137,8 +133,8 @@ export const TabPane = memo(function TabPane({
         <View style={autoLayout ? { height: motion.pageHeight } : { flex: 1 }}>
           {visible && !fullscreen && <ShareBar tabId={tabId} />}
           <View style={{ flex: 1 }}>
-            {(mounted || prewarmed) && <TabWebView tabId={tabId} visible={visible && !newTabShown && !isNewTab} warm={!!warm && !newTabShown && !isNewTab} leading={leading} retiring={retiring} />}
-            {visible && isNewTab && !small && (inSplit ? <SplitEmptyState tabId={tabId} focused={focused} /> : emptyCard ? <EmptyCard windowId={windowId} tabId={tabId} /> : <NewTabPage key={tabId} tabId={tabId} toolbar={toolbar} />)}
+            {mounted && <TabWebView tabId={tabId} visible={visible && !newTabShown && !isNewTab} warm={!!warm && !newTabShown && !isNewTab} leading={leading} retiring={retiring} />}
+            {visible && isNewTab && !small && (inSplit ? <SplitEmptyState tabId={tabId} focused={focused} /> : <EmptyCard windowId={windowId} tabId={tabId} />)}
             {visible && <InternalPage tabId={tabId} />}
             {visible && focused && !fullscreen && !small && <CardLoadingLine tabId={tabId} />}
             {visible && (

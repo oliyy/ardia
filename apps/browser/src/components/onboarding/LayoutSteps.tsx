@@ -139,10 +139,6 @@ export function LayoutStep() {
 
 const TABS_MORE = questionKeys("tabsMore");
 
-const NEW_TAB_CHOICES: ChoiceOption<Settings["newTabOpens"]>[] = [
-  { value: "page", preview: "newtab-page", title: "The New Tab page", subtitle: "Your apps and a search box, as in Dia" },
-  { value: "commandBar", preview: "newtab-commandbar", title: "The command bar", subtitle: "Start typing right away, as in Arc" },
-];
 const TIDY_CHOICES: ChoiceOption<"keep" | "tidy">[] = [
   { value: "keep", preview: "tidy-keep", title: "Keep them", subtitle: "Tabs stay until you close them" },
   { value: "tidy", preview: "tidy-auto", title: "Tidy them up", subtitle: "Close the ones you haven't used in a while" },
@@ -251,39 +247,26 @@ export function TabsStep() {
         />
       </Page>
     );
-  if (id === "tabsMore")
-    return (
-      <Page
-        id={id}
-        title="A few more tab habits"
-        subtitle="Small things Arc and Dia do differently."
-        patch={Object.fromEntries(TABS_MORE.map((k) => [k, values[k]]))}
-        picked={[]}
-        preview={preview}
-      >
-        <View style={{ gap: 8 }}>
-          <CheckRow title="Top Apps grow with the sidebar" subtitle="Up to four across, as in Arc" value={values.balancedTopApps} onChange={(balancedTopApps) => change({ balancedTopApps })} />
-          <OptionRow title="Peek a link with" value={values.peekModifier} options={PEEK_WITH} onChange={(peekModifier) => change({ peekModifier })} />
-          <CheckRow title="⌘Z reopens closed tabs" subtitle="Outside text fields, as in Arc" value={values.undoReopensClosedTab} onChange={(undoReopensClosedTab) => change({ undoReopensClosedTab })} />
-          <CheckRow
-            title="⌘-click on a link makes a tab group"
-            subtitle="Keeps related tabs together"
-            value={values.cmdClickCreatesTabGroup}
-            onChange={(cmdClickCreatesTabGroup) => change({ cmdClickCreatesTabGroup })}
-          />
-        </View>
-      </Page>
-    );
   return (
     <Page
-      id="newTab"
-      title="What does ⌘T open?"
-      subtitle="What you see when you open a tab."
-      patch={{ newTabOpens: values.newTabOpens }}
-      picked={[values.newTabOpens === "commandBar" ? "⌘T opens the command bar" : "⌘T opens the New Tab page"]}
+      id="tabsMore"
+      title="A few more tab habits"
+      subtitle="Small things Arc and Dia do differently."
+      patch={Object.fromEntries(TABS_MORE.map((k) => [k, values[k]]))}
+      picked={[]}
       preview={preview}
     >
-      <ChoiceList options={NEW_TAB_CHOICES} value={values.newTabOpens} onChange={(newTabOpens) => change({ newTabOpens })} mock={focus} />
+      <View style={{ gap: 8 }}>
+        <CheckRow title="Top Apps grow with the sidebar" subtitle="Up to four across, as in Arc" value={values.balancedTopApps} onChange={(balancedTopApps) => change({ balancedTopApps })} />
+        <OptionRow title="Peek a link with" value={values.peekModifier} options={PEEK_WITH} onChange={(peekModifier) => change({ peekModifier })} />
+        <CheckRow title="⌘Z reopens closed tabs" subtitle="Outside text fields, as in Arc" value={values.undoReopensClosedTab} onChange={(undoReopensClosedTab) => change({ undoReopensClosedTab })} />
+        <CheckRow
+          title="⌘-click on a link makes a tab group"
+          subtitle="Keeps related tabs together"
+          value={values.cmdClickCreatesTabGroup}
+          onChange={(cmdClickCreatesTabGroup) => change({ cmdClickCreatesTabGroup })}
+        />
+      </View>
     </Page>
   );
 }

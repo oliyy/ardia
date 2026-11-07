@@ -6,9 +6,9 @@ const { closeNewTabBar, openFromNewTabBar, toggleNewTabBar } = await import("./n
 const { togglePinnedRows, forgetListSpots } = await import("../sidebar/movePinned.ts");
 
 const S = () => useBrowser.getState();
-const reset = (newTabOpens = "page") => {
+const reset = () => {
   S().hydrate({});
-  S().updateSettings({ newTabOpens, newTabPosition: "bottom", cmdClickCreatesTabGroup: false });
+  S().updateSettings({ newTabPosition: "bottom", cmdClickCreatesTabGroup: false });
   forgetListSpots();
 };
 const urlOf = (id) => S().tabs[id]?.url;
@@ -24,19 +24,8 @@ function windowWith(...hosts) {
   return { w, ids };
 }
 
-test("setting off: no bar, and the last tab still closes its window", () => {
+test("the bar adds nothing; closing it again leaves everything as it was", () => {
   reset();
-  const { w, ids: [a] } = windowWith("a", "b");
-  assert.equal(toggleNewTabBar(w), false);
-  assert.equal(toggleNewTabBar(w, { kind: "group", groupId: S().groupTabs([a], { pinned: false }) }), false);
-  assert.equal(panel(w).open, false);
-  const solo = S().createWindow({ url: "https://solo.com/" });
-  S().closeTab(S().windows[solo].tabIds[0]);
-  assert.equal(S().windows[solo], undefined, "the last tab closes its window");
-});
-
-test("setting on: the bar adds nothing; closing it again leaves everything as it was", () => {
-  reset("commandBar");
   const { w, ids: [a] } = windowWith("a", "b");
   const before = { tabs: [...S().windows[w].tabIds], active: model.activeTabId(S(), w), closed: S().closedTabs.length };
   assert.equal(toggleNewTabBar(w), true);
@@ -57,7 +46,7 @@ for (const [newTabPosition, expected] of [
   ["top", ["https://picked.com/", "https://b.com/", "https://c.com/"]],
 ]) {
   test(`a pick makes one selected unpinned tab where new tabs go (${newTabPosition}), outside the selected tab's group`, () => {
-    reset("commandBar");
+    reset();
     const { w, ids: [a, b] } = windowWith("a", "b", "c");
     S().updateSettings({ newTabPosition });
     S().pinTabs([a], true);
@@ -76,7 +65,7 @@ for (const [newTabPosition, expected] of [
 }
 
 test("⌥⌘T in a group: the pick goes into the group", () => {
-  reset("commandBar");
+  reset();
   const { w, ids: [a] } = windowWith("a", "b");
   const group = S().groupTabs([a], { pinned: false });
   S().activate(a);
@@ -89,7 +78,7 @@ test("⌥⌘T in a group: the pick goes into the group", () => {
 });
 
 test("closing the last tab leaves an empty window whose pick fills it; ⌘W there closes the window", () => {
-  reset("commandBar");
+  reset();
   const { w, ids: [a] } = windowWith("a");
   S().closeTab(a);
   assert.ok(S().windows[w], "the window stays");
@@ -189,7 +178,7 @@ test("Move out of Pinned from another window puts the first window's tab back wh
 });
 
 test("a blank pinned tab is never the empty card a pick fills", () => {
-  reset("commandBar");
+  reset();
   const { w, ids: [a] } = windowWith("a");
   const blank = S().newTab(w);
   S().pinTabs([blank], true);

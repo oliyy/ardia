@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 const { barReducer, initialBar, selectionTracker } = await import("./barText.ts");
 
-const fresh = (text = "", none = 0) => initialBar(null, text, none);
+const fresh = (text = "", none = 0) => initialBar(text, none);
 const run = (state, ...events) => events.reduce(barReducer, state);
 const google = { kind: "site", id: "google", name: "Google" };
 
@@ -60,13 +60,6 @@ test("Tab or Space after a site enters its search with an empty field, and Backs
   assert.equal(escaped.scope, null);
   assert.equal(escaped.typed, "cats");
   assert.equal(escaped.selected, 0);
-});
-
-test("the New Tab box comes back from a tab switch with its scope and the text it came from", () => {
-  const restored = initialBar({ typed: "", edited: true, selection: { start: 0, end: 0 }, selected: 0, scope: google, scopeFrom: "x.com " }, "", -1);
-  assert.equal(restored.scope, google);
-  assert.equal(restored.scopeFrom, "x.com ");
-  assert.deepEqual(restored.pendingSelection, { start: 0, end: 0 });
 });
 
 test("a calculator row copies its answer into the field, selected, without moving the row", () => {

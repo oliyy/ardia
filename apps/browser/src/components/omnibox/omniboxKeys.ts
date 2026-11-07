@@ -32,7 +32,6 @@ export type BarKeyEvent = { nativeEvent: { key: string; metaKey?: boolean; altKe
 
 export type BarKeyContext = {
   bar: ReturnType<typeof useBarText>;
-  hero: boolean;
   shownCompletion: string;
   items: Suggestion[];
   selectedIndex: number;
@@ -40,7 +39,6 @@ export type BarKeyContext = {
   tabScope: ReturnType<typeof offeredScope>;
   cancelBang(): void;
   onDone?(reason?: BarDismissal): void;
-  reset(): void;
   removeRow(url: string): void;
   forceSearch(): void;
   go(url: string, disposition?: Disposition): void;
@@ -59,9 +57,7 @@ export function barKeyDown(e: BarKeyEvent, k: BarKeyContext) {
   k.cancelBang();
   if (key === "Escape") {
     if (scope) return bar.dispatch({ kind: "leftScope", restore: null });
-    if (!k.hero) return k.onDone?.("escape");
-    if (k.shownCompletion) return bar.dispatch({ kind: "completionDropped" });
-    return k.reset();
+    return k.onDone?.("escape");
   }
   if (key === "ArrowDown" || (ctrlKey && key === "n")) return move(1);
   if (key === "ArrowUp" || (ctrlKey && key === "p")) return move(-1);

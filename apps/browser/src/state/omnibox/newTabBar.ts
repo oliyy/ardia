@@ -3,8 +3,9 @@ import { onWindowEvent } from "../../platform/windows";
 import { webviews } from "../../platform/webviews";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { activeTabId } from "../browser/model";
-import { isEmptyCardTab, NEW_TAB_BAR_POLICY, newTabOpensBar } from "./newTabBarPolicy";
+import { isEmptyCardTab, NEW_TAB_BAR_POLICY } from "./newTabBarPolicy";
 import { isSmall } from "../windows/small";
+import { focusedWindowOf } from "../windows/ui";
 import type { NewTabTarget } from "../browser/types";
 
 export { isEmptyCardTab };
@@ -19,7 +20,7 @@ function barTarget(s: BrowserState, windowId: string, target: NewTabTarget): New
 }
 
 function barOpensHere(s: BrowserState, windowId: string): boolean {
-  return newTabOpensBar(s) && !!s.windows[windowId] && !isSmall(s, windowId);
+  return !!s.windows[windowId] && !isSmall(s, windowId);
 }
 
 export function showNewTabBar(windowId: string, target: NewTabTarget = IN_LIST): boolean {
@@ -67,8 +68,8 @@ const shownOver = new Set<string>();
 export function showOnceOverEmptyCard(windowId: string, tabId: string) {
   if (!NEW_TAB_BAR_POLICY.showOnceOverNewEmptyWindow || shownOver.has(tabId)) return;
   shownOver.add(tabId);
-  if (launchTabs.has(tabId) && !NEW_TAB_BAR_POLICY.showOnLaunch) return;
   const s = store();
+  if (launchTabs.has(tabId) && (!NEW_TAB_BAR_POLICY.showOnLaunch || focusedWindowOf(s) !== windowId)) return;
   if (activeTabId(s, windowId) === tabId && !s.windowUi[windowId]?.panel.open) showNewTabBar(windowId);
 }
 

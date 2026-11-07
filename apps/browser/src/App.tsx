@@ -58,7 +58,7 @@ function BrowserWindow() {
   const topTabs = useTabLayout() === "top";
   const fullscreen = !!useFullscreenTab(windowId);
   const cardGeometry = useCardGeometry();
-  const [width, setWidth] = useState(0);
+  const [{ width, height }, setSize] = useState({ width: 0, height: 0 });
   const card = (
     <>
       <DockShift>{(link) => <ContentCard dock={link} />}</DockShift>
@@ -67,7 +67,7 @@ function BrowserWindow() {
   );
 
   return (
-    <View style={{ flex: 1, flexDirection: "row" }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+    <View style={{ flex: 1, flexDirection: "row" }} onLayout={(e) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
       <WindowBackdrop vibrancy {...theme.backdrop} colors={theme.windowTint} grainOpacity={theme.grain} style={StyleSheet.absoluteFill} />
       <WindowProfile />
       <ProfileTint />
@@ -87,7 +87,7 @@ function BrowserWindow() {
       >
         {card}
       </DockedLayout>
-      <CommandPanel windowWidth={width} />
+      <CommandPanel windowWidth={width} windowHeight={height} />
       <FolderMenus />
       <DownloadsPopover />
       <ExtensionOverlays />

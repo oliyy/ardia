@@ -1,9 +1,9 @@
 import { Animated, View } from "react-native";
 import { fill, type Rect, ROW, rowY, sideCard, TOOLBAR_H } from "../geometry";
-import { BLANK, tab, TRIP } from "../content";
+import { tab, TRIP } from "../content";
 import { linear, tracker } from "../timeline";
 import { Backdrop, Card, Glyph, Highlight, Label, NewTabButton, TabRow } from "../Kit";
-import { NewTabPage, Page } from "../MockPages";
+import { FreshWindowBar, Page } from "../MockPages";
 import { Cursor, Pill } from "../Floating";
 import { sceneMs } from "../tokens";
 import type { Scene } from "../scene";
@@ -61,10 +61,9 @@ export function quit(fresh: boolean): Scene {
         {fresh ? (
           <Animated.View style={[fill, back]}>
             <Chrome g={g} look={look} opts={quiet} />
-            <TabRow g={g} look={look} t={BLANK} y={rowY(0, listTop(opts))} selected />
-            <NewTabButton g={g} look={look} y={rowY(1, listTop(opts))} />
-            <Card g={g} look={look} rect={c}>
-              <NewTabPage g={g} look={look} width={c.w} />
+            <NewTabButton g={g} look={look} y={rowY(0, listTop(opts))} />
+            <Card g={g} look={look} rect={c} bg="transparent">
+              <FreshWindowBar g={g} look={look} width={c.w} />
             </Card>
           </Animated.View>
         ) : null}

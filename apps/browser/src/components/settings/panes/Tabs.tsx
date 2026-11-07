@@ -69,7 +69,6 @@ const DURATION_UNITS: Option<DurationUnit>[] = [
 ];
 
 export function TabsPane() {
-  const newTabOpens = useSettings((s) => s.newTabOpens);
   const newTabPosition = useSettings((s) => s.newTabPosition);
   const newTabButtonPosition = useSettings((s) => s.newTabButtonPosition);
   const cleanUpMinutes = useSettings((s) => s.cleanUpInactiveTabsAfterMinutes);
@@ -92,17 +91,6 @@ export function TabsPane() {
 
       <SectionHeader title="General" />
       <Group>
-        <Row anchor="tabs.newTabOpens">
-          <PopUp
-            value={newTabOpens}
-            options={[
-              { value: "page", title: "New Tab Page" },
-              { value: "commandBar", title: "Command Bar" },
-            ]}
-            onChange={(v) => updateSettings({ newTabOpens: v })}
-            minWidth={160}
-          />
-        </Row>
         <Row anchor="tabs.newTabPosition">
           <PopUp value={newTabPosition} options={top ? NEW_TABS_ACROSS : NEW_TABS_DOWN} onChange={(v) => updateSettings({ newTabPosition: v })} minWidth={190} />
         </Row>

@@ -5,8 +5,6 @@ export type PreviewId =
   | "address-sidebar"
   | "cmdl-field"
   | "cmdl-centred"
-  | "newtab-page"
-  | "newtab-commandbar"
   | "newtabpos-bottom"
   | "newtabpos-top"
   | "newtabpos-next"
@@ -37,8 +35,6 @@ export const PREVIEW_IDS: readonly PreviewId[] = [
   "address-sidebar",
   "cmdl-field",
   "cmdl-centred",
-  "newtab-page",
-  "newtab-commandbar",
   "newtabpos-bottom",
   "newtabpos-top",
   "newtabpos-next",

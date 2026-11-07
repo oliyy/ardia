@@ -4,11 +4,10 @@ import { BLANK, type Suggestion, tab } from "../content";
 import type { Look } from "../look";
 import { linear, tracker, type Tracker } from "../timeline";
 import { Highlight, Label, NewTabButton, Rows, TabRow } from "../Kit";
-import { NewTabPage } from "../MockPages";
 import { InputRow, Panel, SuggestionRow } from "../Floating";
 import { sceneMs } from "../tokens";
 import type { Scene } from "../scene";
-import { centredFrame, CURRENT, Divider, drop, FRESH, grow, KeyPress, listTop, PANEL_H, SelectedUrl, Std, SuggestionList } from "./SceneParts";
+import { centredFrame, CURRENT, Divider, drop, grow, KeyPress, listTop, PANEL_H, SelectedUrl, Std, SuggestionList } from "./SceneParts";
 
 export const CmdlField: Scene = ({ g, look, p, opts }) => {
   const t = tracker(p, sceneMs.commandBar);
@@ -63,34 +62,6 @@ export const CmdlCentred: Scene = ({ g, look, p, opts }) => {
   );
 };
 
-export const NewTabOpensPage: Scene = ({ g, look, p, opts }) => {
-  const t = tracker(p, sceneMs.newTab);
-  const c = sideCard(g);
-  const top = listTop(opts);
-  const field = opts.addressInSidebar;
-  return (
-    <Std
-      g={g}
-      look={look}
-      opts={opts}
-      rows={
-        <>
-          <Highlight g={g} look={look} y={rowY(0, top)} style={{ opacity: t.out(360, 200) }} />
-          <Rows g={g} look={look} n={4} top={top} newTab={false} />
-          <TabRow g={g} look={look} t={BLANK} y={rowY(4, top)} selected style={{ opacity: t.in(300, 240), transform: [{ translateX: t([[300, -12 * g.s], [600, 0]]) }] }} />
-          <NewTabButton g={g} look={look} y={rowY(4, top)} style={{ transform: [{ translateY: t([[300, 0], [600, ROW.pitch * g.s]]) }] }} />
-          <KeyPress g={g} look={look} t={t} label="⌘T" />
-        </>
-      }
-      card={
-        <Animated.View style={[fill, { opacity: t.in(420, 300) }]}>
-          <NewTabPage g={g} look={look} width={c.w} top={field ? 0 : 0} />
-        </Animated.View>
-      }
-    />
-  );
-};
-
 function Typed({ g, look, t, text, at: ms, step, caretUntil }: { g: Geo; look: Look; t: Tracker; text: string; at: number; step: number; caretUntil: number }) {
   const caret = (from: number, to: number) => t([[from, 0], [from + 1, 1], [to, 1], [to + 1, 0]], linear);
   const bar = { position: "absolute" as const, width: 1.2 * g.s, height: 17 * g.s, borderRadius: 0.6 * g.s, backgroundColor: look.t.accent };
@@ -108,26 +79,6 @@ function Typed({ g, look, t, text, at: ms, step, caretUntil }: { g: Geo; look: L
     </>
   );
 }
-
-export const NewTabOpensBar: Scene = ({ g, look, p, opts }) => {
-  const t = tracker(p, sceneMs.newTab);
-  return (
-    <>
-      <Std g={g} look={look} opts={opts} />
-      <Panel g={g} look={look} rect={centredFrame(g)} style={drop(t, g, 240)}>
-        <InputRow g={g} look={look}>
-          <View style={{ width: 1.2 * g.s, height: 17 * g.s, borderRadius: 0.6 * g.s, backgroundColor: look.t.accent, marginRight: 2 * g.s }} />
-          <Label g={g} size={15} color={look.t.placeholder}>
-            Search or enter address
-          </Label>
-        </InputRow>
-        <Divider g={g} look={look} />
-        <SuggestionList g={g} look={look} t={t} rows={FRESH} ms={400} />
-      </Panel>
-      <KeyPress g={g} look={look} t={t} label="⌘T" />
-    </>
-  );
-};
 
 export function newTabAt(at: "top" | "bottom" | "next"): Scene {
   return ({ g, look, p, opts }) => {

@@ -26,7 +26,6 @@ export type QuestionId =
   | "tabs"
   | "address"
   | "cmdl"
-  | "newTab"
   | "newTabPosition"
   | "tidy"
   | "quit"
@@ -55,7 +54,6 @@ export const QUESTIONS: Record<Exclude<OnboardingStep, "intro">, Question[]> = {
     { id: "cmdl", keys: ["commandBarPlacement"] },
   ],
   tabs: [
-    { id: "newTab", keys: ["newTabOpens"] },
     { id: "newTabPosition", keys: ["newTabPosition", "newTabButtonPosition"] },
     { id: "tidy", keys: ["cleanUpInactiveTabsAfterMinutes"] },
     { id: "quit", keys: ["restoreSession"] },
@@ -300,7 +298,6 @@ type Saved = {
   preset?: Preset;
   picked?: Partial<Record<QuestionId, string[]>>;
   defaultBrowserTrialStartedAt?: number;
-  defaultBrowserCheckInDoneAt?: number;
   introMusicMuted?: boolean;
 };
 
@@ -326,8 +323,6 @@ export const recordDefaultBrowserTrial = () => save({ defaultBrowserTrialStarted
 
 export const defaultBrowserTrialStartedAt = () => readSaved()?.defaultBrowserTrialStartedAt ?? null;
 
-export const defaultBrowserCheckInDoneAt = () => readSaved()?.defaultBrowserCheckInDoneAt ?? null;
-export const recordDefaultBrowserCheckInDone = () => save({ defaultBrowserCheckInDoneAt: Date.now() });
 
 export const onboardingCompletedAt = () => readSaved()?.completedAt ?? null;
 

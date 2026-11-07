@@ -9,6 +9,7 @@ import { openNewTabInSplit } from "../../state/splits/actions";
 import { openOverflowMenu, openSidebarMenu } from "../../state/sidebar/menus";
 import { toggleNewTabBar } from "../../state/omnibox/newTabBar";
 import { useAddressBarInSidebar } from "../../state/windows/layout";
+import { useWindowUiOf } from "../../state/windows/hooks";
 import { modifiersOf } from "../../lib/keys";
 import { useClipped, useShift, type ClipSource } from "./EntryMotion";
 import { ARC_NEW_TAB, useSidebarTokens } from "./tokens";
@@ -26,6 +27,7 @@ export const NewTabRow = memo(function NewTabRow({ windowId, shift = null, clip 
   const addressBar = useAddressBarInSidebar();
   const restingChevron = !addressBar;
   const arcDark = addressBar && theme.dark;
+  const barOpen = useWindowUiOf(windowId, (ui) => !!ui?.panel.open && !!ui.panel.newTab);
   const { hovered, hoverProps } = useHover();
   const [moved, movedRef] = useShift(shift);
   const [movedButtons, movedButtonsRef] = useShift(shift);
@@ -71,13 +73,13 @@ export const NewTabRow = memo(function NewTabRow({ windowId, shift = null, clip 
                   alignItems: "center",
                   paddingLeft: layout.rowPadding,
                   paddingRight: 34,
-                  backgroundColor: pressed ? theme.tabPressed : hovered ? theme.tabHover : undefined,
+                  backgroundColor: barOpen ? tokens.selectedFill : pressed ? theme.tabPressed : hovered ? theme.tabHover : undefined,
                 },
                 moved.style as object,
               ]}
             >
-              <Symbol name="plus" size={addressBar ? ARC_NEW_TAB.size : 13} weight="medium" color={arcDark ? ARC_NEW_TAB.icon : tokens.newTabIcon} style={{ width: 16, height: 16 }} />
-              <FadeLabel text="New Tab" fontSize={layout.rowFontSize} color={arcDark ? ARC_NEW_TAB.label : tokens.newTabLabel} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
+              <Symbol name="plus" size={addressBar ? ARC_NEW_TAB.size : 13} weight="medium" color={barOpen ? theme.textPrimary : arcDark ? ARC_NEW_TAB.icon : tokens.newTabIcon} style={{ width: 16, height: 16 }} />
+              <FadeLabel text="New Tab" fontSize={layout.rowFontSize} color={barOpen ? theme.textPrimary : arcDark ? ARC_NEW_TAB.label : tokens.newTabLabel} style={{ flex: 1, height: 18, marginLeft: layout.rowLabelGap }} />
             </View>
           )}
         </Pressable>

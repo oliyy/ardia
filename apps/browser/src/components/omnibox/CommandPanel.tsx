@@ -8,12 +8,10 @@ import { useActiveTabIdWhile, useCommandBarCentred, useTabHasUrlWhile } from "..
 import { usePage } from "../../state/tabs/pageState";
 import { dismissHover, setRowsCovered } from "../../state/sidebar/hover";
 import { useCardAnchors, useUrlAnchors } from "../../state/windows/layout";
-import { barWidth } from "../ntp/NewTabPage";
-import { closeNewTabBar } from "../../state/omnibox/newTabBar";
-import type { NewTabTarget } from "../../state/browser/types";
+import { NewTabBarHost } from "./NewTabBar";
 import { Omnibox } from "./Omnibox";
 import { BAR, PANEL_TEXT_LEFT, GROW } from "./tokens";
-import { closePanelToHeroBar, type BarDismissal } from "../../state/omnibox/barState";
+import { closePanelToPage, type BarDismissal } from "../../state/omnibox/barState";
 import { insecureLevel, urlTextLeft } from "../toolbar/Toolbar";
 import { useToolbarRow } from "../toolbar/useToolbarRow";
 import { compactLift, urlFieldOf } from "../../lib/toolbarRow";
@@ -29,10 +27,24 @@ const DROPDOWN_PAST_FIELD = 137;
 const DROPDOWN_RADIUS = 12;
 const PANEL_OPEN_HEIGHT = 107;
 const CENTRED_TOP_SHARE = 0.22;
+const CENTRED_WIDTHS = { fillBelow: 636, fillMargin: 20, narrowFrom: 708, narrow: 616, wideFrom: 1700, medium: 652, wide: 774, margin: 28 } as const;
 
 type Box = { left: number; top: number; width: number; height: number };
 
-export function CommandPanel({ windowWidth }: { windowWidth: number }) {
+export function CommandPanel({ windowWidth, windowHeight = 0 }: { windowWidth: number; windowHeight?: number }) {
+  const windowId = useWindowId();
+  const { panel } = useWindowUi();
+  const activeId = useActiveTabIdWhile(windowId, panel.open);
+  const newTab = panel.open && panel.newTab && activeId ? { tabId: activeId, target: panel.newTab } : null;
+  return (
+    <>
+      <NewTabBarHost windowId={windowId} open={newTab} windowWidth={windowWidth} windowHeight={windowHeight} />
+      <FieldBar windowWidth={windowWidth} />
+    </>
+  );
+}
+
+function FieldBar({ windowWidth }: { windowWidth: number }) {
   const theme = useTheme();
   const windowId = useWindowId();
   const { panel } = useWindowUi();
@@ -41,19 +53,18 @@ export function CommandPanel({ windowWidth }: { windowWidth: number }) {
   const insecure = usePage(activeId, (p) => !!insecureLevel(p));
   const anchor = useUrlAnchors((s) => (panel.open ? s[windowId] : undefined));
   const centred = useCommandBarCentred(windowId, panel.open && !panel.newTab);
-  const card = useCardAnchors((s) => (panel.newTab || centred ? s[windowId] : undefined));
+  const card = useCardAnchors((s) => (centred ? s[windowId] : undefined));
   const toolbarRow = useToolbarRow();
   const overRows = panel.open && !panel.newTab && !centred && !!anchor?.sidebar;
   useEffect(() => {
     if (panel.open) dismissHover();
     setRowsCovered(windowId, overRows);
   }, [panel.open, overRows, windowId]);
-  if (!panel.open || !activeId) return null;
-  if (panel.newTab) return card ? <CentredBar windowId={windowId} tabId={activeId} target={panel.newTab} card={card} /> : null;
+  if (!panel.open || !activeId || panel.newTab) return null;
 
   const room = (left: number, fallback: number) => (windowWidth > 0 ? windowWidth - left - WINDOW_MARGIN : fallback);
   const onCancel = () => closePanel(windowId);
-  const onDone = (reason?: BarDismissal) => closePanelToHeroBar(windowId, activeId, reason);
+  const onDone = (reason?: BarDismissal) => closePanelToPage(windowId, activeId, reason);
   const surface = (radius: number) => panelSurface(theme, radius);
 
   if (centred && card) {
@@ -110,30 +121,16 @@ function panelSurface(theme: ReturnType<typeof useTheme>, radius: number) {
   };
 }
 
+function barWidth(viewWidth: number) {
+  const content = viewWidth < CENTRED_WIDTHS.narrowFrom ? (viewWidth <= CENTRED_WIDTHS.fillBelow ? viewWidth - CENTRED_WIDTHS.fillMargin : CENTRED_WIDTHS.narrow) : viewWidth < CENTRED_WIDTHS.wideFrom ? CENTRED_WIDTHS.medium : CENTRED_WIDTHS.wide;
+  return Math.min(content, viewWidth - CENTRED_WIDTHS.margin);
+}
+
 function centredFrame(card: Box) {
   const width = barWidth(card.width);
   const left = card.left + (card.width - width) / 2;
   const top = card.top + Math.max(WINDOW_MARGIN, Math.round(card.height * CENTRED_TOP_SHARE));
   return { left, top, width };
-}
-
-function CentredBar({ windowId, tabId, target, card }: { windowId: string; tabId: string; target: NewTabTarget; card: Box }) {
-  const theme = useTheme();
-  const onCancel = () => closePanel(windowId);
-  const onDone = () => closeNewTabBar(windowId);
-  return (
-    <Grow
-      from={null}
-      frame={centredFrame(card)}
-      openHeight={PANEL_OPEN_HEIGHT}
-      radius={PANEL_RADIUS}
-      surface={panelSurface(theme, PANEL_RADIUS)}
-    >
-      <OutsidePressArea onOutsidePress={onCancel}>
-        <Omnibox key={`newTab:${target.kind}`} variant="panel" floating tabId={tabId} opensTab={target} onCancel={onCancel} onDone={onDone} />
-      </OutsidePressArea>
-    </Grow>
-  );
 }
 
 function Grow({

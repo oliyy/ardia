@@ -17,12 +17,6 @@ type ExperimentDef = {
 export const MAX_SWITCHES = 8;
 
 export const SWITCHES = {
-  newTabPrewarm: {
-    about: "A New Tab page's engine tab is made a moment after it opens, so Enter only navigates it (state/tabs/prewarm.ts).",
-    owner: "command bar",
-    removeBy: "2026-12-15",
-    live: true,
-  },
   lazySidebarRows: {
     about: "A launch mounts only the sidebar rows its window shows, and the profile pages beside it a frame later (components/sidebar/SidebarPage.tsx).",
     owner: "sidebar",

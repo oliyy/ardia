@@ -332,7 +332,6 @@ export function setSharing(on: boolean, source: SharingSource) {
   capture("sharing_turned_on", { source });
 }
 
-export const dismissAsk = () => save({ askDoneAt: Date.now() });
 
 type PreviousSession = "clean" | "unclean" | "none";
 

@@ -13,6 +13,8 @@ const DARK = {
   swipeChevron: "#FFFFFFD9",
   swipeRim: "rgba(255,255,255,0.15)",
   swipeSelection: "rgba(255,255,255,0.1)",
+  emptySurface: "rgba(255,255,255,0.03)",
+  emptySurfaceEdge: "rgba(255,255,255,0.1)",
 };
 
 const LIGHT: typeof DARK = {
@@ -25,6 +27,8 @@ const LIGHT: typeof DARK = {
   swipeChevron: "#000000D9",
   swipeRim: "rgba(0,0,0,0.125)",
   swipeSelection: "rgba(0,0,0,0.1)",
+  emptySurface: "rgba(255,255,255,0.3)",
+  emptySurfaceEdge: "rgba(0,0,0,0.06)",
 };
 
 export type WindowColors = typeof DARK;

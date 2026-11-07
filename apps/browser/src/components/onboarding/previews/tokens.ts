@@ -4,7 +4,6 @@ export const sceneMs = {
   tabs: 1200,
   address: 1100,
   commandBar: 1200,
-  newTab: 1300,
   newTabPosition: 1100,
   tidy: 1500,
   quit: 1500,

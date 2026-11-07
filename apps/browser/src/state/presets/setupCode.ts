@@ -11,7 +11,6 @@ export const SETUP_SETTING_KEYS = [
   "tabLayout",
   "addressBar",
   "commandBarPlacement",
-  "newTabOpens",
   "newTabPosition",
   "newTabButtonPosition",
   "cleanUpInactiveTabsAfterMinutes",
@@ -46,7 +45,6 @@ export const SETTING_FIELDS: { [K in SetupSettingKey]: Field<Settings[K]> } = {
   tabLayout: { key: "t", values: ["sidebar", "top"] },
   addressBar: { key: "a", values: ["toolbar", "sidebar"] },
   commandBarPlacement: { key: "c", values: ["field", "centred"] },
-  newTabOpens: { key: "n", values: ["page", "commandBar"] },
   newTabPosition: { key: "o", values: ["top", "bottom", "nextToCurrent"] },
   newTabButtonPosition: { key: "b", values: ["top", "bottom"] },
   cleanUpInactiveTabsAfterMinutes: { key: "i", values: [null, 12 * 60, 24 * 60, 7 * 24 * 60] },
@@ -187,7 +185,6 @@ export function describeSetupChoices(choices: SetupChoices): string[] {
   const lines: string[] = [];
   if (s.tabLayout) lines.push(s.tabLayout === "top" ? "Tabs along the top" : "Tabs in the sidebar");
   if (s.addressBar && s.tabLayout !== "top") lines.push(s.addressBar === "sidebar" ? "Address in the sidebar" : "Address in the toolbar");
-  if (s.newTabOpens) lines.push(s.newTabOpens === "commandBar" ? "⌘T opens the command bar" : "⌘T opens the New Tab page");
   if (s.appearance) lines.push(APPEARANCE_LINE[s.appearance]);
   if (choices.color) lines.push(`${choices.color[0]!.toUpperCase()}${choices.color.slice(1)} theme`);
   if (choices.pins?.length) lines.push(`${choices.pins.length} ${choices.pins.length === 1 ? "app" : "apps"} pinned`);

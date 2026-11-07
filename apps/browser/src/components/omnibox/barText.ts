@@ -1,5 +1,4 @@
 import type { SearchScope } from "@ardia/core";
-import type { BarSnapshot } from "../../state/omnibox/barState";
 
 export type Selection = { start: number; end: number };
 
@@ -27,15 +26,15 @@ export type BarEvent =
   | { kind: "select"; selection: Selection }
   | { kind: "selectionApplied" };
 
-export function initialBar(restored: BarSnapshot | null, initialText: string, noneSelected: number): BarText {
+export function initialBar(initialText: string, noneSelected: number): BarText {
   return {
-    typed: restored?.typed ?? initialText,
-    edited: restored?.edited ?? false,
+    typed: initialText,
+    edited: false,
     suppressCompletion: true,
-    selected: restored?.selected ?? noneSelected,
-    scope: restored?.scope ?? null,
-    scopeFrom: restored?.scopeFrom ?? "",
-    pendingSelection: restored?.selection ?? (initialText ? { start: 0, end: initialText.length } : null),
+    selected: noneSelected,
+    scope: null,
+    scopeFrom: "",
+    pendingSelection: initialText ? { start: 0, end: initialText.length } : null,
   };
 }
 

@@ -44,9 +44,9 @@ test("the site's switches.json is a version 1 file naming only switches the app 
 
 test("a cached value is read synchronously; unknown names and non-booleans are ignored", () => {
   reset();
-  docs.set("switches-cache.json", JSON.stringify(file({ sidebarSlide: false, newTabPrewarm: "no", gone: false, lazySidebarRows: 0 })));
+  docs.set("switches-cache.json", JSON.stringify(file({ sidebarSlide: false, updatePrewarm: "no", gone: false, lazySidebarRows: 0 })));
   assert.equal(ks.switchOn("sidebarSlide"), false);
-  assert.equal(ks.switchOn("newTabPrewarm"), true);
+  assert.equal(ks.switchOn("updatePrewarm"), true);
   assert.equal(ks.switchOn("lazySidebarRows"), true);
   reset();
   docs.set("switches-cache.json", "not json");
@@ -56,11 +56,11 @@ test("a cached value is read synchronously; unknown names and non-booleans are i
 test("an ARDIA_SWITCHES value from the launch config wins over the cache", () => {
   reset();
   docs.set("switches-cache.json", JSON.stringify(file({ sidebarSlide: false, lazySidebarRows: false })));
-  launch.switches = { sidebarSlide: true, lazySidebarRows: false, newTabPrewarm: false };
+  launch.switches = { sidebarSlide: true, lazySidebarRows: false, updatePrewarm: false };
   reloadLaunchConfigForTests();
   assert.equal(ks.switchOn("sidebarSlide"), true);
   assert.equal(ks.switchOn("lazySidebarRows"), false);
-  assert.equal(ks.switchOn("newTabPrewarm"), false);
+  assert.equal(ks.switchOn("updatePrewarm"), false);
   reset();
 });
 

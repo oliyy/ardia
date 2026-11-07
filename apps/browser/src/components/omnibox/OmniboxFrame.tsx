@@ -24,7 +24,7 @@ export function DropdownFrame({ rootRef, onContextMenu, leadingIcon, scope, fiel
       <ContextMenuArea captureDescendants onContextMenu={onContextMenu}>
         <View style={{ flexDirection: "row", alignItems: "center", height: BAR.dropdown.height, paddingLeft: BAR.dropdown.left, paddingRight: BAR.dropdown.right, gap: BAR.dropdown.gap }}>
           <View style={ICON_SLOT}>{leadingIcon}</View>
-          {scope && <ScopeChip scope={scope} large={false} />}
+          {scope && <ScopeChip scope={scope} />}
           {field}
           {onSiteControls ? (
             <Button variant="icon"
@@ -44,7 +44,7 @@ export function DropdownFrame({ rootRef, onContextMenu, leadingIcon, scope, fiel
   );
 }
 
-export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, list, hero, rowHeight, bottom }: FrameProps & { hero: boolean; rowHeight: number; bottom: ReactNode }) {
+export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, list, rowHeight, bottom }: FrameProps & { rowHeight: number; bottom: ReactNode }) {
   return (
     <View ref={rootRef}>
       <ContextMenuArea captureDescendants onContextMenu={onContextMenu}>
@@ -52,14 +52,14 @@ export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, 
           style={{
             flexDirection: "row",
             alignItems: "center",
-            height: hero ? BAR.panel.heroHeight : rowHeight,
-            paddingLeft: hero ? BAR.panel.heroIconLeft : BAR.panel.iconLeft,
+            height: rowHeight,
+            paddingLeft: BAR.panel.iconLeft,
             paddingRight: BAR.panel.right,
-            gap: hero ? BAR.panel.heroGap : BAR.panel.gap,
+            gap: BAR.panel.gap,
           }}
         >
           <View style={ICON_SLOT}>{leadingIcon}</View>
-          {scope && <ScopeChip scope={scope} large={hero} />}
+          {scope && <ScopeChip scope={scope} />}
           {field}
         </View>
       </ContextMenuArea>
@@ -69,17 +69,16 @@ export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, 
   );
 }
 
-export function BottomRow({ hero, addChip, onDictate, label, enabled, onGo }: { hero: boolean; addChip: ReactNode; onDictate(): void; label: string; enabled: boolean; onGo(): void }) {
+export function BottomRow({ addChip, onDictate, label, enabled, onGo }: { addChip: ReactNode; onDictate(): void; label: string; enabled: boolean; onGo(): void }) {
   const theme = useTheme();
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        paddingLeft: hero ? BAR.bottom.heroLeft : BAR.bottom.left,
-        paddingRight: hero ? BAR.bottom.heroRight : BAR.bottom.right,
-        height: hero ? BAR.bottom.heroHeight : BAR.bottom.height,
-        marginBottom: hero ? BAR.bottom.heroBelow : 0,
+        paddingLeft: BAR.bottom.left,
+        paddingRight: BAR.bottom.right,
+        height: BAR.bottom.height,
       }}
     >
       {addChip}

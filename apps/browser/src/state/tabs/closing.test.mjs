@@ -29,10 +29,11 @@ test("closing a Peek through either call ends the Peek and records nothing", () 
   }
 });
 
-test("⌘W on the last tab closes the window; closing every tab at once keeps it with a New Tab", () => {
+test("⌘W on the last tab leaves the empty window; closing every tab at once keeps it with a New Tab", () => {
   const one = windowWith("a");
   S().closeTab(one.ids[0]);
-  assert.equal(S().windows[one.w], undefined);
+  assert.ok(S().windows[one.w]);
+  assert.deepEqual(viewTabIds(S(), one.w).map((id) => S().tabs[id].url), [""]);
 
   const all = windowWith("a", "b");
   S().closeTabs(all.ids);
@@ -112,15 +113,14 @@ test("an empty pinned group alone keeps the window on its last tab's close", () 
   assert.equal(S().tabs[activeTabId(S(), w)].url, "");
 });
 
-test("without pinned items the last tab still asks before closing its window", async () => {
+test("without pinned items the last tab closes without asking and leaves the empty window", async () => {
   const { w, ids: [only] } = windowWith("only");
   await closeTab(only);
-  assert.ok(S().tabs[only], "the declined confirmation keeps the tab");
-  S().closeTab(only);
-  assert.equal(S().windows[w], undefined);
+  assert.equal(S().tabs[only], undefined);
+  assert.ok(S().windows[w]);
 });
 
-test("a pinned item in the profile the window doesn't show keeps nothing open", () => {
+test("a pinned item in a profile the window doesn't show changes nothing: the window keeps its empty surface", () => {
   const { w, ids: [only] } = windowWith("only");
   const other = S().createProfile({ name: "Other" });
   const elsewhere = S().newTab(w, { url: "https://elsewhere.com/", profileId: other, background: true });
@@ -128,5 +128,6 @@ test("a pinned item in the profile the window doesn't show keeps nothing open", 
   assert.equal(S().tabs[elsewhere].profileId, other);
   assert.notEqual(S().windows[w].profileId, other);
   S().closeTab(only);
-  assert.equal(S().windows[w], undefined);
+  assert.ok(S().windows[w], "the window stays, empty");
+  assert.deepEqual(viewTabIds(S(), w).map((id) => S().tabs[id].url), [""]);
 });

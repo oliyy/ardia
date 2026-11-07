@@ -4,7 +4,6 @@ import { prompt } from "../../platform/dialogs";
 import { updateFolder } from "../live/store";
 import { useBrowser } from "../browser/store";
 import { webviews } from "../../platform/webviews";
-import { focusHeroBar } from "../omnibox/barState";
 import { ancestorIds } from "../groups/groups";
 import { activeTabId, bookmarkProfileId, inPinnedContainer, pinSection, tabLayoutOf, tabTitle, viewTabIds } from "../browser/model";
 import type { ClickMods } from "../drag/drops";
@@ -30,7 +29,6 @@ export function returnFocusToPage(windowId: string) {
   const active = activeTabId(s, windowId);
   if (!active) return;
   if (s.tabs[active]?.url) void webviews.get(active)?.focus();
-  else focusHeroBar(windowId, active);
 }
 
 export function toggleBookmarkInWindow(windowId: string, page: { url: string; title: string; favicon: string | null }) {

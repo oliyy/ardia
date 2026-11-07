@@ -12,7 +12,6 @@ const ARC = {
     tabLayout: "sidebar",
     addressBar: "sidebar",
     commandBarPlacement: "centred",
-    newTabOpens: "commandBar",
     newTabPosition: "top",
     newTabButtonPosition: "top",
     cleanUpInactiveTabsAfterMinutes: 720,
@@ -119,7 +118,6 @@ test("the summary names what the code sets, in plain words", () => {
   assert.deepEqual(describeSetupChoices(ARC), [
     "Tabs in the sidebar",
     "Address in the sidebar",
-    "⌘T opens the command bar",
     "Always dark",
     "Green theme",
     "3 apps pinned",

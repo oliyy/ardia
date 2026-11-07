@@ -43,9 +43,6 @@ export function startDevHarness() {
     get history(): typeof import("../../state/history/history") {
       return require("../../state/history/history");
     },
-    get checkIn(): typeof import("../../state/onboarding/defaultBrowserCheckIn") {
-      return require("../../state/onboarding/defaultBrowserCheckIn");
-    },
     get media(): typeof import("../../state/media/media").useMedia {
       return require("../../state/media/media").useMedia;
     },
@@ -93,9 +90,6 @@ export function startDevHarness() {
     },
     get settingsNav(): typeof import("../../state/settings/settingsWindows").useSettingsNav {
       return require("../../state/settings/settingsWindows").useSettingsNav;
-    },
-    get preload(): typeof import("../../state/tabs/prewarm") {
-      return require("../../state/tabs/prewarm");
     },
     get syncSheets(): typeof import("../settings/panes/SyncSheets") {
       return require("../settings/panes/SyncSheets");
