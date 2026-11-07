@@ -1,11 +1,11 @@
 import type { BrowserState } from "../browser/store";
 import { autoGroupName } from "../groups/groupNames";
-import { ancestorIds, canNest, commonGroup, innermostGroupOf, insertAll, leaveGroups, nestGroups, orderSections, placeBlock, placeGroups, reparent, syncGroupOrder, withParent } from "../groups/groups";
+import { ancestorIds, canNest, commonGroup, descendantIds, innermostGroupOf, insertAll, leaveGroups, nestGroups, orderSections, placeBlock, placeGroups, reparent, syncGroupOrder, withParent } from "../groups/groups";
 import { inPinnedContainer, isIncognitoProfile, isPinnedRow, newId, pinKeyOf } from "../browser/model";
 import { splitOf, splitTabIdsOf, withSplitRows } from "../splits/splits";
 import { markPinned } from "./pinChoices";
 import type { BrowserWindow, Tab, TabGroup } from "../browser/types";
-import { anchorFor, anchorUnder, dropNodes, groupNode, isGroupNode, isTabNode, placeNodes, promoteChildren, siblingsOf, tableOf, tabNode, type PinPlaces } from "./pinTree";
+import { anchorFor, anchorUnder, descendantsOf, dropNodes, groupNode, isGroupNode, isTabNode, placeNodes, promoteChildren, siblingsOf, tableOf, tabNode, type PinPlaces } from "./pinTree";
 
 export type GroupPlacement = { pinned: boolean; beforeId?: string | null; parentId?: string | null; parent?: string | null; beforeNode?: string | null; siblings?: string[] };
 
@@ -104,18 +104,34 @@ export function withGroup(
   return [{ ...s, pinPlace, groups: syncGroupOrder(groups, window), windows: { ...s.windows, [w.id]: window } }, group.id];
 }
 
-export function groupPinPlaces(s: Pick<BrowserState, "pinPlace" | "tabs">, g: TabGroup, pinned: boolean, parent: string | null = null, beforeNode: string | null = null, siblings?: string[]): PinPlaces {
+function placeFolderContents(places: PinPlaces, s: Pick<BrowserState, "tabs" | "groups">, g: TabGroup): PinPlaces {
+  const subfolders = Object.values(s.groups).filter((x) => x.parentId === g.id);
+  const entries = g.tabIds.flatMap((id) => {
+    const t = s.tabs[id];
+    if (!t || t.pin) return [];
+    const subfolder = subfolders.find((x) => x.tabIds.includes(id));
+    return [subfolder ? groupNode(pinKeyOf(subfolder)) : tabNode(pinKeyOf(t))];
+  });
+  const placed = placeNodes(places, g.profileId, [...entries, ...subfolders.map((x) => groupNode(pinKeyOf(x)))], groupNode(pinKeyOf(g)), null);
+  return subfolders.reduce((acc, x) => placeFolderContents(acc, s, x), placed);
+}
+
+function unplaceFolder(places: PinPlaces, profileId: string, folder: string): PinPlaces {
+  const emptied = dropNodes(places, profileId, siblingsOf(tableOf(places, profileId), folder).filter(isTabNode));
+  return promoteChildren(emptied, profileId, folder);
+}
+
+export function groupPinPlaces(s: Pick<BrowserState, "pinPlace" | "tabs" | "groups">, g: TabGroup, pinned: boolean, parent: string | null = null, beforeNode: string | null = null, siblings?: string[]): PinPlaces {
   const node = groupNode(pinKeyOf(g));
   let places = s.pinPlace;
   if (pinned) {
     places = placeNodes(places, g.profileId, [node], parent, anchorFor(tableOf(places, g.profileId), beforeNode, parent, siblings), siblings);
     if (g.pinned) return places;
-    const leaves = g.tabIds.filter((id) => s.tabs[id] && !s.tabs[id]!.pin).map((id) => tabNode(pinKeyOf(s.tabs[id]!)));
-    return placeNodes(places, g.profileId, leaves, node, null);
+    return placeFolderContents(places, s, g);
   }
   if (!g.pinned) return places;
-  places = dropNodes(places, g.profileId, siblingsOf(tableOf(places, g.profileId), node).filter(isTabNode));
-  return promoteChildren(places, g.profileId, node);
+  const subfolders = descendantsOf(tableOf(places, g.profileId), [node]).filter(isGroupNode).reverse();
+  return [...subfolders, node].reduce((acc, folder) => unplaceFolder(acc, g.profileId, folder), places);
 }
 
 export function withRowsGrouped(s: BrowserState, asked: string[], o: { name?: string; pinned?: boolean; parentId?: string | null }): [BrowserState, string] {
@@ -163,7 +179,8 @@ export function movingGroup(s: BrowserState, groupId: string, p: GroupPlacement)
   let pinChoices = s.pinChoices;
   if (pinned && !g.pinned && !isIncognitoProfile(g.profileId)) {
     const placed = g.tabIds.flatMap((id) => (s.tabs[id] ? [pinKeyOf(s.tabs[id]!)] : []));
-    pinChoices = markPinned(pinChoices, g.profileId, { groups: [pinKeyOf(g)], placed });
+    const folders = [g, ...descendantIds(s.groups, groupId).map((id) => s.groups[id]!)];
+    pinChoices = markPinned(pinChoices, g.profileId, { groups: folders.map(pinKeyOf), placed });
   }
   const rest = w.tabIds.filter((id) => !moving.has(id));
   let at: number;
