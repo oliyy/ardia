@@ -141,3 +141,33 @@ test("a closed window restored while its groups' ids are taken maps the nesting 
   assert.equal(i.id, inner);
   assert.equal(i.parentId, o.id);
 });
+
+test("pinning and unpinning a folder keeps its nested subfolders, and the store still takes writes", () => {
+  reset();
+  const { w, ids } = windowWith("home", "l1", "a1", "b1", "c1", "l2");
+  const [, l1, a1, b1, c1, l2] = ids;
+  const outer = S().groupTabs([l1, a1, b1, c1, l2], { pinned: false, name: "Outer" });
+  S().groupTabs([a1], { name: "A" });
+  S().groupTabs([b1, c1], { name: "B" });
+  S().groupTabs([c1], { name: "C" });
+  const folders = () => Object.values(S().groups).filter((g) => g.windowId === w).map((g) => `${path(g)} ${g.pinned} ${g.tabIds.map(host)}`).sort();
+  const structure = (pinned) => [`Outer ${pinned} l1,a1,b1,c1,l2`, `Outer/A ${pinned} a1`, `Outer/B ${pinned} b1,c1`, `Outer/B/C ${pinned} c1`];
+  const table = () => S().pinPlace.default ?? {};
+  const label = (node) => (node.startsWith("g:") ? Object.values(S().groups).find((g) => model.pinKeyOf(g) === node.slice(2)).name : host(Object.values(S().tabs).find((t) => model.pinKeyOf(t) === node.slice(2)).id));
+  const children = (parent) => Object.keys(table()).filter((n) => table()[n].parent === parent).sort((a, z) => (table()[a].pos < table()[z].pos ? -1 : 1));
+  const shape = (node) => (node.startsWith("g:") ? { [label(node)]: children(node).map(shape) } : label(node));
+  assert.deepEqual(folders(), structure(false));
+
+  S().moveGroup(outer, { pinned: true, parent: null, beforeNode: null });
+  assert.deepEqual(folders(), structure(true));
+  assert.deepEqual(shape(`g:${model.pinKeyOf(S().groups[outer])}`), { Outer: ["l1", { A: ["a1"] }, { B: ["b1", { C: ["c1"] }] }, "l2"] });
+
+  S().moveGroup(outer, { pinned: false });
+  assert.deepEqual(folders(), structure(false));
+  assert.deepEqual(Object.keys(table()), [], "nothing of the folder stays in the pinned tree");
+  assert.deepEqual([l1, a1, b1, c1, l2].filter((id) => S().tabs[id].pin), [], "no tab turns into a pin");
+
+  const later = S().newTab(w, { url: "https://later.com/", background: true });
+  assert.ok(S().tabs[later]);
+  assert.deepEqual(folders(), structure(false));
+});
