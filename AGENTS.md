@@ -54,7 +54,7 @@ For the architecture and the test tooling, read `docs/agent-brief.md`.
   stay ⏸. The one exception is Tidy (the sidebar's Tidy button and Tidy Tabs), which the owner asked to have
   sort a space's unpinned tabs into folders with Claude Opus 5.5 through OpenRouter, using their own key.
 - **The local MCP server never deletes pins.** The owner asked for an MCP server on 127.0.0.1 that lets their own agents
-  organize tabs and folders across spaces. It may rename and move pinned tabs and pinned folders, including to other
+  organize tabs and folders across spaces. It may rename, re-icon and move pinned tabs and pinned folders, including to other
   spaces, but never closes a pinned tab, deletes a pinned folder or unpins either (unpinning is a two-step delete).
   Favorites are add-only. Keep that rule on every tool.
 
