@@ -1,7 +1,9 @@
 import { useBrowser } from "../browser/store";
 import { tabTitle } from "../browser/model";
-import { folderName, addFavorite, createFolder, moveFolder, moveTabs, openTab, pinTab, tabName, type Args, type Change } from "./writes";
-import { editableTab, folderIn, keepsPins, listSpaces, listTabs, McpToolError, resolveSpace, tabIn, unpinnedFolder, unpinnedTabs } from "./spaces";
+import { NO_GROUP_ICON } from "../groups/groupIcons";
+import { folderIconChoices } from "../groups/iconChoices";
+import { folderIcon, folderName, addFavorite, createFolder, moveFolder, moveTabs, openTab, pinTab, tabName, type Args, type Change } from "./writes";
+import { editableTab, fail, folderIn, keepsPins, listSpaces, listTabs, McpToolError, resolveSpace, restylableFolder, tabIn, unpinnedFolder, unpinnedTabs } from "./spaces";
 
 export type ToolResult = { text: string; isError?: true };
 
@@ -52,7 +54,7 @@ export const TOOLS: Tool[] = [
     name: "list_tabs",
     title: "List tabs",
     description:
-      "Lists one space's favorites, pinned tabs and pinned folders, and unpinned tabs and folders, in sidebar order. Pinned tabs and folders are marked pinned: they can be renamed and moved, even to another space, but never closed, deleted or unpinned. Favorites and live-folder tabs are marked locked: they can be read and shown but never changed.",
+      "Lists one space's favorites, pinned tabs and pinned folders, and unpinned tabs and folders, in sidebar order. Pinned tabs and folders are marked pinned: they can be renamed and moved, even to another space, but never closed, deleted or unpinned. Favorites, favorite folders, live folders and live-folder tabs are marked locked: they can be read and shown but never changed. A folder with its own icon reports it as icon.",
     inputSchema: schema({ space: SPACE }),
     annotations: READ,
     run: (a) => listTabs(store(), resolveSpace(store(), a.space)),
@@ -163,6 +165,30 @@ export const TOOLS: Tool[] = [
       const name = folderName(a.name);
       store().updateGroup(folder.id, { name });
       return { renamed: folder.id, name };
+    },
+  },
+  {
+    name: "list_folder_icons",
+    title: "List folder icons",
+    description: "Lists the values set_folder_icon takes, as the sidebar's icon picker offers them. Any other single emoji works too.",
+    inputSchema: schema({ query: { type: "string", description: "Keeps only the icons whose name or words contain this, such as rocket" } }),
+    annotations: READ,
+    run: (a) => {
+      if (a.query !== undefined && typeof a.query !== "string") fail("query must be text");
+      return { noIcon: NO_GROUP_ICON, reset: null, ...folderIconChoices((a.query as string | undefined) ?? "") };
+    },
+  },
+  {
+    name: "set_folder_icon",
+    title: "Set folder icon",
+    description: `Sets the icon of a pinned or unpinned folder, at the top level or nested, as the sidebar's icon picker does. Favorite folders and live folders can't be changed. icon is one emoji, an arc: or symbol: value from list_folder_icons, ${NO_GROUP_ICON} for No Icon, or null for the default.`,
+    inputSchema: schema({ id: FOLDER_ID, icon: { type: ["string", "null"], description: "The icon, or null for the default" } }, ["id", "icon"]),
+    annotations: { ...WRITE, idempotentHint: true },
+    run: (a) => {
+      const folder = restylableFolder(store(), a.id);
+      const icon = folderIcon(a.icon);
+      store().updateGroup(folder.id, { icon });
+      return { folder: folder.id, icon };
     },
   },
   {

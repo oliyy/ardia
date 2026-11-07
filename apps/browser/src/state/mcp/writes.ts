@@ -2,6 +2,8 @@ import type { BrowserState } from "../browser/store";
 import type { Tab, TabGroup } from "../browser/types";
 import { inPinnedContainer, isPinnedRow, pinSection, viewTabIds } from "../browser/model";
 import { ancestorIds, descendantIds, innermostGroupOf } from "../groups/groups";
+import { NO_GROUP_ICON } from "../groups/groupIcons";
+import { isFolderIcon } from "../groups/iconChoices";
 import { placing } from "../pins/placing";
 import { movingGroup, withRowsGrouped } from "../pins/tabGrouping";
 import { withNewTab } from "../tabs/tabs";
@@ -31,6 +33,12 @@ export function folderName(value: unknown): string {
   if (!name) fail("name must be a folder name");
   if (name.length > NAME_LIMIT) fail(`name must be at most ${NAME_LIMIT} characters`);
   return name;
+}
+
+export function folderIcon(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value === "string" && isFolderIcon(value)) return value;
+  return fail(`icon must be one emoji, arc:<id>, symbol:<name>, ${NO_GROUP_ICON} for No Icon, or null for the default; list_folder_icons names the arc and symbol values`);
 }
 
 const optionalIndex = (value: unknown): number | undefined => {

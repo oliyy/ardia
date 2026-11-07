@@ -1,30 +1,28 @@
 import type { ImageRequireSource } from "react-native";
+import type { ArcFolderIconId } from "../../state/groups/iconChoices";
+import { ARC_ICON_PREFIX } from "../../lib/customIcon";
 
-export const ARC_ICON_PREFIX = "arc:";
+const SOURCE_TABLE: Record<ArcFolderIconId, ImageRequireSource> = {
+  airplane: require("../../../assets/arc-folder-icons/airplane.png"),
+  book: require("../../../assets/arc-folder-icons/book.png"),
+  bulb: require("../../../assets/arc-folder-icons/bulb.png"),
+  chatBubbleEllipses: require("../../../assets/arc-folder-icons/chatbubble-ellipses.png"),
+  code: require("../../../assets/arc-folder-icons/code.png"),
+  construction: require("../../../assets/arc-folder-icons/construct.png"),
+  fileTrayFull: require("../../../assets/arc-folder-icons/file-tray-full.png"),
+  flash: require("../../../assets/arc-folder-icons/flash.png"),
+  github: require("../../../assets/arc-folder-icons/logo-github.png"),
+  map: require("../../../assets/arc-folder-icons/map.png"),
+  musicalNote: require("../../../assets/arc-folder-icons/musical-notes.png"),
+  planet: require("../../../assets/arc-folder-icons/planet.png"),
+  shapes: require("../../../assets/arc-folder-icons/shapes.png"),
+  skull: require("../../../assets/arc-folder-icons/skull.png"),
+  star: require("../../../assets/arc-folder-icons/star.png"),
+  triangle: require("../../../assets/arc-folder-icons/triangle.png"),
+};
 
-export const ARC_FOLDER_ICONS: readonly { id: string; source: ImageRequireSource }[] = [
-  { id: "airplane", source: require("../../../assets/arc-folder-icons/airplane.png") },
-  { id: "book", source: require("../../../assets/arc-folder-icons/book.png") },
-  { id: "bulb", source: require("../../../assets/arc-folder-icons/bulb.png") },
-  { id: "chatBubbleEllipses", source: require("../../../assets/arc-folder-icons/chatbubble-ellipses.png") },
-  { id: "code", source: require("../../../assets/arc-folder-icons/code.png") },
-  { id: "construction", source: require("../../../assets/arc-folder-icons/construct.png") },
-  { id: "fileTrayFull", source: require("../../../assets/arc-folder-icons/file-tray-full.png") },
-  { id: "flash", source: require("../../../assets/arc-folder-icons/flash.png") },
-  { id: "github", source: require("../../../assets/arc-folder-icons/logo-github.png") },
-  { id: "map", source: require("../../../assets/arc-folder-icons/map.png") },
-  { id: "musicalNote", source: require("../../../assets/arc-folder-icons/musical-notes.png") },
-  { id: "planet", source: require("../../../assets/arc-folder-icons/planet.png") },
-  { id: "shapes", source: require("../../../assets/arc-folder-icons/shapes.png") },
-  { id: "skull", source: require("../../../assets/arc-folder-icons/skull.png") },
-  { id: "star", source: require("../../../assets/arc-folder-icons/star.png") },
-  { id: "triangle", source: require("../../../assets/arc-folder-icons/triangle.png") },
-];
-
-const SOURCES = new Map(ARC_FOLDER_ICONS.map((icon) => [icon.id, icon.source]));
+const SOURCES = new Map<string, ImageRequireSource>(Object.entries(SOURCE_TABLE));
 
 export const isArcIcon = (icon: string | null | undefined): boolean => !!icon?.startsWith(ARC_ICON_PREFIX);
 
 export const arcIconSource = (icon: string | null | undefined) => (icon?.startsWith(ARC_ICON_PREFIX) ? SOURCES.get(icon.slice(ARC_ICON_PREFIX.length)) : undefined);
-
-export const arcIconWords = (id: string) => id.replace(/([A-Z])/g, " $1").toLowerCase();

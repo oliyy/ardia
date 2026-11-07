@@ -16,7 +16,7 @@ export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"];
 const DEFAULT_VERSION = "2025-06-18";
 
 const INSTRUCTIONS =
-  "Ardia's spaces are its profiles. Use list_spaces and list_tabs to read them. You can open, close, rename, move and show unpinned tabs, and make, rename, nest, move and delete unpinned folders. Pinned tabs and pinned folders can be renamed, reordered, nested and moved to other spaces, but never closed, deleted or unpinned; a call that would do any of that changes nothing. pin_tab, add_favorite and moving tabs or folders into the pinned section add new pins. Favorites and live-folder tabs are locked: you can show them and add_favorite adds new ones at the end, but nothing changes, moves or removes an existing one.";
+  "Ardia's spaces are its profiles. Use list_spaces and list_tabs to read them. You can open, close, rename, move and show unpinned tabs, and make, rename, nest, move and delete unpinned folders. Pinned and unpinned folders can have their icons set with set_folder_icon; list_folder_icons names the values. Pinned tabs and pinned folders can be renamed, reordered, nested and moved to other spaces, but never closed, deleted or unpinned; a call that would do any of that changes nothing. pin_tab, add_favorite and moving tabs or folders into the pinned section add new pins. Favorites, favorite folders, live folders and live-folder tabs are locked: you can show the tabs and add_favorite adds new favorites at the end, but nothing changes, moves or removes an existing one.";
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 

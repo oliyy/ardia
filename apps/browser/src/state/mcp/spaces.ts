@@ -2,6 +2,8 @@ import type { BrowserState } from "../browser/store";
 import type { BrowserWindow, Tab, TabGroup } from "../browser/types";
 import { activeTabId, inPinnedContainer, isIncognitoProfile, pinSection, tabTitle, viewTabIds } from "../browser/model";
 import { ancestorIds, innermostGroupOf } from "../groups/groups";
+import { useLive } from "../live/store";
+import { tileFolderOf } from "../pins/tileFolders";
 import { groupLabel } from "../pins/tabGrouping";
 import { isRegularWindow } from "../windows/small";
 
@@ -55,6 +57,14 @@ export const isFixedTab = (tab: Tab) => isFavorite(tab) || isLiveTab(tab);
 export const isPinnedTab = (s: BrowserState, id: string) => !!s.tabs[id] && !isFixedTab(s.tabs[id]!) && inPinnedContainer(s, id);
 
 export const isPinnedFolder = (s: BrowserState, g: TabGroup) => g.pinned || ancestorIds(s.groups, g.id).some((a) => s.groups[a]?.pinned);
+
+export function restylableFolder(s: BrowserState, id: unknown): TabGroup {
+  if (typeof id !== "string") return fail(`No folder ${String(id)}`);
+  if (Object.values(s.tabs).some((t) => tileFolderOf(t)?.id === id && !isIncognitoProfile(t.profileId) && isRegularWindow(s.windows[t.windowId]))) fail(`${id} is a favorite folder; favorite folders can't be changed here`);
+  const live = useLive.getState().folders[id];
+  if (live && spaceIds(s).includes(live.profileId)) fail(`${id} is a live folder; live folders can't be changed here`);
+  return folderIn(s, id);
+}
 
 const fixedTabMessage = (tab: Tab) =>
   isFavorite(tab) ? `${tab.id} is a favorite; favorites can't be changed here` : `${tab.id} is in a live folder; live-folder tabs can't be changed here`;
@@ -115,7 +125,7 @@ export function sameWindow(tabs: Tab[]): string {
 
 function tabEntry(s: BrowserState, id: string, active: string | undefined) {
   const t = s.tabs[id]!;
-  const folder = innermostGroupOf(s.groups, id)?.id ?? (t.pin?.as === "tile" ? t.pin.folder?.id : undefined);
+  const folder = innermostGroupOf(s.groups, id)?.id ?? (t.pin?.as === "tile" ? t.pin.folder?.id : undefined) ?? t.liveItem?.folderId;
   return {
     id,
     title: tabTitle(t),
@@ -128,7 +138,7 @@ function tabEntry(s: BrowserState, id: string, active: string | undefined) {
 }
 
 function folderEntry(s: BrowserState, g: TabGroup) {
-  return { id: g.id, name: groupLabel(s, g), ...(g.parentId ? { parent: g.parentId } : {}), ...(isPinnedFolder(s, g) ? { pinned: true } : {}) };
+  return { id: g.id, name: groupLabel(s, g), ...(g.icon ? { icon: g.icon } : {}), ...(g.parentId ? { parent: g.parentId } : {}), ...(isPinnedFolder(s, g) ? { pinned: true } : {}) };
 }
 
 function tileFolders(s: BrowserState, ids: string[]) {
@@ -139,6 +149,11 @@ function tileFolders(s: BrowserState, ids: string[]) {
   }
   return [...seen].map(([id, name]) => ({ id, name, locked: true }));
 }
+
+const liveFolders = (profileId: string) =>
+  Object.values(useLive.getState().folders)
+    .filter((f) => f.profileId === profileId)
+    .map((f) => ({ id: f.id, name: f.name, ...(f.icon ? { icon: f.icon } : {}), live: true, locked: true }));
 
 export function listTabs(s: BrowserState, profileId: string) {
   const w = spaceWindow(s, profileId);
@@ -156,7 +171,7 @@ export function listTabs(s: BrowserState, profileId: string) {
   return {
     space: { id: profileId, name: s.profiles[profileId]?.name ?? profileId },
     favorites: { tabs: favorites.map((id) => tabEntry(s, id, active)), folders: tileFolders(s, favorites) },
-    pinned: { tabs: pinned.map((id) => tabEntry(s, id, active)), folders: groups.filter((g) => isPinnedFolder(s, g)).map((g) => folderEntry(s, g)) },
+    pinned: { tabs: pinned.map((id) => tabEntry(s, id, active)), folders: [...groups.filter((g) => isPinnedFolder(s, g)).map((g) => folderEntry(s, g)), ...liveFolders(profileId)] },
     unpinned: { tabs: unpinned.map((id) => tabEntry(s, id, active)), folders: groups.filter((g) => !isPinnedFolder(s, g)).map((g) => folderEntry(s, g)) },
   };
 }

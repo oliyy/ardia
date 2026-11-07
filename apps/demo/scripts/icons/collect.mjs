@@ -25,7 +25,7 @@ function sourceFiles() {
 }
 
 function pickerSymbols(source) {
-  const start = source.indexOf("const SYMBOLS");
+  const start = source.indexOf("const SYMBOL_CHOICES");
   if (start < 0) return [];
   return [...source.slice(start, source.indexOf("];", start)).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 }
@@ -36,7 +36,7 @@ export function collectAppSymbols(vocabulary) {
   for (const file of sourceFiles()) {
     const source = readFileSync(file, "utf8");
     const relative = file.slice(REPO.length);
-    if (relative.endsWith("IconPicker.tsx")) for (const name of pickerSymbols(source)) add(name, `${relative} SYMBOLS`);
+    if (relative.endsWith("groups/iconChoices.ts")) for (const name of pickerSymbols(source)) add(name, `${relative} SYMBOL_CHOICES`);
     source.split("\n").forEach((rawLine, index) => {
       const line = rawLine.replace(/hint\([^)]*\)/g, "").replace(/modifiers:\s*\[[^\]]*\]/g, "").replace(/keywords:\s*\[[^\]]*\]/g, "");
       const symbolish = SYMBOL_CONTEXT.test(line) || SYMBOL_FILES.test(relative);
