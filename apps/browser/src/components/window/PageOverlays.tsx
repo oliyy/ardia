@@ -27,7 +27,6 @@ export function PageOverlays({
   geometry,
   toolbar,
   fullscreen,
-  newTabShown,
   statusStyle,
   popovers = true,
   cliPill = false,
@@ -38,7 +37,6 @@ export function PageOverlays({
   geometry: ToolbarGeometry;
   toolbar: boolean;
   fullscreen: boolean;
-  newTabShown: boolean;
   statusStyle?: Animated.WithAnimatedValue<ViewStyle>;
   popovers?: boolean;
   cliPill?: boolean;
@@ -54,16 +52,16 @@ export function PageOverlays({
       </Animated.View>
       <SadTab tabId={tabId} />
       {cliPill && <CliControlPill style={statusStyle} />}
-      {!newTabShown && <PermissionPrompt tabId={tabId} left={fitLeft(geometry.urlLeft, width, PERMISSION_PROMPT_WIDTH)} top={POPOVER_MARGIN} />}
+      <PermissionPrompt tabId={tabId} left={fitLeft(geometry.urlLeft, width, PERMISSION_PROMPT_WIDTH)} top={POPOVER_MARGIN} />
       <PasswordPrompt tabId={tabId} right={POPOVER_MARGIN} top={POPOVER_MARGIN} />
       <AutofillPrompt tabId={tabId} right={POPOVER_MARGIN} top={POPOVER_MARGIN} />
-      {!newTabShown && <ExternalAppPrompt tabId={tabId} left={fitLeft(geometry.urlLeft, width, EXTERNAL_APP_WIDTH)} top={POPOVER_MARGIN} />}
-      {!newTabShown && <EngineOfferPrompt tabId={tabId} left={fitLeft(geometry.urlLeft, width, ENGINE_OFFER_WIDTH)} top={POPOVER_MARGIN} />}
+      <ExternalAppPrompt tabId={tabId} left={fitLeft(geometry.urlLeft, width, EXTERNAL_APP_WIDTH)} top={POPOVER_MARGIN} />
+      <EngineOfferPrompt tabId={tabId} left={fitLeft(geometry.urlLeft, width, ENGINE_OFFER_WIDTH)} top={POPOVER_MARGIN} />
       {popovers && <SiteControls tabId={tabId} open={popover === "siteControls"} {...popoverSide} top={POPOVER_MARGIN} />}
       {popovers && popover === "popups" && <BlockedPopupsPrompt tabId={tabId} {...popoverSide} top={POPOVER_MARGIN} />}
       {popovers && <ZoomPopover tabId={tabId} open={popover === "zoom"} {...popoverSide} top={POPOVER_MARGIN} />}
       <SharePicker tabId={tabId} paneWidth={width} />
-      {!newTabShown && <DeviceChooser tabId={tabId} left={fitLeft(geometry.urlLeft, width, DEVICE_CHOOSER_WIDTH)} top={POPOVER_MARGIN} />}
+      <DeviceChooser tabId={tabId} left={fitLeft(geometry.urlLeft, width, DEVICE_CHOOSER_WIDTH)} top={POPOVER_MARGIN} />
       <CastPicker tabId={tabId} paneWidth={width} />
       <NavigationOverlays tabId={tabId} windowId={windowId} geometry={geometry} />
       <SelectionPopover tabId={tabId} zoom={zoom} />
@@ -87,7 +85,7 @@ export function PeekPage({ tabId, sourceId, windowId, width, fullscreen }: { tab
   return (
     <>
       <TabWebView tabId={tabId} visible warm={false} peekOf={sourceId} />
-      <PageOverlays tabId={tabId} windowId={windowId} width={width} geometry={NO_TOOLBAR} toolbar={false} fullscreen={fullscreen} newTabShown={false} cliPill />
+      <PageOverlays tabId={tabId} windowId={windowId} width={width} geometry={NO_TOOLBAR} toolbar={false} fullscreen={fullscreen} cliPill />
     </>
   );
 }

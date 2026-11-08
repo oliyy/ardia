@@ -57,7 +57,6 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
   const activeFronted = useTab(activeId, (t) => !!holderOfPage(t));
   const windowProfile = useWindow(windowId, (w) => w?.profileId ?? "");
   const bridged = useFrozenPages((f) => !!f.bridges[windowId]);
-  const activeNewTabShown = usePages((st) => !!activeId && !!st.pages[activeId]?.newTabShown);
   const popoverOpen = usePages((st) => !!activeId && !!st.popover[activeId]);
   const panelOpen = useWindowUiOf(windowId, (ui) => !!ui?.panel.open);
   const tabDragged = useTabDrag((d) => d.phase === "tab" && d.tabIds.length > 0 && (d.windowId === windowId || d.overWindow === windowId));
@@ -116,7 +115,6 @@ export function ContentCard({ dock }: { dock?: DockLink }) {
       !peekId &&
       !activeFronted &&
       !bridged &&
-      !activeNewTabShown &&
       !!activeUrl &&
       !internalPageOf(activeUrl) &&
       mountedIds.has(activeId) &&

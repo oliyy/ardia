@@ -7,7 +7,7 @@ import { tabEngine } from "../engines/engines";
 import { holderOf } from "../pins/pinShare";
 import { splitOf } from "../splits/splits";
 import { adoptOf, frozenOn, needsPage, wokenPage } from "../tabs/pageSession";
-import { pageOf, patchPage } from "../tabs/pageState";
+import { pageOf } from "../tabs/pageState";
 import { wantsPage } from "../tabs/tabPages";
 import { removeTabs } from "../tabs/tabs";
 import { isSmallWindow } from "./small";
@@ -130,7 +130,6 @@ export function downloadNavigated(tabId: string, committedUrl: string | null | u
   const others = s.windows[t.windowId]?.tabIds.some((id) => id !== tabId && s.tabs[id]?.profileId === t.profileId);
   const opened = !!(t.openerId || adoptOf(t)) && !pageOf(tabId).wasNewTab;
   if (!skipped && opened && !s.live[tabId]?.canGoBack && others) return useBrowser.getState().closeTab(tabId);
-  patchPage(tabId, { backToNewTab: false, newTabShown: null });
   useBrowser.getState().updateTab(tabId, { url: "", title: "", favicon: null });
 }
 

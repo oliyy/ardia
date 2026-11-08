@@ -5,7 +5,7 @@ import { useTab } from "../../state/browser/hooks";
 import { openModeFor, openUrl } from "../../state/bookmarks/actions";
 import { openInternalPage } from "../../state/pages/urls";
 import { font, MenuRow, menuRowFill, MenuSeparator, MouseArea, PANEL, Popover, POPOVER_MARGIN, useHover } from "../ui";
-import { Favicon, NewTabIcon } from "../favicon/Favicon";
+import { Favicon } from "../favicon/Favicon";
 import { modifiersOf } from "../../lib/keys";
 import { closeHistoryMenu, closeHistoryMenuOf, goToHistoryItem, historyFavicons, useHistoryMenu, type HistoryItem } from "../../state/tabs/navigation";
 
@@ -89,7 +89,7 @@ function Row({
         <Pressable onPress={(e) => onOpen(modifiersOf(e))}>
           {({ pressed }) => (
             <RowFrame hovered={hovered} pressed={pressed}>
-              <View style={{ width: PANEL.iconSlot, alignItems: "center" }}>{item.offset === "newTab" ? <NewTabIcon size={16} /> : <Favicon url={item.url} favicon={favicon} size={16} />}</View>
+              <View style={{ width: PANEL.iconSlot, alignItems: "center" }}><Favicon url={item.url} favicon={favicon} size={16} /></View>
               <Text numberOfLines={1} style={{ flex: 1, ...font.body, color: theme.textPrimary }}>
                 {item.title}
               </Text>

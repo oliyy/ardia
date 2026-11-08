@@ -7,7 +7,7 @@ import { useTheme } from "../ui/theme";
 import { spring as springOf } from "../ui/motion";
 import { SHADOWS, SWIPE_CONFIRMED_WASH, SWIPE_MOTION, windowColors } from "./tokens";
 import { useTab } from "../../state/browser/hooks";
-import { Favicon, NewTabIcon } from "../favicon/Favicon";
+import { Favicon } from "../favicon/Favicon";
 import { HistoryPopover } from "./HistoryPopover";
 import { goBack, goForward, goToHistoryItem, historyFavicons, historyItems, openHistoryMenu, useHistoryAvailability, useHistoryMenu, type HistoryItem } from "../../state/tabs/navigation";
 import type { ToolbarGeometry } from "./geometry";
@@ -288,7 +288,7 @@ function DestinationList({ tabId, items, selected, appear, pill }: { tabId: stri
       {items.map((item, i) => (
         <View key={item.key} style={{ height: ROW, flexDirection: "row", alignItems: "center", paddingHorizontal: space.xlx, gap: space.ml }}>
           <View style={{ width: 16, height: 16, borderRadius: radius.s, overflow: "hidden" }}>
-            {item.offset === "newTab" ? <NewTabIcon size={16} /> : <Favicon url={item.url} favicon={favicons.get(item.url) ?? null} size={16} />}
+            <Favicon url={item.url} favicon={favicons.get(item.url) ?? null} size={16} />
           </View>
           <Text numberOfLines={1} style={{ flex: 1, ...font.body, color: i === selected ? theme.textPrimary : theme.textSecondary }}>
             {item.title}

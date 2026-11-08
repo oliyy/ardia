@@ -1,13 +1,13 @@
 import { memo, useEffect, useLayoutEffect } from "react";
 import { Animated, StyleSheet, View } from "react-native";
 import { activate } from "../../state/tabs/actions";
-import { shallowEqual, useBrowserWhile, useStoreWhile, useTabValue } from "../../state/tabs/tabWatch";
+import { shallowEqual, useBrowserWhile, useTabValue } from "../../state/tabs/tabWatch";
 import { splitOf } from "../../state/splits/splits";
 import type { Tab } from "../../state/browser/types";
 import { BookmarksBar, bookmarksBarShown, type BookmarksBarMode } from "../bookmarks/BookmarksBar";
 import { useBookmarksBarHeight } from "../bookmarks/barSize";
 import type { Rect, ToolbarGeometry } from "./geometry";
-import { patchPage, usePages } from "../../state/tabs/pageState";
+import { patchPage } from "../../state/tabs/pageState";
 import { SplitEmptyState } from "../split/SplitEmptyState";
 import { EmptyCard } from "./EmptyCard";
 import { InternalPage } from "../pages";
@@ -83,7 +83,6 @@ export const TabPane = memo(function TabPane({
   const cardRadius = useCardGeometry().radius;
   const toolbarHeight = useToolbarRow().height;
   const isNewTab = !own.url;
-  const newTabShown = useStoreWhile(usePages, live, (s) => !!s.pages[tabId]?.newTabShown);
   const inSomeSplit = useBrowserWhile(!!warm, (s) => !!warm && !!splitOf(s, tabId));
   const inSplit = visible ? inActiveSplit : inSomeSplit;
   const emptySurface = visible && isNewTab && !small && !inSplit;
@@ -133,7 +132,7 @@ export const TabPane = memo(function TabPane({
         <View style={autoLayout ? { height: motion.pageHeight } : { flex: 1 }}>
           {visible && !fullscreen && <ShareBar tabId={tabId} />}
           <View style={{ flex: 1 }}>
-            {mounted && <TabWebView tabId={tabId} visible={visible && !newTabShown && !isNewTab} warm={!!warm && !newTabShown && !isNewTab} leading={leading} retiring={retiring} />}
+            {mounted && <TabWebView tabId={tabId} visible={visible && !isNewTab} warm={!!warm && !isNewTab} leading={leading} retiring={retiring} />}
             {visible && isNewTab && !small && (inSplit ? <SplitEmptyState tabId={tabId} focused={focused} /> : <EmptyCard windowId={windowId} tabId={tabId} />)}
             {visible && <InternalPage tabId={tabId} />}
             {visible && focused && !fullscreen && !small && <CardLoadingLine tabId={tabId} />}
@@ -145,7 +144,6 @@ export const TabPane = memo(function TabPane({
                 geometry={geometry}
                 toolbar={toolbar}
                 fullscreen={fullscreen}
-                newTabShown={newTabShown}
                 statusStyle={autoLayout ? motion.bottomStyle : undefined}
                 popovers={popovers}
                 cliPill={!peekShown && (fullscreen || focused || !inSplit)}

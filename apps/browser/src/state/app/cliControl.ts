@@ -15,7 +15,7 @@ import { create } from "zustand";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { hasPage } from "../tabs/pageSession";
 import { shownPageId } from "../peek/peek";
-import { isTabReady, pageOf, usePages } from "../tabs/pageState";
+import { isTabReady, usePages } from "../tabs/pageState";
 import { isInternalTab } from "../pages/urls";
 import { afterFirstWindow } from "../../lib/afterFirstWindow";
 import { parseSaved, unchanged, versionedJson, type Migrations } from "../../lib/savedDocument";
@@ -132,7 +132,7 @@ function shownReadyTab(s: BrowserState): string | null {
   const windowId = focusedWindowOf(s);
   const id = windowId ? shownPageId(s, windowId) : undefined;
   const tab = id ? s.tabs[id] : undefined;
-  if (!id || !tab?.url || pageOf(id).newTabShown || !hasPage(tab) || isInternalTab(tab)) return null;
+  if (!id || !tab?.url || !hasPage(tab) || isInternalTab(tab)) return null;
   return isTabReady(id) ? id : null;
 }
 

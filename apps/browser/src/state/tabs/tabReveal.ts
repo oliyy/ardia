@@ -17,7 +17,7 @@ const hasWebPage = (t: Tab | undefined): t is Tab => !!t && hasPage(t) && isWebP
 
 function plainPage(tabId: string): boolean {
   const page = pageOf(tabId);
-  return !page.newTabShown && !page.fullscreen && !page.crashed && !page.unresponsive;
+  return !page.fullscreen && !page.crashed && !page.unresponsive;
 }
 
 function revealFor(s: BrowserState, prev: BrowserState, windowId: string, next: string, before: string): Switch | null {

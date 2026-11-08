@@ -180,7 +180,6 @@ test("a hidden pane's paused reads are current the render it's shown, and follow
     ({ visible }) => ({
       own: useTabValue(a, (t) => ({ url: t?.url ?? "", zoom: t?.zoom ?? 1 }), shallowEqual),
       popover: useStoreWhile(usePages, visible, (s) => s.popover[a] ?? null),
-      newTabShown: useStoreWhile(usePages, visible, (s) => !!s.pages[a]?.newTabShown),
       hasPage: useStoreWhile(useBrowser, visible, (s) => !!s.tabs[a]?.url),
     }),
     { props: { visible: false } },
@@ -190,13 +189,11 @@ test("a hidden pane's paused reads are current the render it's shown, and follow
   assert.deepEqual(pane.value.own, { url: "https://moved.com/", zoom: 1.5 }, "URL and zoom while hidden");
   const afterOwn = pane.renders;
   usePages.setState((s) => ({ popover: { ...s.popover, [a]: "zoom" } }));
-  patchPage(a, { newTabShown: { url: "x" } });
   assert.equal(pane.pending, false, "paused reads don't wake a hidden pane");
   assert.equal(pane.renders, afterOwn);
   assert.ok(afterOwn > renders);
   const shown = pane.rerender({ visible: true });
   assert.equal(shown.popover, "zoom");
-  assert.equal(shown.newTabShown, true);
   usePages.setState((s) => ({ popover: { ...s.popover, [a]: null } }));
   assert.equal(pane.value.popover, null, "and follows the store while shown");
   S().updateTab(a, { url: "" });

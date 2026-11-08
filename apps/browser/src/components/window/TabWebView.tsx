@@ -25,7 +25,7 @@ import { shallowEqual, useBrowserWhile, useProfilesValue, useTabValue } from "..
 import { isIncognitoProfile, navigationTo } from "../../state/browser/model";
 import type { Tab } from "../../state/browser/types";
 import { zoomChangedByUser } from "../../state/site/zoomBubble";
-import { markTabReady, patchPage, pageOf, popoverOf, setPopover } from "../../state/tabs/pageState";
+import { markTabReady, patchPage, popoverOf, setPopover } from "../../state/tabs/pageState";
 import { closeFolderPanelIn } from "../../state/sidebar/tileFolderUi";
 import { isAddressBarInSidebar } from "../../state/sidebar/current";
 import { popupBlocked, showAutofillPrompt, showPasswordPrompt } from "../../state/site/prompts";
@@ -147,7 +147,6 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine, leading = null, r
       return;
     }
     pending.current = navigation.url;
-    if (pageOf(tabId).newTabShown) patchPage(tabId, { newTabShown: null });
     if (loadsOnCreate.current === navigation.seq) {
       loadsOnCreate.current = undefined;
       return;
@@ -155,7 +154,6 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine, leading = null, r
     if (takeStartedNavigation(tabId, navigation.seq)) return;
     void webviews.get(tabId)?.loadUrl(navigation.url, { userInitiated: !!navigation.userInitiated });
   }, [seq]);
-  const fromNewTab = useRef(pageOf(tabId).wasNewTab && !adoptId);
   useEffect(() => {
     persistEngine(tabId, engine);
     return () => noteGone(tabId);
@@ -222,16 +220,6 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine, leading = null, r
         }
         const shownTheme = restoredThemeColor(tabId, url, themeColor, isLoading);
         pending.current = null;
-        const kept = pageOf(tabId).newTabShown;
-        if (kept) {
-          if (url === kept.url) {
-            patchPage(tabId, { newTabShown: { ...kept, title } });
-            updateLive(tabId, { isLoading, canGoBack, canGoForward, themeColor: shownTheme });
-            return;
-          }
-          patchPage(tabId, { newTabShown: null });
-        }
-        if (fromNewTab.current && url && !isBlank(url)) patchPage(tabId, { backToNewTab: true });
         updateTab(tabId, { url, title }, { isLoading, canGoBack, canGoForward, themeColor: shownTheme });
         dropOutlivedFavicon(tabId, url, isLoading);
         if (engine === "webkit") noteWebKitPage(tabId, { url, title, isLoading, committedUrl: committedUrl ?? "" });
@@ -297,8 +285,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine, leading = null, r
       onNotificationClose={closeWebNotification}
       onDiscarded={(url) => {
         pending.current = url;
-        fromNewTab.current = false;
-        patchPage(tabId, { backToNewTab: false, status: "" });
+        patchPage(tabId, { status: "" });
         updateLive(tabId, { isLoading: false, canGoBack: false, canGoForward: false, playingAudio: false });
         setPageProgress(tabId, 0);
         noteDiscarded(tabId);

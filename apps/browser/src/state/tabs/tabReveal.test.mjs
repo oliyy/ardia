@@ -75,12 +75,6 @@ test("a switch the native view can't show by itself ends any reveal in that wind
   assert.deepEqual(revealed(), ["drop over a"], "a New Tab page");
   S().activate("a");
   revealed();
-  patchPage("d", { newTabShown: { url: "", title: "", favicon: null } });
-  S().activate("d");
-  assert.deepEqual(revealed(), ["drop over a"], "a page under the New Tab page");
-  patchPage("d", { newTabShown: null });
-  S().activate("a");
-  revealed();
   patchPage("e", { crashed: { status: 1, reason: "crashed", code: 0 } });
   S().activate("e");
   assert.deepEqual(revealed(), ["drop over a"], "a crashed page, which shows the sad tab over it");
@@ -131,12 +125,6 @@ test("a page Chrome opened in front (a link's new tab, DevTools, an extension) i
   assert.deepEqual(revealed(), [], "in the background");
   S().newTab("w1", { url: "https://dup.example/", adoptId: "clone:a" });
   assert.deepEqual(revealed(), [`drop over ${made}`], "a duplicate made from a tab");
-  S().activate("b");
-  revealed();
-  patchPage("b", { newTabShown: { url: "", title: "", favicon: null } });
-  S().newTab("w1", { url: "https://other.example/", adoptId: "tab:7" });
-  assert.deepEqual(revealed(), ["drop over b"], "over a New Tab page");
-  patchPage("b", { newTabShown: null });
 });
 
 test("a new tab isn't shown over a page whose toolbar is scrolled away (its page is taller than the new tab's)", async () => {

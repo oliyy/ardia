@@ -84,7 +84,6 @@ test("the engine hears which page the user is looking at while control is on", a
 test("a page parked behind New Tab or an Ardia page is not what the user is looking at", async () => {
   const active = [];
   globalThis.acTestCliActive = (id) => (active.push(id), Promise.resolve({}));
-  const { patchPage } = await import("../tabs/pageState.ts");
   const S = useBrowser.getState;
   S().hydrate({});
   const w = S().createWindow({ url: "https://a.com" });
@@ -94,18 +93,9 @@ test("a page parked behind New Tab or an Ardia page is not what the user is look
   emit({ state: "on", generation: 4, connections: 0 });
   await settle();
   assert.deepEqual(active, [a]);
-  const tab = S().tabs[a];
-  patchPage(a, { newTabShown: { url: tab.url, title: tab.title, favicon: null } });
-  S().updateTab(a, { url: "", title: "", favicon: null });
-  await settle();
-  assert.deepEqual(active, [a, null], "Back to New Tab keeps the WebContents for Forward, but shows New Tab");
-  patchPage(a, { newTabShown: null });
-  S().updateTab(a, { url: tab.url, title: tab.title });
-  await settle();
-  assert.deepEqual(active, [a, null, a], "Forward shows the page again");
   S().updateTab(a, { url: "ardia://settings", page: { kind: "loaded", nav: { ...S().tabs[a].page.nav, url: "ardia://settings" } } });
   await settle();
-  assert.deepEqual(active, [a, null, a, null], "an Ardia page over a parked WebContents");
+  assert.deepEqual(active, [a, null], "an Ardia page over a parked WebContents");
   emit({ state: "off", generation: 4 });
   await settle();
 });

@@ -33,9 +33,7 @@ export type PageState = {
   externalApp: ExternalAppRequest | null;
   mediaAccess: MediaAccess | null;
   wasNewTab: boolean;
-  backToNewTab: boolean;
   engineBack: { engine: PageEngine; url: string } | null;
-  newTabShown: { url: string; title: string; favicon: string | null } | null;
 };
 
 const IDLE_PAGE: PageState = {
@@ -53,9 +51,7 @@ const IDLE_PAGE: PageState = {
   externalApp: null,
   mediaAccess: null,
   wasNewTab: false,
-  backToNewTab: false,
   engineBack: null,
-  newTabShown: null,
 };
 
 type Store = {
