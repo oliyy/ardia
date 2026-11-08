@@ -84,7 +84,7 @@ export const privacyRows = {
     },
   ],
   search: [
-    { section: "Default search engine", rows: { defaultEngine: { title: "Default search engine", description: "Used by the command bar and the New Tab page.", keywords: ["google", "duckduckgo", "bing", "kagi", "ecosia"] } } },
+    { section: "Default search engine", rows: { defaultEngine: { title: "Default search engine", description: "Used by the command bar.", keywords: ["google", "duckduckgo", "bing", "kagi", "ecosia"] } } },
     {
       section: "Other search engines",
       rows: { otherEngines: { advanced: true, title: "Other search engines", description: "Type a shortcut and press Tab in the command bar to search a site directly.", keywords: ["custom search", "site search", "keyword"] } },

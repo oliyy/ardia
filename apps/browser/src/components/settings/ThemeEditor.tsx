@@ -95,7 +95,7 @@ export function ThemeSection({ profileId }: { profileId: string }) {
     <>
       <SectionHeader
         title="Theme"
-        description="Tints this profile's windows, New Tab page and highlights."
+        description="Tints this profile's windows and highlights."
         action={<Button title="Import from Arc…" onPress={() => void importArcTheme(profileId)} />}
       />
       <Group>
