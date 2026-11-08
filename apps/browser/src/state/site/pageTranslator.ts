@@ -6,6 +6,10 @@ const KEY = `window[Symbol.for("ardia.translator")]`;
 const INSTALL = String.raw`
 const KEY = Symbol.for("ardia.translator");
 if (!window[KEY]) {
+  const REGIONS = "nav,header,footer,aside,menu,dialog,[role=navigation],[role=banner],[role=contentinfo],[role=complementary],[role=menu],[aria-hidden=true]";
+  const SAMPLE_CHARS = 3000;
+  const SAMPLE_MAIN = 400;
+  const SAMPLE_PAGE = 200;
   const SKIP = "script,style,noscript,template,code,pre,kbd,samp,var,textarea,input,select,option,svg,math,iframe,[contenteditable]:not([contenteditable=false]),[translate=no],.notranslate";
   const BLOCK = "p,li,dd,dt,td,th,caption,figcaption,blockquote,h1,h2,h3,h4,h5,h6,summary,legend,label,button,div,section,article,aside,header,footer,main,nav,form,fieldset,details,dialog,body";
   const LETTER = /\p{L}/u;
@@ -53,10 +57,33 @@ if (!window[KEY]) {
       return n.nodeType === 3 && n.nodeValue.length <= MAX_TEXT && this.letter.test(n.nodeValue) && !skipped(n.parentElement);
     },
     sample() {
-      const w = document.createTreeWalker(root(), NodeFilter.SHOW_TEXT);
-      let text = "";
-      for (let n = w.nextNode(), i = 0; n && text.length < 2500 && i < 20000; n = w.nextNode(), i++)
-        if (n.nodeValue.length <= MAX_TEXT && LETTER.test(n.nodeValue) && !skipped(n.parentElement)) text += n.nodeValue.trim() + " ";
+      const shown = new WeakMap();
+      const visible = (el) => {
+        let v = shown.get(el);
+        if (v === undefined) shown.set(el, (v = !el.checkVisibility || el.checkVisibility({ visibilityProperty: true })));
+        return v;
+      };
+      const chrome = new WeakMap();
+      const inChrome = (el) => {
+        let v = chrome.get(el);
+        if (v === undefined) chrome.set(el, (v = !!el.closest(REGIONS)));
+        return v;
+      };
+      const collect = (from, skipChrome) => {
+        if (!from) return "";
+        const w = document.createTreeWalker(from, NodeFilter.SHOW_TEXT);
+        let text = "";
+        for (let n = w.nextNode(), i = 0; n && text.length < SAMPLE_CHARS && i < 50000; n = w.nextNode(), i++) {
+          const el = n.parentElement;
+          if (n.nodeValue.length > MAX_TEXT || !LETTER.test(n.nodeValue) || skipped(el) || !visible(el) || (skipChrome && inChrome(el))) continue;
+          text += n.nodeValue.trim() + " ";
+        }
+        return text;
+      };
+      const main = document.querySelector("main") || document.querySelector("[role=main]") || document.querySelector("article");
+      let text = collect(main, false);
+      if (text.length < SAMPLE_MAIN) text = collect(root(), true);
+      if (text.length < SAMPLE_PAGE) text = collect(root(), false);
       return { lang: document.documentElement.lang || "", text, active: this.active };
     },
     wake() {

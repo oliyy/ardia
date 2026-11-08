@@ -32,6 +32,10 @@ const BATCH = 8;
 const BATCH_CHARS = 2000;
 const WAIT_MS = 5000;
 const WAIT_GRACE_MS = 2000;
+const SHORT_TEXT = 40;
+const SETTLED_TEXT = 200;
+const LOADED_PASSES = [0, 2000] as const;
+const SAME_DOCUMENT_PASSES = [700, 2000] as const;
 const PROGRESS_AFTER_MS = 1200;
 const PROGRESS_TOAST = "translate-progress";
 
@@ -90,25 +94,45 @@ export function setNeverTranslate(tabId: string, never: boolean) {
 }
 
 type Sample = { lang: string; text: string; active: boolean };
+type PageLanguage = { language: string | null; active: boolean; thin: boolean };
 
-async function pageLanguage(tabId: string): Promise<{ language: string | null; active: boolean } | null> {
+async function pageLanguage(tabId: string): Promise<PageLanguage | null> {
   const sample = await webviews.get(tabId)?.evaluate<Sample>(translatorCall("sample"));
   if (!sample || !translation) return null;
-  const detected = sample.text.length >= 40 ? await translation.detect(sample.text.slice(0, 3000)) : null;
-  return { language: detected ?? (sample.lang ? String(sample.lang).slice(0, 20) : null), active: !!sample.active };
+  const text = sample.text.trim();
+  const lang = sample.lang ? String(sample.lang).slice(0, 20) : null;
+  const language = text.length >= SHORT_TEXT ? await translation.detect(text.slice(0, 3000)) : lang;
+  return { language, active: !!sample.active, thin: text.length < SETTLED_TEXT };
 }
 
-async function detect(tabId: string) {
+async function detect(tabId: string, settled = true) {
   const tab = useBrowser.getState().tabs[tabId];
   if (!translation || !tab || !translatableHost(tab.url)) return set(tabId, IDLE);
   const page = await pageLanguage(tabId);
   if (!page) return;
   if (!page.active && stateOf(tabId).status === "translated") toIdle(tabId);
   if (isNeverTranslated(tab.profileId, tab.url)) return setSource(tabId, null);
+  if (page.thin && !settled) return;
   const mine = new Set(languages().map(baseLanguage));
   const source = page.language && !mine.has(baseLanguage(page.language)) ? page.language : null;
   if (source && (await translation.status(source, defaultTarget())) === "unsupported") return setSource(tabId, null);
+  if (useBrowser.getState().tabs[tabId]?.url !== tab.url) return;
   setSource(tabId, source);
+}
+
+const passes = new Map<string, ReturnType<typeof setTimeout>[]>();
+
+function detectSoon(tabId: string, delays: readonly number[]) {
+  for (const timer of passes.get(tabId) ?? []) clearTimeout(timer);
+  passes.set(
+    tabId,
+    delays.map((delay, i) =>
+      setTimeout(() => {
+        if (useBrowser.getState().live[tabId]?.isLoading) return;
+        void detect(tabId, i === delays.length - 1).catch(() => {});
+      }, delay),
+    ),
+  );
 }
 
 type Batch = { passages: Passage[]; more: boolean; gone: boolean; done: number; total: number };
@@ -280,10 +304,19 @@ export function startTranslate() {
   if (!translation) return () => {};
   return useBrowser.subscribe((s, prev) => {
     for (const id of changedIds(s.live, prev.live)) {
-      if (s.live[id] && prev.live[id]?.isLoading && !s.live[id].isLoading) void detect(id).catch(() => {});
+      if (s.live[id] && prev.live[id]?.isLoading && !s.live[id].isLoading) detectSoon(id, LOADED_PASSES);
     }
     if (s.tabs === prev.tabs) return;
+    for (const id of changedIds(s.tabs, prev.tabs)) {
+      const url = s.tabs[id]?.url;
+      const before = prev.tabs[id]?.url;
+      if (!url || !before || url === before) continue;
+      if (translatableHost(url) !== translatableHost(before) && useTranslate.getState()[id]) set(id, IDLE);
+      if (!s.live[id]?.isLoading) detectSoon(id, SAME_DOCUMENT_PASSES);
+    }
     const gone = Object.keys(useTranslate.getState()).filter((id) => !s.tabs[id]);
+    for (const id of gone) for (const timer of passes.get(id) ?? []) clearTimeout(timer);
+    for (const id of gone) passes.delete(id);
     if (gone.length) useTranslate.setState(Object.fromEntries(gone.map((id) => [id, undefined])));
   });
 }
