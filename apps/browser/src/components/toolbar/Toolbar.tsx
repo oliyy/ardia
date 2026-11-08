@@ -228,6 +228,7 @@ export function FieldButtons({
   toggleSiteControls,
   accessory,
   zoom = true,
+  translate = true,
   children,
 }: {
   tab: ToolbarTab;
@@ -238,6 +239,7 @@ export function FieldButtons({
   toggleSiteControls: () => void;
   accessory?: ReactNode;
   zoom?: boolean;
+  translate?: boolean;
   children?: ReactNode;
 }) {
   const popups = usePage(tab.id, (p) => p.popups.length);
@@ -245,7 +247,7 @@ export function FieldButtons({
   return (
     <View style={{ flexDirection: "row", alignItems: "center", paddingRight: 3 }}>
       {children}
-      <TranslateButton tabId={tab.id} palette={palette} box={row.fieldButton} radius={row.fieldButtonRadius} onFocus={onFocus} />
+      {translate && <TranslateButton tabId={tab.id} palette={palette} box={row.fieldButton} radius={row.fieldButtonRadius} onFocus={onFocus} />}
       {capture && <CaptureIndicator camera={capture.camera} microphone={capture.microphone} screen={capture.screen} box={row.fieldButton} onPress={toggleSiteControls} />}
       {zoom && <ZoomIndicator tabId={tab.id} zoom={tab.zoom} palette={palette} box={row.fieldButton} radius={row.fieldButtonRadius} onFocus={onFocus} />}
       {popups > 0 && (

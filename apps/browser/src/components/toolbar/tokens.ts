@@ -4,7 +4,7 @@ export const TOOLBAR_MOTION = { dim: 160, progress: 200, hide: 150, show: 200, s
 
 export const SIDEBAR_URL_TEXT = { light: "#00000099", dark: "#FFFFFF99" } as const;
 
-export const SIDEBAR_FIELD_BUTTONS = { box: 24, radius: 6, fade: 150, siteControlsGlyph: 18, insecureIcon: 22 } as const;
+export const SIDEBAR_FIELD_BUTTONS = { box: 24, radius: 6, fade: 150, siteControlsGlyph: 18, insecureIcon: 22, translateGap: 2, translateTrail: 1.5 } as const;
 
 export const COPY_LINK = {
   glyph: 14,

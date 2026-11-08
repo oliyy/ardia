@@ -55,3 +55,5 @@ export const siteLine = { section: 15, checkLabel: 16 } as const;
 export const selectionBar = { radius: 10, shadow: { ...shadow.popover, radius: 14, offset: [0, 6] } satisfies ShadowLevel, showDelay: 150 } as const;
 
 export const UNAVAILABLE_OPACITY = 0.4;
+
+export const TRANSLATE_GLYPH = { sidebarSize: 12, toolbarSize: 11, pulseLow: 0.4, pulseMs: 700, settleMs: 150 } as const;

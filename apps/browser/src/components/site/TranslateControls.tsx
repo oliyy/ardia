@@ -11,22 +11,55 @@ import {
   translationTarget,
   useTranslateState,
 } from "../../state/site/translate";
-import { memo } from "react";
-import { View } from "react-native";
+import { memo, useEffect, useRef } from "react";
+import { Animated } from "react-native";
 import { useSettings, useTab } from "../../state/browser/hooks";
 import { isIncognitoProfile } from "../../state/browser/model";
-import { Button, MenuRow, MenuSeparator, Symbol, Toggle } from "../ui";
-import { useTheme } from "../ui/theme";
+import { Button, MenuRow, MenuSeparator, Symbol, Toggle, type SymbolProps } from "../ui";
 import type { ToolbarPalette } from "../ui/toolbarColors";
 import { SettingRow } from "./SiteControlsParts";
+import { TRANSLATE_GLYPH } from "./tokens";
 
-const LIT_BADGE = 18;
+export function useTranslateButton(tabId: string) {
+  const state = useTranslateState(tabId);
+  const shown = !!translation && (!!state.source || state.status !== "idle");
+  const on = state.status !== "idle";
+  return {
+    shown,
+    on,
+    translating: state.status === "translating",
+    tooltip: on ? "Show Original" : `Translate to ${languageName(defaultTarget())}`,
+    toggle: () => toggleTranslation(tabId),
+  };
+}
+
+export function TranslateGlyph({ size, weight, color, frame, translating }: { size: number; weight: SymbolProps["weight"]; color: string; frame: number; translating: boolean }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  const wasTranslating = useRef(false);
+  useEffect(() => {
+    if (translating) {
+      wasTranslating.current = true;
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, { toValue: TRANSLATE_GLYPH.pulseLow, duration: TRANSLATE_GLYPH.pulseMs, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 1, duration: TRANSLATE_GLYPH.pulseMs, useNativeDriver: true }),
+        ]),
+      );
+      pulse.start();
+      return () => pulse.stop();
+    }
+    if (wasTranslating.current) Animated.timing(opacity, { toValue: 1, duration: TRANSLATE_GLYPH.settleMs, useNativeDriver: true }).start();
+  }, [translating]);
+  return (
+    <Animated.View pointerEvents="none" style={{ width: frame, height: frame, opacity }}>
+      <Symbol name="translate" size={size} weight={weight} color={color} style={{ width: frame, height: frame }} />
+    </Animated.View>
+  );
+}
 
 export const TranslateButton = memo(function TranslateButton({ tabId, palette, box, radius, onFocus }: { tabId: string; palette: ToolbarPalette; box: number; radius: number; onFocus: () => void }) {
-  const theme = useTheme();
-  const state = useTranslateState(tabId);
-  if (!translation || (!state.source && state.status === "idle")) return null;
-  const on = state.status !== "idle";
+  const button = useTranslateButton(tabId);
+  if (!button.shown) return null;
   return (
     <Button
       variant="icon"
@@ -34,16 +67,13 @@ export const TranslateButton = memo(function TranslateButton({ tabId, palette, b
       palette={palette}
       box={box}
       radius={radius}
-      glyph={(tint) => (
-        <View style={{ width: LIT_BADGE, height: LIT_BADGE, borderRadius: LIT_BADGE / 2, alignItems: "center", justifyContent: "center", backgroundColor: on ? theme.accent : undefined }}>
-          <Symbol name="translate" size={on ? 11 : 13} weight={on ? "medium" : "regular"} color={on ? theme.onAccent : tint} style={{ width: LIT_BADGE, height: LIT_BADGE }} />
-        </View>
-      )}
+      active={button.on}
+      glyph={(tint) => <TranslateGlyph size={TRANSLATE_GLYPH.toolbarSize} weight="regular" color={tint} frame={box} translating={button.translating} />}
       onPress={() => {
         onFocus();
-        toggleTranslation(tabId);
+        button.toggle();
       }}
-      tooltip={on ? "Show Original" : `Translate to ${languageName(defaultTarget())}`}
+      tooltip={button.tooltip}
     />
   );
 });

@@ -11,6 +11,8 @@ import { useSidebarHovered } from "../sidebar/ClearDivider";
 import { showUrlBarMenu } from "../../state/omnibox/paste";
 import { COPY_LINK, SIDEBAR_FIELD_BUTTONS, SIDEBAR_URL_TEXT } from "./tokens";
 import { FieldButtons, LOCK, useUrlField, type UrlFieldProps } from "./Toolbar";
+import { TranslateGlyph, useTranslateButton } from "../site/TranslateControls";
+import { TRANSLATE_GLYPH } from "../site/tokens";
 
 const SITE_CONTROLS_GLYPH = {
   closed: require("../../../assets/arc-url-icons/site-controls.png"),
@@ -33,6 +35,8 @@ export const SidebarUrlField = memo(function SidebarUrlField({ tab, palette, win
   const buttonsShown = hovered || sidebarHovered;
   const buttonsFade = useFieldButtonsFade(buttonsShown);
   const textLeft = insecure ? LOCK.gap : SIDEBAR_FIELD.textLeft;
+  const translate = useTranslateButton(tab.id);
+  const translateWidth = translate.shown ? SIDEBAR_FIELD_BUTTONS.box + SIDEBAR_FIELD_BUTTONS.translateGap + SIDEBAR_FIELD_BUTTONS.translateTrail : 0;
 
   return (
     <View {...field.hoverProps} style={{ flexDirection: "row", alignItems: "center", height, borderRadius: SIDEBAR_FIELD.radius, borderCurve: "continuous", overflow: "hidden" }}>
@@ -59,24 +63,41 @@ export const SidebarUrlField = memo(function SidebarUrlField({ tab, palette, win
               text={field.host + field.trail}
               alignment={urlTextAlignment(tab.url)}
               color={theme.dark ? SIDEBAR_URL_TEXT.dark : SIDEBAR_URL_TEXT.light}
-              hoverButtonsWidth={buttonsShown ? 2 * SIDEBAR_FIELD_BUTTONS.box : 0}
+              hoverButtonsWidth={(buttonsShown ? 2 * SIDEBAR_FIELD_BUTTONS.box : 0) + translateWidth}
               pointerEvents="none"
               style={{ position: "absolute", left: textLeft, right: 0, top: 0, bottom: 0 }}
             />
           </Pressable>
         </ContextMenuArea>
-        <Animated.View pointerEvents={buttonsShown ? "box-none" : "none"} style={{ position: "absolute", right: 0, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", opacity: buttonsFade }}>
-          <CopyLinkButton url={tab.url} palette={palette} />
-          <FieldButton palette={palette} active={popover === "siteControls"} onPress={toggleSiteControls} tooltip="Site Controls">
-            <Image
-              source={popover === "siteControls" ? SITE_CONTROLS_GLYPH.open : SITE_CONTROLS_GLYPH.closed}
-              accessible={false}
-              style={{ width: SIDEBAR_FIELD_BUTTONS.siteControlsGlyph, height: SIDEBAR_FIELD_BUTTONS.siteControlsGlyph, tintColor: palette.icon }}
-            />
-          </FieldButton>
-        </Animated.View>
+        <View pointerEvents="box-none" style={{ position: "absolute", right: 0, top: 0, bottom: 0, flexDirection: "row", alignItems: "center" }}>
+          <Animated.View pointerEvents={buttonsShown ? "box-none" : "none"} style={{ flexDirection: "row", alignItems: "center", opacity: buttonsFade }}>
+            <CopyLinkButton url={tab.url} palette={palette} />
+            <FieldButton palette={palette} active={popover === "siteControls"} onPress={toggleSiteControls} tooltip="Site Controls">
+              <Image
+                source={popover === "siteControls" ? SITE_CONTROLS_GLYPH.open : SITE_CONTROLS_GLYPH.closed}
+                accessible={false}
+                style={{ width: SIDEBAR_FIELD_BUTTONS.siteControlsGlyph, height: SIDEBAR_FIELD_BUTTONS.siteControlsGlyph, tintColor: palette.icon }}
+              />
+            </FieldButton>
+          </Animated.View>
+          {translate.shown ? (
+            <View style={{ marginLeft: SIDEBAR_FIELD_BUTTONS.translateGap, marginRight: SIDEBAR_FIELD_BUTTONS.translateTrail }}>
+              <FieldButton
+                palette={palette}
+                active={translate.on}
+                onPress={() => {
+                  onFocus();
+                  translate.toggle();
+                }}
+                tooltip={translate.tooltip}
+              >
+                <TranslateGlyph size={TRANSLATE_GLYPH.sidebarSize} weight="medium" color={palette.icon} frame={COPY_LINK.frame} translating={translate.translating} />
+              </FieldButton>
+            </View>
+          ) : null}
+        </View>
       </View>
-      <FieldButtons tab={tab} palette={palette} row={TOOLBAR_ROWS.regular} onFocus={onFocus} popover={popover} toggleSiteControls={toggleSiteControls} accessory={accessory} zoom={false} />
+      <FieldButtons tab={tab} palette={palette} row={TOOLBAR_ROWS.regular} onFocus={onFocus} popover={popover} toggleSiteControls={toggleSiteControls} accessory={accessory} zoom={false} translate={false} />
     </View>
   );
 });
