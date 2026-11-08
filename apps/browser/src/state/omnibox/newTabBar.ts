@@ -8,6 +8,7 @@ import { isSmall } from "../windows/small";
 import { focusedWindowOf } from "../windows/ui";
 import type { NewTabTarget } from "../browser/types";
 import { switchFromBar } from "./openFromBar";
+import { discardKeyResponder, saveKeyResponder } from "../../platform/focus";
 
 export { isEmptyCardTab };
 
@@ -61,6 +62,12 @@ export function openFromNewTabBar(windowId: string, target: NewTabTarget, url: s
     return store().activate(id);
   }
   store().newTab(windowId, { url, newTabCommand: true });
+}
+
+export async function focusLeftNewTabBar(windowId: string): Promise<boolean> {
+  const holder = await saveKeyResponder(windowId);
+  discardKeyResponder(holder);
+  return holder !== 0;
 }
 
 export function switchFromNewTabBar(targetTabId: string, url: string, barTabId: string) {

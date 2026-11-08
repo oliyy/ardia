@@ -16,7 +16,7 @@ import { traceOmnibox, useOmniboxDriver } from "./devDriver";
 import { claimFocusTag, commandBarFocus } from "../../state/focus/focusClaims";
 import type { BarDismissal } from "../../state/omnibox/barState";
 import { openFromBar, otherOpenTabs, switchFromBar, type Disposition } from "../../state/omnibox/openFromBar";
-import { openFromNewTabBar, switchFromNewTabBar } from "../../state/omnibox/newTabBar";
+import { focusLeftNewTabBar, openFromNewTabBar, switchFromNewTabBar } from "../../state/omnibox/newTabBar";
 import { routeTyped } from "../../state/omnibox/typedRoutes";
 import { closePanel } from "../../state/windows/actions";
 import type { NewTabTarget } from "../../state/browser/types";
@@ -283,7 +283,11 @@ export function Omnibox({
       onBlur={() => {
         editing.current = false;
         focusEcho.current = false;
-        onCancel?.();
+        if (!newTabBar) return onCancel?.();
+        void focusLeftNewTabBar(windowId).then((left) => {
+          if (left) return latest.current.onCancel?.();
+          if (latest.current.onCancel && !editing.current) focusField();
+        });
       }}
       keyDownEvents={barKeyDownEvents(asksForBackspace(scope), isRemovable(current), newTabBar)}
       onKeyDown={onKeyDown}
