@@ -152,7 +152,8 @@ if (!window[KEY]) {
       if (tries <= MAX_RETRIES && node.isConnected) this.track(node);
     },
     start(token, letters) {
-      if (this.active) return this.token === token;
+      if (this.active && this.token === token) return true;
+      if (this.active) this.revert();
       this.active = true;
       this.token = token;
       try {
@@ -279,6 +280,10 @@ if (!window[KEY]) {
   });
 }
 `;
+
+export type PageProbe = { href: string; ready: string; active: boolean; token: string | null };
+
+export const PAGE_PROBE = `const t = ${KEY}; post("result", JSON.stringify({ href: location.href, ready: document.readyState, active: !!(t && t.active), token: t ? t.token : null }));`;
 
 type Installing = "sample" | "start";
 type Op = Installing | "next" | "wait" | "apply" | "revert";

@@ -39,3 +39,13 @@ export function originForSecurityDisplay(origin: string): string {
     return origin;
   }
 }
+
+const GENERIC_SECOND_LEVEL = new Set(["ac", "co", "com", "edu", "gen", "go", "gob", "gov", "idv", "ltd", "mil", "ne", "net", "nom", "or", "org", "plc", "sch"]);
+
+export function registrableDomain(host: string): string {
+  const name = host.toLowerCase().replace(/\.$/, "");
+  if (!name.includes(".") || /^[\d.]+$/.test(name) || name.includes(":")) return name;
+  const labels = name.split(".");
+  const keep = labels.length > 2 && labels.at(-1)!.length === 2 && GENERIC_SECOND_LEVEL.has(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-keep).join(".");
+}
