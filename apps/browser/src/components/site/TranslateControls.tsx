@@ -11,10 +11,42 @@ import {
   translationTarget,
   useTranslateState,
 } from "../../state/site/translate";
+import { memo } from "react";
+import { View } from "react-native";
 import { useSettings, useTab } from "../../state/browser/hooks";
 import { isIncognitoProfile } from "../../state/browser/model";
-import { MenuRow, MenuSeparator, Toggle } from "../ui";
+import { Button, MenuRow, MenuSeparator, Symbol, Toggle } from "../ui";
+import { useTheme } from "../ui/theme";
+import type { ToolbarPalette } from "../ui/toolbarColors";
 import { SettingRow } from "./SiteControlsParts";
+
+const LIT_BADGE = 18;
+
+export const TranslateButton = memo(function TranslateButton({ tabId, palette, box, radius, onFocus }: { tabId: string; palette: ToolbarPalette; box: number; radius: number; onFocus: () => void }) {
+  const theme = useTheme();
+  const state = useTranslateState(tabId);
+  if (!translation || (!state.source && state.status === "idle")) return null;
+  const on = state.status !== "idle";
+  return (
+    <Button
+      variant="icon"
+      toolbar
+      palette={palette}
+      box={box}
+      radius={radius}
+      glyph={(tint) => (
+        <View style={{ width: LIT_BADGE, height: LIT_BADGE, borderRadius: LIT_BADGE / 2, alignItems: "center", justifyContent: "center", backgroundColor: on ? theme.accent : undefined }}>
+          <Symbol name="translate" size={on ? 11 : 13} weight={on ? "medium" : "regular"} color={on ? theme.onAccent : tint} style={{ width: LIT_BADGE, height: LIT_BADGE }} />
+        </View>
+      )}
+      onPress={() => {
+        onFocus();
+        toggleTranslation(tabId);
+      }}
+      tooltip={on ? "Show Original" : `Translate to ${languageName(defaultTarget())}`}
+    />
+  );
+});
 
 export function TranslateSetting({ tabId, onClose }: { tabId: string; onClose: () => void }) {
   const state = useTranslateState(tabId);

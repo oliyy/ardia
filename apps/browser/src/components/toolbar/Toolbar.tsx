@@ -21,6 +21,7 @@ import { showUrlBarMenu } from "../../state/omnibox/paste";
 import { ToolbarExtensions, useToolbarExtensionsWidth } from "../extensions/ToolbarExtensions";
 import { GlassFill, liquidGlass } from "../ui/Glass";
 import { ZoomIndicator } from "../site/ZoomControls";
+import { TranslateButton } from "../site/TranslateControls";
 import { useShortcutHint, withShortcut } from "../../state/commands/commandShortcuts";
 import { curve } from "../ui/motion";
 import { HistoryButton, ReloadButton } from "./NavButtons";
@@ -244,6 +245,7 @@ export function FieldButtons({
   return (
     <View style={{ flexDirection: "row", alignItems: "center", paddingRight: 3 }}>
       {children}
+      <TranslateButton tabId={tab.id} palette={palette} box={row.fieldButton} radius={row.fieldButtonRadius} onFocus={onFocus} />
       {capture && <CaptureIndicator camera={capture.camera} microphone={capture.microphone} screen={capture.screen} box={row.fieldButton} onPress={toggleSiteControls} />}
       {zoom && <ZoomIndicator tabId={tab.id} zoom={tab.zoom} palette={palette} box={row.fieldButton} radius={row.fieldButtonRadius} onFocus={onFocus} />}
       {popups > 0 && (
