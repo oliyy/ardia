@@ -30,9 +30,28 @@ export const useTranslateState = (tabId: string) => useTranslate((s) => s[tabId]
 
 const BATCH = 8;
 const BATCH_CHARS = 2000;
-const FOLLOW_MS = 600;
+const WAIT_MS = 5000;
+const WAIT_GRACE_MS = 2000;
 const PROGRESS_AFTER_MS = 1200;
 const PROGRESS_TOAST = "translate-progress";
+
+const SOURCE_SCRIPTS: Record<string, string[]> = {
+  ar: ["Arabic"],
+  he: ["Hebrew"],
+  hi: ["Devanagari"],
+  ja: ["Han", "Hiragana", "Katakana"],
+  ko: ["Hangul", "Han"],
+  ru: ["Cyrillic"],
+  uk: ["Cyrillic"],
+  th: ["Thai"],
+  "zh-Hans": ["Han"],
+  "zh-Hant": ["Han"],
+};
+
+export function sourceLetters(source: string): string {
+  const scripts = SOURCE_SCRIPTS[baseLanguage(source)];
+  return scripts ? scripts.map((script) => `\\p{Script=${script}}`).join("|") : "\\p{L}";
+}
 
 export function baseLanguage(language: string): string {
   const [lang = "", second] = language.split(/[-_]/);
@@ -113,32 +132,44 @@ async function translatePassages(source: string, target: string, passages: Passa
   return out;
 }
 
+function cleanPassages(passages: Passage[]): Passage[] {
+  return passages
+    .slice(0, BATCH * 4)
+    .filter((p): p is Passage => Array.isArray(p) && Array.isArray(p[1]))
+    .map(([id, pieces]): Passage => [id, pieces.filter((x) => Array.isArray(x) && typeof x[1] === "string").slice(0, 40)]);
+}
+
 async function drain(tabId: string, token: string, onProgress?: (done: number, total: number) => void): Promise<boolean> {
+  let previous: Promise<boolean> = Promise.resolve(true);
   for (;;) {
     const current = stateOf(tabId);
     const web = webviews.get(tabId);
-    if (current.status === "idle" || current.token !== token || !web) return false;
+    if (current.status === "idle" || current.token !== token || !web) return previous.then(() => false);
     const { source, target } = current;
     const batch = await web.evaluate<Batch>(translatorCall("next", token, BATCH, BATCH_CHARS));
-    if (!batch || batch.gone || !Array.isArray(batch.passages)) return false;
-    const passages = batch.passages
-      .slice(0, BATCH * 4)
-      .filter((p): p is Passage => Array.isArray(p) && Array.isArray(p[1]))
-      .map(([id, pieces]): Passage => [id, pieces.filter((x) => Array.isArray(x) && typeof x[1] === "string").slice(0, 40)]);
-    if (passages.length) {
+    if (!batch || batch.gone || !Array.isArray(batch.passages)) return previous.then(() => false);
+    const passages = cleanPassages(batch.passages);
+    const translated = passages.length ? translatePassages(source, target, passages) : Promise.resolve([]);
+    translated.catch(() => {});
+    const step = previous.then(async (ok) => {
+      if (!ok) return false;
       let results: Translated[];
       try {
-        results = await translatePassages(source, target, passages);
+        results = await translated;
       } catch (error) {
         const untranslated: Translated[] = passages.flatMap(([, pieces]) => pieces.map(([id]): Translated => [id, null]));
         await web.evaluate(translatorCall("apply", untranslated)).catch(() => {});
         throw error;
       }
       if (!holds(tabId, token)) return false;
-      await web.evaluate(translatorCall("apply", results));
-    }
-    onProgress?.(batch.done, batch.total);
-    if (!batch.more) return true;
+      if (results.length) await web.evaluate(translatorCall("apply", results));
+      onProgress?.(batch.done, batch.total);
+      return true;
+    });
+    step.catch(() => {});
+    if (!batch.more) return step;
+    if (!(await previous)) return step.then(() => false);
+    previous = step;
   }
 }
 
@@ -147,14 +178,31 @@ function holds(tabId: string, token: string) {
   return state.status !== "idle" && state.token === token;
 }
 
+const stillTranslated = (tabId: string, token: string) => {
+  const current = stateOf(tabId);
+  return current.status === "translated" && current.token === token;
+};
+
+type Wait = "work" | "idle" | "gone";
+
+async function waitForText(tabId: string, token: string): Promise<Wait | null> {
+  const web = webviews.get(tabId);
+  if (!web) return null;
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), WAIT_MS + WAIT_GRACE_MS));
+  return Promise.race([web.evaluate<Wait>(translatorCall("wait", token, WAIT_MS)).catch(() => null), timeout]);
+}
+
 async function follow(tabId: string, token: string) {
   for (;;) {
-    await new Promise((r) => setTimeout(r, FOLLOW_MS));
-    const current = stateOf(tabId);
-    if (current.status !== "translated" || current.token !== token) return;
-    try {
-      if (await drain(tabId, token)) continue;
-    } catch {}
+    if (!stillTranslated(tabId, token)) return;
+    const found = await waitForText(tabId, token);
+    if (!stillTranslated(tabId, token)) return;
+    if (found === "idle") continue;
+    if (found === "work") {
+      try {
+        if (await drain(tabId, token)) continue;
+      } catch {}
+    }
     if (!holds(tabId, token)) return;
     if ((await pageLanguage(tabId).catch(() => null))?.active) continue;
     if (holds(tabId, token)) toIdle(tabId);
@@ -183,7 +231,7 @@ export async function translatePage(tabId: string, target = defaultTarget()) {
     if (status === "supported") await translation.prepare(source, target);
     const token = Math.random().toString(36).slice(2);
     set(tabId, { status: "translating", source, target, token });
-    if (!(await webviews.get(tabId)?.evaluate<boolean>(translatorCall("start", token)))) throw new Error("the page isn't ready");
+    if (!(await webviews.get(tabId)?.evaluate<boolean>(translatorCall("start", token, sourceLetters(source))))) throw new Error("the page isn't ready");
     const started = Date.now();
     const done = await drain(tabId, token, (n, total) => {
       if (Date.now() - started < PROGRESS_AFTER_MS || total <= 0) return;
