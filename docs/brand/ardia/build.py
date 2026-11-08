@@ -53,7 +53,7 @@ mark = clean_alpha(Image.open(SRC / "mark.png"))
 mark.save(OUT / "mark-trim.png")
 
 
-def fit(im, size, width_frac, bottom=None):
+def fit(im, size, width_frac):
     w = round(size * width_frac)
     h = round(im.height * w / im.width)
     if h > size * width_frac:
@@ -61,13 +61,9 @@ def fit(im, size, width_frac, bottom=None):
         w = round(im.width * h / im.height)
     small = im.resize((w, h), LZ)
     c = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    y = (size - h) // 2 if bottom is None else size - h - bottom
-    c.alpha_composite(small, ((size - w) // 2, y))
+    c.alpha_composite(small, ((size - w) // 2, (size - h) // 2))
     return c
 
-
-for scale in (1, 2, 3):
-    fit(mark, 100 * scale, 0.94, bottom=0).save(OUT / f"ntp-mark{'' if scale == 1 else f'@{scale}x'}.png")
 
 fit(mark, 1024, 0.96).save(OUT / "plate-mark-1024.png")
 
@@ -153,85 +149,12 @@ def tinted_marks(base, names=PROFILE_SWATCHES):
 from scipy import ndimage as nd  # noqa: E402
 
 BACK, FRONT, SUN = 0, 1, 2
-painting = np.array(mark).astype(np.float32) / 255
-known = painting[..., 3] > 0.5
-blobs, _ = nd.label(painting[..., 3] > 0.06)
-hills_blob = blobs == np.bincount(blobs[blobs > 0]).argmax()
-dark = nd.median_filter(hsvlib.rgb_to_hsv(painting[..., :3])[..., 0] > 0.34, 9)
-labels = np.where(hills_blob, np.where(dark, FRONT, BACK), SUN)
-labels = labels[tuple(nd.distance_transform_edt(~known, return_distances=False, return_indices=True))]
-
-
-def fit_mask(m, size):
-    """A layer mask through `fit`'s geometry (0.94 of the width, bottom edge), box-filtered so it doesn't ring."""
-    w = round(size * 0.94)
-    h = round(mark.height * w / mark.width)
-    out = np.zeros((size, size), np.float32)
-    small = Image.fromarray((m * 255).astype(np.uint8)).resize((w, h), Image.BOX)
-    out[size - h:, (size - w) // 2:(size - w) // 2 + w] = np.array(small, np.float32) / 255
-    return out
-
-
-def split_layers(comp, size):
-    """Alphas of the back, front and sun layers, the back hill's own paint, and where it goes on under the front."""
-    a = comp[..., 3]
-    cover = np.clip(a / np.median(a[a > 0.5]), 0, 1)
-    front, sun = fit_mask(labels == FRONT, size), fit_mask(labels == SUN, size)
-    seen = (front < 0.5) & (a > 0.5) & (sun < 0.5)
-    front = nd.grey_dilation(front, size=3)
-    core = nd.binary_erosion(seen, iterations=max(1, round(0.6 * size / 100)))
-    cols = np.nonzero(seen.any(0))[0]
-    top = np.where(seen.any(0), seen.argmax(0), size).astype(np.float32)
-    notch = cols.max()
-    near = np.arange(notch - max(3, round(0.08 * size)), notch + 1)
-    slope = np.polyfit(near, top[near], 1)[0]
-    x = np.arange(size)
-    ridge = np.where(x > notch, top[notch] + slope * (x - notch), top)
-    under = (np.arange(size)[:, None] >= ridge[None, :]) & (x >= cols.min())[None, :]
-    fill = under & (front > 0.998) & (cover > 0.97)
-    back = np.where(fill, a, np.where(cover * front < 0.999, a * (1 - front) / np.maximum(1 - cover * front, 1e-6), 0.0))
-    return back * (1 - sun), a * front * (1 - sun), a * sun, core, fill
-
-
-def spread(values, weight, sigma):
-    """`values` averaged over `weight` and carried out past it (normalized convolution); also returns the weight."""
-    num = nd.gaussian_filter(values * weight[..., None], (sigma, sigma, 0))
-    den = nd.gaussian_filter(weight, sigma)
-    return num / np.maximum(den, 1e-6)[..., None], den
-
-
-def paint_back(comp, core, fill):
-    """The back hill under the front one: its own colour, smoothed and carried on, in the front hill's brushstrokes."""
-    rgb = comp[..., :3]
-    size = rgb.shape[0]
-    colour, _ = spread(rgb, core.astype(np.float32), 0.2 * size)
-    for sigma in (0.08, 0.03):
-        c, den = spread(rgb, core.astype(np.float32), sigma * size)
-        colour = np.where((den > 0.05)[..., None], c, colour)
-    lum = rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)
-    local, _ = spread(lum[..., None], fill.astype(np.float32), 0.03 * size)
-    strokes = np.clip(lum / np.maximum(local[..., 0], 1e-3), 0.5, 1.6) ** 0.8
-    return np.where(fill[..., None], np.clip(colour * strokes[..., None], 0, 1), rgb)
 
 
 def layer(rgb, alpha):
     return Image.fromarray((np.dstack([rgb[..., :3], alpha]) * 255).round().astype(np.uint8))
 
 
-for scale in (1, 2, 3):
-    suffix = "" if scale == 1 else f"@{scale}x"
-    base = Image.open(OUT / f"ntp-mark{suffix}.png")
-    back, front, sun, core, fill = split_layers(np.array(base).astype(np.float32) / 255, 100 * scale)
-    variants = [("", base)] + [(f"-{name}", im) for name, im in tinted_marks(base)]
-    for name, im in variants:
-        im.save(OUT / f"ntp-mark{name}{suffix}.png", optimize=True)
-        comp = np.array(im).astype(np.float32) / 255
-        layer(paint_back(comp, core, fill), back).save(OUT / f"ntp-mark{name}-back{suffix}.png", optimize=True)
-        layer(comp, front).save(OUT / f"ntp-mark{name}-front{suffix}.png", optimize=True)
-        layer(comp, sun).save(OUT / f"ntp-mark{name}-sun{suffix}.png", optimize=True)
-    if scale == 3:
-        print("layer tops (pt):", [round(np.nonzero((m > 0.02).any(1))[0].min() / 3, 1) for m in (back, front, sun)])
-print("tinted marks")
 
 import shutil  # noqa: E402
 
