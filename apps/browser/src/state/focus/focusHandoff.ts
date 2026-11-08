@@ -3,7 +3,7 @@ import type { CommandEvent } from "../../platform/commands";
 import { useBrowser } from "../browser/store";
 import { resolveWindowId } from "../browser/model";
 import { peekTabId } from "../peek/peek";
-import { cancelAbandonedFocus, claimFocusTag, commandBarFocus, expectFocus, findFocus, heroBarFocus, pageFocus, runFocusMove } from "./focusClaims";
+import { cancelAbandonedFocus, claimFocusTag, commandBarFocus, expectFocus, findFocus, pageFocus, runFocusMove } from "./focusClaims";
 import { webviews } from "../../platform/webviews";
 
 const activeTab = (windowId: string) => {
@@ -25,8 +25,7 @@ export function settlingCommandFocus(e: CommandEvent, run: (e: CommandEvent) => 
     expects = runFocusMove(generation, windowId, before, () => {
       run(e);
       const after = activeTab(windowId);
-      if (!after || after === before) return;
-      if (!useBrowser.getState().tabs[after]?.url) return expectFocus(windowId, heroBarFocus(after));
+      if (!after || after === before || !useBrowser.getState().tabs[after]?.url) return;
       expectFocus(windowId, pageFocus(after));
       claimFocusTag(windowId, pageFocus(after), () => webviews.get(after)?.nativeTag() ?? null);
     });
@@ -45,7 +44,7 @@ function stillPossible(windowId: string, destination: string): boolean {
     if (destination === findFocus(page)) return !!s.find[page]?.open;
     if (destination === pageFocus(page)) return true;
   }
-  return destination === heroBarFocus(active);
+  return false;
 }
 
 export function cancelAbandonedFocusMoves() {
