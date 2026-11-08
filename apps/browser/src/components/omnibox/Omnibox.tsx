@@ -16,7 +16,7 @@ import { traceOmnibox, useOmniboxDriver } from "./devDriver";
 import { claimFocusTag, commandBarFocus } from "../../state/focus/focusClaims";
 import type { BarDismissal } from "../../state/omnibox/barState";
 import { openFromBar, otherOpenTabs, switchFromBar, type Disposition } from "../../state/omnibox/openFromBar";
-import { openFromNewTabBar } from "../../state/omnibox/newTabBar";
+import { openFromNewTabBar, switchFromNewTabBar } from "../../state/omnibox/newTabBar";
 import { routeTyped } from "../../state/omnibox/typedRoutes";
 import { closePanel } from "../../state/windows/actions";
 import type { NewTabTarget } from "../../state/browser/types";
@@ -159,6 +159,7 @@ export function Omnibox({
     switch (s.kind) {
       case "page":
         if (s.tabId && disposition === "current") {
+          if (opensTab) return switchFromNewTabBar(s.tabId, s.url, tabId);
           switchFromBar(s.tabId, s.url, tabId, disposition);
           return;
         }
@@ -284,7 +285,7 @@ export function Omnibox({
         focusEcho.current = false;
         onCancel?.();
       }}
-      keyDownEvents={barKeyDownEvents(asksForBackspace(scope), isRemovable(current))}
+      keyDownEvents={barKeyDownEvents(asksForBackspace(scope), isRemovable(current), newTabBar)}
       onKeyDown={onKeyDown}
     />
   );

@@ -7,6 +7,7 @@ import { isEmptyCardTab, NEW_TAB_BAR_POLICY } from "./newTabBarPolicy";
 import { isSmall } from "../windows/small";
 import { focusedWindowOf } from "../windows/ui";
 import type { NewTabTarget } from "../browser/types";
+import { switchFromBar } from "./openFromBar";
 
 export { isEmptyCardTab };
 
@@ -60,6 +61,11 @@ export function openFromNewTabBar(windowId: string, target: NewTabTarget, url: s
     return store().activate(id);
   }
   store().newTab(windowId, { url, newTabCommand: true });
+}
+
+export function switchFromNewTabBar(targetTabId: string, url: string, barTabId: string) {
+  switchFromBar(targetTabId, url, barTabId, "current");
+  if (store().tabs[targetTabId]?.url) void webviews.get(targetTabId)?.focus();
 }
 
 const launchTabs = new Set<string>();

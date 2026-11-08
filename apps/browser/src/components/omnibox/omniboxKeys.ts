@@ -23,10 +23,15 @@ const BASE_KEYS = [
 ];
 const SCOPE_KEYS = [...BASE_KEYS, { key: "Backspace" }];
 const REMOVE_KEYS = [...BASE_KEYS, { key: "Delete", shiftKey: true }];
+const withEnter = (keys: typeof BASE_KEYS) => [{ key: "Enter" }, ...keys];
+const ENTER_KEYS = { base: withEnter(BASE_KEYS), scope: withEnter(SCOPE_KEYS), remove: withEnter(REMOVE_KEYS) };
 
 export const PASTED_TYPES = ["string" as const];
 
-export const barKeyDownEvents = (scopeAsksForBackspace: boolean, removable: boolean) => (scopeAsksForBackspace ? SCOPE_KEYS : removable ? REMOVE_KEYS : BASE_KEYS);
+export function barKeyDownEvents(scopeAsksForBackspace: boolean, removable: boolean, entersByKey = false) {
+  if (entersByKey) return scopeAsksForBackspace ? ENTER_KEYS.scope : removable ? ENTER_KEYS.remove : ENTER_KEYS.base;
+  return scopeAsksForBackspace ? SCOPE_KEYS : removable ? REMOVE_KEYS : BASE_KEYS;
+}
 
 export type BarKeyEvent = { nativeEvent: { key: string; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; ctrlKey?: boolean } };
 
@@ -76,5 +81,6 @@ export function barKeyDown(e: BarKeyEvent, k: BarKeyContext) {
     if (ctrlKey && !/[\s./:]/.test(typed.trim()) && typed.trim())
       return k.go(`https://www.${typed.trim()}.com`, shiftKey ? "newWindow" : "current");
     if (metaKey || altKey || shiftKey) return k.choose(current, dispositionFor({ metaKey, altKey, shiftKey }), true);
+    if (!ctrlKey) return k.choose(current, "current", true);
   }
 }
