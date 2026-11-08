@@ -7,14 +7,14 @@ import SwiftUI
 @available(macOS 26.0, *)
 @MainActor
 enum DownloadPrompt {
-  static func run(source: Locale.Language, target: Locale.Language) async throws {
+  static func run(_ configuration: TranslationSession.Configuration) async throws {
     guard let content = (NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible })?.contentView else {
       throw TranslateError.noWindow
     }
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       var host: NSView?
       var finished = false
-      let view = DownloadPromptView(configuration: .init(source: source, target: target)) { result in
+      let view = DownloadPromptView(configuration: configuration) { result in
         guard !finished else { return }
         finished = true
         host?.removeFromSuperview()

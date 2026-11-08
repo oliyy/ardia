@@ -28,11 +28,7 @@ public class TranslateModule: Module {
 
     AsyncFunction("status") { (source: String, target: String) async -> String in
       guard #available(macOS 26.0, *) else { return "unsupported" }
-      switch await LanguageAvailability().status(from: Locale.Language(identifier: source), to: Locale.Language(identifier: target)) {
-      case .installed: return "installed"
-      case .supported: return "supported"
-      default: return "unsupported"
-      }
+      return await TranslationSessions.status(source: source, target: target)
     }
 
     AsyncFunction("supportedLanguages") { () async -> [String] in
@@ -42,7 +38,7 @@ public class TranslateModule: Module {
 
     AsyncFunction("prepare") { (source: String, target: String) async throws in
       guard #available(macOS 26.0, *) else { throw TranslateError.unavailable }
-      try await DownloadPrompt.run(source: Locale.Language(identifier: source), target: Locale.Language(identifier: target))
+      try await TranslationSessions.prepare(source: source, target: target)
     }
 
     AsyncFunction("translateBlocks") { (source: String, target: String, blocks: [[String]]) async -> [[String]?] in
@@ -95,6 +91,41 @@ extension TranslateModule {
 }
 
 extension TranslateModule {
+  struct Sentence {
+    let text: String
+    let fragments: [(piece: Int, text: String)]
+  }
+
+  static func sentences(of pieces: [String], language: String) -> [Sentence] {
+    let whole = pieces.joined()
+    let chars = Array(whole)
+    let tokenizer = NLTokenizer(unit: .sentence)
+    tokenizer.string = whole
+    tokenizer.setLanguage(NLLanguage(rawValue: language))
+    var starts = tokenizer.tokens(for: whole.startIndex..<whole.endIndex).map { whole.distance(from: whole.startIndex, to: $0.lowerBound) }
+    if starts.first != 0 { starts.insert(0, at: 0) }
+    var bounds: [(start: Int, end: Int)] = []
+    var offset = 0
+    for piece in pieces {
+      let end = min(chars.count, offset + piece.count)
+      bounds.append((offset, end))
+      offset = end
+    }
+    return starts.enumerated().compactMap { (k, start) in
+      let end = k + 1 < starts.count ? starts[k + 1] : chars.count
+      guard start < end else { return nil }
+      let fragments = bounds.enumerated().compactMap { (piece, range) -> (piece: Int, text: String)? in
+        let lo = max(start, range.start), hi = min(end, range.end)
+        return lo < hi ? (piece, String(chars[lo..<hi])) : nil
+      }
+      return fragments.isEmpty ? nil : Sentence(text: String(chars[start..<end]), fragments: fragments)
+    }
+  }
+
+  static func separatesSentences(_ language: String) -> Bool {
+    !["zh", "ja", "th", "lo", "km", "my"].contains(Locale.Language(identifier: language).languageCode?.identifier ?? "")
+  }
+
   static func distribute(_ text: String, over pieces: [String]) -> [String] {
     let chars = Array(text)
     let total = max(1, pieces.reduce(0) { $0 + $1.count })
@@ -111,6 +142,9 @@ extension TranslateModule {
         }
       }
       end = max(start, end)
+      if end == start, start < chars.count {
+        end = (start + 1..<min(chars.count, start + 24)).first { chars[$0] == " " }.map { $0 + 1 } ?? min(chars.count, start + 1)
+      }
       out.append(String(chars[start..<end]))
       start = end
     }
