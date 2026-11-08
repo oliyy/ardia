@@ -16,7 +16,7 @@ import { traceOmnibox, useOmniboxDriver } from "./devDriver";
 import { claimFocusTag, commandBarFocus } from "../../state/focus/focusClaims";
 import type { BarDismissal } from "../../state/omnibox/barState";
 import { openFromBar, otherOpenTabs, switchFromBar, type Disposition } from "../../state/omnibox/openFromBar";
-import { focusLeftNewTabBar, openFromNewTabBar, switchFromNewTabBar } from "../../state/omnibox/newTabBar";
+import { focusMovedFromNewTabBar, openFromNewTabBar, switchFromNewTabBar } from "../../state/omnibox/newTabBar";
 import { routeTyped } from "../../state/omnibox/typedRoutes";
 import { closePanel } from "../../state/windows/actions";
 import type { NewTabTarget } from "../../state/browser/types";
@@ -284,8 +284,8 @@ export function Omnibox({
         editing.current = false;
         focusEcho.current = false;
         if (!newTabBar) return onCancel?.();
-        void focusLeftNewTabBar(windowId).then((left) => {
-          if (left) return latest.current.onCancel?.();
+        void focusMovedFromNewTabBar(windowId, findNodeHandle(input.current)).then((moved) => {
+          if (moved) return latest.current.onCancel?.();
           if (latest.current.onCancel && !editing.current) focusField();
         });
       }}

@@ -45,7 +45,7 @@ final class SavedKeyResponders {
     saved.removeValue(forKey: token)
   }
 
-  private static func owner(of responder: NSResponder?) -> NSView? {
+  static func owner(of responder: NSResponder?) -> NSView? {
     if let editor = responder as? NSTextView, editor.isFieldEditor, let field = editor.delegate as? NSView { return field }
     return responder as? NSView
   }

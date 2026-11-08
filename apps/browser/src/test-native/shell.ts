@@ -105,6 +105,7 @@ const windowsModule: Modules["ArdiaAppWindows"] = {
 const focus: Modules["ArdiaFocus"] = {
   setSwitcherCapture: () => Promise.resolve(),
   setDragEscapeCapture: () => Promise.resolve(),
+  holdsKeyFocus: () => Promise.resolve(false),
   saveKeyResponder: () => Promise.resolve(0),
   restoreKeyResponder: () => Promise.resolve(false),
   discardKeyResponder: () => Promise.resolve(),

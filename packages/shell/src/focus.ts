@@ -3,6 +3,7 @@ export type FocusNative = {
   setDragEscapeCapture(active: boolean): Promise<void>;
   cancelFocusMove(generation: number, restoringSource: boolean): Promise<void>;
   claimFocus(generation: number, tag: number): Promise<void>;
+  holdsKeyFocus(tag: number): Promise<boolean>;
   saveKeyResponder(windowId: string): Promise<number>;
   restoreKeyResponder(token: number): Promise<boolean>;
   discardKeyResponder(token: number): Promise<void>;

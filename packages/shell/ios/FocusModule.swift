@@ -42,6 +42,12 @@ public class FocusModule: Module {
       guard let view = self?.appContext?.findView(withTag: tag, ofType: NSView.self) else { return }
       FocusHandoff.shared.claim(generation, destination: view)
     }.runOnQueue(.main)
+    AsyncFunction("holdsKeyFocus") { [weak self] (tag: Int) -> Bool in
+      guard let view = self?.appContext?.findView(withTag: tag, ofType: NSView.self),
+        let holder = SavedKeyResponders.owner(of: view.window?.firstResponder)
+      else { return false }
+      return holder === view || holder.isDescendant(of: view)
+    }.runOnQueue(.main)
     AsyncFunction("saveKeyResponder") { (windowId: String) -> Int in
       SavedKeyResponders.shared.save(WindowManager.shared.window(windowId))
     }.runOnQueue(.main)
