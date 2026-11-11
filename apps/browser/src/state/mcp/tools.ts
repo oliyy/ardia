@@ -3,6 +3,8 @@ import { tabTitle } from "../browser/model";
 import { NO_GROUP_ICON } from "../groups/groupIcons";
 import { folderIconChoices } from "../groups/iconChoices";
 import { folderIcon, folderName, addFavorite, createFolder, moveFolder, moveTabs, openTab, pinTab, tabName, type Args, type Change } from "./writes";
+import { saveLinkRouting } from "../settings/linkRoutingActions";
+import { addLinkRule, deleteLinkRule, listLinkRules, moveLinkRule, setDefaultLinkDestination, updateLinkRule, type RoutingChange } from "./linkRules";
 import { editableTab, fail, folderIn, keepsPins, listSpaces, listTabs, McpToolError, resolveSpace, restylableFolder, tabIn, unpinnedFolder, unpinnedTabs } from "./spaces";
 
 export type ToolResult = { text: string; isError?: true };
@@ -19,6 +21,20 @@ type Tool = {
 const SPACE = { type: "string", description: "A space id or name from list_spaces; the front window's space when left out" };
 const IDS = { type: "array", items: { type: "string" }, minItems: 1, description: "Tab ids from list_tabs" };
 const FOLDER_ID = { type: "string", description: "A folder id from list_tabs" };
+const RULE_ID = { type: "string", description: "A rule id from list_link_rules" };
+const MATCH = {
+  type: "string",
+  enum: ["contains", "equals"],
+  description:
+    "contains: the text appears anywhere in the URL (host, path, query or fragment), ignoring ASCII case. equals (Is equal to): the whole URL equals the text once both are lowercased and stripped of http:// or https://, the query, the fragment and one trailing slash; the port, www. and percent escapes count",
+};
+const RULE_TEXT = { type: "string", description: "The text to match, such as github.com or docs.google.com/document; not a regex or wildcard. Can't be empty" };
+const DESTINATION = {
+  type: "string",
+  description:
+    "Where a matching link opens: a space id or name from list_spaces, recent for the most recently used space in a regular window, or little for a Little Ardia window. Little Ardia uses the space the link came from for typed URLs and page links, and the most recent space for links from other apps. recent and little win over a space with that name; give such a space by id",
+};
+const ROUTING_RESULT = "Returns the rules in their new order and the default.";
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
 
@@ -30,6 +46,14 @@ function change(apply: (s: ReturnType<typeof store>, a: Args) => Change) {
     const [next, result, movedFolders] = apply(s, a);
     keepsPins(s, next, movedFolders);
     if (next !== s) useBrowser.setState(next);
+    return result;
+  };
+}
+
+function routing(apply: (s: ReturnType<typeof store>, a: Args) => RoutingChange) {
+  return (a: Args) => {
+    const [next, result] = apply(store(), a);
+    saveLinkRouting(next);
     return result;
   };
 }
@@ -230,6 +254,66 @@ export const TOOLS: Tool[] = [
     inputSchema: schema({ id: { type: "string", description: "An unpinned tab to make a favorite" }, url: { type: "string", description: "A URL to add as a favorite" }, space: SPACE }),
     annotations: WRITE,
     run: change(addFavorite),
+  },
+  {
+    name: "list_link_rules",
+    title: "List link rules",
+    description:
+      "Lists Air Traffic Control's link routing rules, in order, and the default for links from other apps. Each rule is match, text and destination (a space id with its name, recent or little). Rules apply to typed URLs, links from other apps, and links, popups and script navigations on pages. They run top to bottom and the first match wins; a link matching no rule, or matching one for the space it's already in, navigates as usual, except that a link from another app matching no rule goes to the default. A blank rule (blank: true, made in Settings and not yet filled in) never matches. A rule whose space was deleted is missing: true and is skipped.",
+    inputSchema: schema({}),
+    annotations: READ,
+    run: () => listLinkRules(store()),
+  },
+  {
+    name: "add_link_rule",
+    title: "Add link rule",
+    description: `Adds an Air Traffic Control rule: links whose URL matches it open in its destination. Rules run in order and the first match wins, so a rule for a narrower URL must come before a broader one. ${ROUTING_RESULT}`,
+    inputSchema: schema(
+      { match: MATCH, text: RULE_TEXT, destination: DESTINATION, index: { type: "integer", minimum: 0, description: "Its position, 0 for first; the end (lowest precedence) when left out" } },
+      ["match", "text", "destination"],
+    ),
+    annotations: WRITE,
+    run: routing(addLinkRule),
+  },
+  {
+    name: "update_link_rule",
+    title: "Update link rule",
+    description: `Changes a rule's match, text or destination; what's left out stays. Its position doesn't change; use move_link_rule for that. ${ROUTING_RESULT}`,
+    inputSchema: schema({ id: RULE_ID, match: MATCH, text: RULE_TEXT, destination: DESTINATION }, ["id"]),
+    annotations: { ...WRITE, idempotentHint: true },
+    run: routing(updateLinkRule),
+  },
+  {
+    name: "move_link_rule",
+    title: "Move link rule",
+    description: `Moves a rule to another position, which changes which rule wins when several match: the first one does. Give exactly one of index, before or after. ${ROUTING_RESULT}`,
+    inputSchema: schema(
+      {
+        id: RULE_ID,
+        index: { type: "integer", minimum: 0, description: "Its new position among the rules, 0 for first" },
+        before: { ...RULE_ID, description: "Another rule's id to put it just before" },
+        after: { ...RULE_ID, description: "Another rule's id to put it just after" },
+      },
+      ["id"],
+    ),
+    annotations: { ...WRITE, idempotentHint: true },
+    run: routing(moveLinkRule),
+  },
+  {
+    name: "delete_link_rule",
+    title: "Delete link rule",
+    description: `Deletes an Air Traffic Control rule. Links it matched go to the next matching rule, or navigate as usual (the default, for links from other apps). ${ROUTING_RESULT}`,
+    inputSchema: schema({ id: RULE_ID }, ["id"]),
+    annotations: { ...WRITE, destructiveHint: true },
+    run: routing(deleteLinkRule),
+  },
+  {
+    name: "set_default_link_destination",
+    title: "Set default link destination",
+    description: `Sets where a link from another app opens when no rule matches it, as Settings › Links › Links from other apps does. It never applies to typed URLs or page links, which navigate as usual without a match. ${ROUTING_RESULT}`,
+    inputSchema: schema({ destination: DESTINATION }, ["destination"]),
+    annotations: { ...WRITE, idempotentHint: true },
+    run: routing(setDefaultLinkDestination),
   },
 ];
 

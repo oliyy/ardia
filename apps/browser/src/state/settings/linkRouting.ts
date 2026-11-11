@@ -58,6 +58,14 @@ export const withLinkRuleChanged = (routing: LinkRouting, id: string, patch: Par
   rules: routing.rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)),
 });
 
+export function withLinkRuleMoved(routing: LinkRouting, id: string, index: number): LinkRouting {
+  const rule = routing.rules.find((r) => r.id === id);
+  if (!rule) return routing;
+  const rest = routing.rules.filter((r) => r.id !== id);
+  const at = Math.max(0, Math.min(index, rest.length));
+  return { ...routing, rules: [...rest.slice(0, at), rule, ...rest.slice(at)] };
+}
+
 export const withoutLinkRule = (routing: LinkRouting, id: string): LinkRouting => ({ ...routing, rules: routing.rules.filter((rule) => rule.id !== id) });
 
 export const withDefaultDestination = (routing: LinkRouting, defaultDestination: LinkDestination): LinkRouting => ({ ...routing, defaultDestination });
