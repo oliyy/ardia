@@ -55,7 +55,7 @@ type LinkRouting = { rules: LinkRule[]; defaultDestination: LinkDestination };
 
 `linkRouting` lives in the settings store. Destinations use stable sidebar profile IDs, not names or engine IDs, so renames show up live. Array order is precedence. Rules have no AND/OR, regex, priority, enable switch or drag reordering. ATC settings stay out of the sync allowlist; Arc keeps them local too.
 
-The editor is Settings → Links → Air Traffic Control. New Route adds a row (condition, text, destination), rows can be removed, and a selector sets the default. Changes apply at once; there is no Save or Apply (Arc: G1). The General pane and the menu item for links from other apps edit the same default. The Open Link Preferences command opens the pane.
+The editor is Settings → Links → Air Traffic Control. New Route adds a row (condition, text, destination), rows can be removed, and a selector sets the default. Changes apply at once; there is no Save or Apply (Arc: G1). The General pane and the menu item for links from other apps edit the same default. The Open Link Preferences command opens the pane. The local MCP server can list, add, edit, reorder and delete rules and set the default (`list_link_rules`, `add_link_rule`, `update_link_rule`, `move_link_rule`, `delete_link_rule`, `set_default_link_destination`, in `state/mcp/linkRules.ts`); it saves through the editor's path, refuses blank text, and the open pane shows its changes at once.
 
 `linkRouting` replaces the `openLinksInLittleArdia` boolean. A saved `false`, the old "A new tab" choice, migrates to a Most Recent default. `true` or no saved value means Little Ardia, the fresh-install default. Rules start empty.
 
